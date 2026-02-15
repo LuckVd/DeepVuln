@@ -1,0 +1,47 @@
+# DeepVuln Default Configuration
+
+# Workspace settings
+workspace:
+  # Base directory for workspaces (null = system temp dir)
+  base_dir: null
+  # Maximum number of concurrent workspaces
+  max_workspaces: 10
+  # Auto cleanup on exit
+  auto_cleanup: true
+  # Workspace name prefix
+  prefix: "deepvuln_"
+
+# Git settings
+git:
+  # Clone timeout in seconds
+  clone_timeout: 300
+  # Default clone depth (0 = full clone)
+  default_depth: 0
+  # Retry attempts for network operations
+  retry_attempts: 3
+  # Retry delay in seconds
+  retry_delay: 5
+  # Verify SSL certificates
+  verify_ssl: true
+
+# Logging settings
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  # Log format (uses Rich formatting)
+  format: "[%(name)s] %(message)s"
+  # Log to file (null = no file logging)
+  file: null
+  # Use Rich console for pretty output
+  use_rich: true
+
+# Fetcher settings
+fetcher:
+  # Default branch when not specified
+  default_branch: "main"
+  # Supported URL patterns for Git repos
+  git_url_patterns:
+    - "https://github.com/"
+    - "https://gitlab.com/"
+    - "https://bitbucket.org/"
+    - "git@"
