@@ -2,8 +2,8 @@
 
 import shutil
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 from git import Repo
@@ -115,17 +115,17 @@ def sample_git_repo_with_commits(temp_dir: Path) -> Generator[tuple[Path, Repo],
     # First commit
     (repo_path / "file1.txt").write_text("Content 1\n")
     repo.index.add(["file1.txt"])
-    commit1 = repo.index.commit("First commit")
+    repo.index.commit("First commit")
 
     # Second commit
     (repo_path / "file2.txt").write_text("Content 2\n")
     repo.index.add(["file2.txt"])
-    commit2 = repo.index.commit("Second commit")
+    repo.index.commit("Second commit")
 
     # Third commit
     (repo_path / "file3.txt").write_text("Content 3\n")
     repo.index.add(["file3.txt"])
-    commit3 = repo.index.commit("Third commit")
+    repo.index.commit("Third commit")
 
     yield repo_path, repo
 

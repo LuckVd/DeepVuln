@@ -1,9 +1,7 @@
 """Tests for AssetFetcher."""
 
-import shutil
 from pathlib import Path
 
-import pytest
 from git import Repo
 
 from src.layers.l1_intelligence.fetcher import AssetFetcher
