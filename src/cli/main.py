@@ -1,5 +1,6 @@
 """Main CLI entry point for DeepVuln."""
 
+import asyncio
 from typing import Any
 
 import click
@@ -15,11 +16,14 @@ from src.cli.display import (
     show_summary,
     show_welcome,
 )
+from src.cli.intel import intel as intel_group
 from src.cli.prompts import (
     ask_next_action,
     get_git_config,
     get_local_config,
     prompt_continue_on_error,
+    select_intel_menu_action,
+    select_main_menu_action,
     select_source_type,
 )
 from src.layers.l1_intelligence import AssetFetcher
@@ -107,44 +111,237 @@ def execute_fetch(source_type: str, config: dict[str, Any]) -> dict[str, Any] | 
 
 
 def run_interactive_mode() -> None:
-    """Run the full interactive CLI mode."""
+    """Run the full interactive CLI mode with main menu."""
     show_banner()
     show_welcome()
 
     while True:
         try:
-            fetch_outcome = run_interactive_fetch()
+            # Main menu selection
+            action = select_main_menu_action()
 
-            if fetch_outcome is None:
-                if prompt_continue_on_error():
+            if action is None or action == "exit":
+                show_goodbye()
+                break
+
+            elif action == "fetch":
+                # Source code fetch workflow
+                console.print()
+                console.rule("[bold cyan]Source Code Acquisition[/]")
+                console.print()
+
+                fetch_outcome = run_interactive_fetch()
+
+                if fetch_outcome is None:
+                    if not prompt_continue_on_error():
+                        break
                     continue
-                else:
+
+                # Ask what to do next after fetch
+                next_action = ask_next_action()
+                if next_action == "exit":
+                    show_goodbye()
                     break
+                elif next_action == "analyze":
+                    show_info(
+                        "Analysis Mode",
+                        "Vulnerability analysis is not yet implemented.\n"
+                        "This feature will be available in a future version.",
+                    )
+                    show_goodbye()
+                    break
+                # else continue to main menu
 
-            # Ask what to do next
-            action = ask_next_action()
+            elif action == "intel":
+                # Threat intelligence workflow
+                run_intel_interactive()
 
-            if action == "exit":
-                show_goodbye()
-                break
-            elif action == "new":
+            elif action == "clean":
+                # Clean workspaces
                 console.print()
-                console.rule("[bold cyan]New Project[/]")
+                console.rule("[bold cyan]Workspace Cleanup[/]")
                 console.print()
-                continue
-            elif action == "analyze":
-                show_info(
-                    "Analysis Mode",
-                    "Vulnerability analysis is not yet implemented.\n"
-                    "This feature will be available in a future version.",
-                )
-                show_goodbye()
-                break
+                fetcher = AssetFetcher()
+                cleaned = fetcher.cleanup_all()
+                show_success("Cleanup Complete", f"Cleaned up {cleaned} workspace(s)")
 
         except KeyboardInterrupt:
             console.print()
             show_info("Interrupted", "Operation cancelled by user.")
             break
+
+
+def run_intel_interactive() -> None:
+    """Run interactive threat intelligence workflow."""
+    console.print()
+    console.rule("[bold cyan]Threat Intelligence[/]")
+    console.print()
+
+    while True:
+        try:
+            action = select_intel_menu_action()
+
+            if action is None or action == "back":
+                break
+
+            elif action == "search":
+                run_intel_search_interactive()
+
+            elif action == "sync":
+                run_intel_sync_interactive()
+
+            elif action == "kev":
+                run_intel_kev_interactive()
+
+            elif action == "stats":
+                run_intel_stats_interactive()
+
+        except KeyboardInterrupt:
+            console.print()
+            show_info("Interrupted", "Operation cancelled.")
+            break
+
+
+def run_intel_search_interactive() -> None:
+    """Run interactive CVE search."""
+    from questionary import text
+
+    query = text(
+        "Enter search query:",
+        instruction="(e.g., 'apache struts', 'rce', 'sql injection')",
+    ).ask()
+
+    if not query:
+        return
+
+    async def _search():
+        from src.layers.l1_intelligence.threat_intel import IntelService
+
+        async with IntelService() as service:
+            cves = await service.search_cves(query, limit=20)
+            return cves
+
+    cves = asyncio.get_event_loop().run_until_complete(_search())
+
+    if cves:
+        from src.cli.intel_display import show_cve_table
+
+        show_cve_table(cves, title=f"Search Results: '{query}'")
+
+        # Ask if user wants to see details
+        from questionary import confirm, text
+
+        if confirm("View CVE details?", default=False).ask():
+            cve_id = text("Enter CVE ID:").ask()
+            if cve_id:
+                run_intel_show_interactive(cve_id)
+    else:
+        show_info("No Results", f"No CVEs found matching '{query}'")
+
+
+def run_intel_show_interactive(cve_id: str) -> None:
+    """Show CVE details interactively.
+
+    Args:
+        cve_id: CVE identifier.
+    """
+    # Normalize CVE ID
+    cve_id = cve_id.upper()
+    if not cve_id.startswith("CVE-"):
+        cve_id = f"CVE-{cve_id}"
+
+    async def _show():
+        from src.layers.l1_intelligence.threat_intel import IntelService
+
+        async with IntelService() as service:
+            cve = await service.get_cve(cve_id)
+            pocs = await service.get_pocs_for_cve(cve_id) if cve else []
+            return cve, pocs
+
+    cve, pocs = asyncio.get_event_loop().run_until_complete(_show())
+
+    if cve:
+        from src.cli.intel_display import show_cve_detail
+
+        show_cve_detail(cve, pocs)
+    else:
+        show_info(
+            "CVE Not Found",
+            f"'{cve_id}' was not found.\n"
+            "Try syncing first: deepvuln intel sync",
+        )
+
+
+def run_intel_sync_interactive() -> None:
+    """Run interactive sync."""
+    from questionary import select
+
+    sync_type = select(
+        "What would you like to sync?",
+        choices=[
+            "Recent CVEs (last 7 days)",
+            "Full sync (last 30 days)",
+            "KEV catalog only",
+            "Cancel",
+        ],
+    ).ask()
+
+    if sync_type == "Cancel" or sync_type is None:
+        return
+
+    async def _sync():
+        from src.layers.l1_intelligence.threat_intel import IntelService
+
+        async with IntelService() as service:
+            with create_progress() as progress:
+                task = progress.add_task("[cyan]Syncing...", total=None)
+
+                if "Recent" in sync_type:
+                    await service.sync_cves(days=7)
+                    await service.sync_kev()
+                elif "Full" in sync_type:
+                    await service.sync_all(days=30)
+                elif "KEV" in sync_type:
+                    await service.sync_kev()
+
+                progress.update(task, completed=True, description="[green]Done!")
+
+    asyncio.get_event_loop().run_until_complete(_sync())
+    show_success("Sync Complete", "Synced threat intelligence data")
+
+
+def run_intel_kev_interactive() -> None:
+    """Show KEV alerts interactively."""
+    async def _kev():
+        from src.layers.l1_intelligence.threat_intel import IntelService
+
+        async with IntelService() as service:
+            kevs = await service.get_kev_cves(limit=20)
+            return kevs
+
+    kevs = asyncio.get_event_loop().run_until_complete(_kev())
+
+    if kevs:
+        from src.cli.intel_display import show_kev_alerts
+
+        show_kev_alerts(kevs, title="Known Exploited Vulnerabilities")
+    else:
+        show_info("No KEVs", "No KEV data available. Try syncing first.")
+
+
+def run_intel_stats_interactive() -> None:
+    """Show statistics interactively."""
+    async def _stats():
+        from src.layers.l1_intelligence.threat_intel import IntelService
+
+        async with IntelService() as service:
+            return await service.get_stats()
+
+    stats = asyncio.get_event_loop().run_until_complete(_stats())
+
+    from src.cli.intel_display import show_stats
+
+    show_stats(stats)
 
 
 @click.group(invoke_without_command=True)
@@ -250,6 +447,10 @@ def clean() -> None:
     cleaned = fetcher.cleanup_all()
 
     show_success("Cleanup Complete", f"Cleaned up {cleaned} workspace(s)")
+
+
+# Add intel command group
+main.add_command(intel_group, name="intel")
 
 
 if __name__ == "__main__":

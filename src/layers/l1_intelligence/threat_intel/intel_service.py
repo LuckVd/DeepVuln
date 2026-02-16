@@ -187,6 +187,26 @@ class IntelService:
         """
         return await self.db.get_kev_cves(limit=limit)
 
+    async def get_recent_kevs(self, days: int = 30, limit: int = 50) -> list[CVEInfo]:
+        """Get recently added KEV entries.
+
+        Args:
+            days: Days to look back.
+            limit: Maximum results.
+
+        Returns:
+            List of CVEInfo objects marked as KEV.
+        """
+        # Get KEV CVEs and filter by recent date
+        all_kevs = await self.db.get_kev_cves(limit=limit * 2)
+        cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        from datetime import timedelta
+
+        cutoff = cutoff - timedelta(days=days)
+
+        recent = [cve for cve in all_kevs if cve.published_date and cve.published_date >= cutoff]
+        return recent[:limit]
+
     # ==================== PoC Operations ====================
 
     async def get_pocs_for_cve(self, cve_id: str) -> list[PoCInfo]:
@@ -243,8 +263,8 @@ class IntelService:
 
     # ==================== Sync Operations ====================
 
-    async def sync_recent(self, days: int = 7) -> dict[str, Any]:
-        """Sync recent CVEs.
+    async def sync_cves(self, days: int = 7) -> dict[str, Any]:
+        """Sync recent CVEs from NVD.
 
         Args:
             days: Days to sync.
@@ -252,45 +272,105 @@ class IntelService:
         Returns:
             Sync statistics.
         """
+        await self.initialize()
+
         if self._cve_sync is None:
             self._cve_sync = CVESyncService(nvd_api_key=self.config.nvd_api_key)
 
         stats = {
             "cves_synced": 0,
+            "days": days,
             "started_at": datetime.now(),
+            "nvd_success": True,
         }
 
-        async with self._cve_sync:
-            async for cve in self._cve_sync.sync_recent_cves(days=days):
-                await self.db.save_cve(cve)
-                stats["cves_synced"] += 1
+        try:
+            async with self._cve_sync:
+                async for cve in self._cve_sync.sync_recent_cves(days=days):
+                    await self.db.save_cve(cve)
+                    stats["cves_synced"] += 1
+        except Exception as e:
+            stats["nvd_success"] = False
+            stats["error"] = str(e)
+            logger.error(f"CVE sync failed: {e}")
 
         stats["completed_at"] = datetime.now()
         return stats
 
-    async def sync_all(self) -> dict[str, Any]:
-        """Perform full synchronization.
+    async def sync_kev(self) -> int:
+        """Sync Known Exploited Vulnerabilities from CISA.
+
+        Returns:
+            Number of KEV entries synced.
+        """
+        await self.initialize()
+
+        from src.layers.l1_intelligence.threat_intel.sources.vulnerabilities.cisa_kev import (
+            CISAKEVClient,
+        )
+
+        kev_client = CISAKEVClient()
+        count = await kev_client.sync()
+
+        # Mark CVEs in database as KEV
+        kev_cves = kev_client.get_all_kev_cves()
+        for cve_id in kev_cves:
+            cve = await self.db.get_cve(cve_id)
+            if cve and not cve.kev:
+                cve.kev = True
+                if "known-exploited" not in cve.tags:
+                    cve.tags.append("known-exploited")
+                await self.db.save_cve(cve)
+
+        logger.info(f"Synced {count} KEV entries")
+        return count
+
+    async def sync_recent(self, days: int = 7) -> dict[str, Any]:
+        """Sync recent CVEs. (Alias for sync_cves)
+
+        Args:
+            days: Days to sync.
 
         Returns:
             Sync statistics.
         """
+        return await self.sync_cves(days=days)
+
+    async def sync_all(self, days: int = 30) -> dict[str, Any]:
+        """Perform full synchronization.
+
+        Args:
+            days: Days to sync for CVEs.
+
+        Returns:
+            Sync statistics.
+        """
+        await self.initialize()
+
         stats = {
             "started_at": datetime.now(),
-            "cves": 0,
-            "exploits": 0,
+            "cves_synced": 0,
+            "kev_synced": 0,
+            "exploits_synced": 0,
             "errors": [],
         }
 
         try:
             # Sync CVEs
-            cve_stats = await self.sync_recent(days=30)
-            stats["cves"] = cve_stats["cves_synced"]
+            cve_stats = await self.sync_cves(days=days)
+            stats["cves_synced"] = cve_stats.get("cves_synced", 0)
         except Exception as e:
             stats["errors"].append(f"CVE sync: {e}")
 
         try:
+            # Sync KEV
+            stats["kev_synced"] = await self.sync_kev()
+        except Exception as e:
+            stats["errors"].append(f"KEV sync: {e}")
+
+        try:
             # Sync ExploitDB
-            stats["exploits"] = await self.sync_exploitdb()
+            stats["exploits_synced"] = await self.sync_exploitdb()
         except Exception as e:
             stats["errors"].append(f"ExploitDB sync: {e}")
 

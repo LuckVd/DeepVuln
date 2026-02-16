@@ -24,6 +24,43 @@ CUSTOM_STYLE = Style(
 )
 
 
+def select_main_menu_action() -> str | None:
+    """Ask user to select main menu action.
+
+    Returns:
+        Selected action: 'fetch', 'intel', 'clean', or 'exit'.
+    """
+    return questionary.select(
+        "What would you like to do?",
+        choices=[
+            questionary.Choice("📥 Fetch Source Code (Git/Local)", value="fetch"),
+            questionary.Choice("🔍 Threat Intelligence (CVE/KEV/PoC)", value="intel"),
+            questionary.Choice("🧹 Clean Workspaces", value="clean"),
+            questionary.Choice("🚪 Exit", value="exit"),
+        ],
+        style=CUSTOM_STYLE,
+    ).ask()
+
+
+def select_intel_menu_action() -> str | None:
+    """Ask user to select threat intelligence action.
+
+    Returns:
+        Selected action: 'search', 'sync', 'kev', 'stats', or 'back'.
+    """
+    return questionary.select(
+        "Threat Intelligence Menu",
+        choices=[
+            questionary.Choice("🔍 Search CVEs", value="search"),
+            questionary.Choice("📥 Sync Latest Data", value="sync"),
+            questionary.Choice("🔔 View KEV Alerts", value="kev"),
+            questionary.Choice("📊 View Statistics", value="stats"),
+            questionary.Choice("◀ Back to Main Menu", value="back"),
+        ],
+        style=CUSTOM_STYLE,
+    ).ask()
+
+
 def select_source_type() -> str:
     """Ask user to select source code type.
 
