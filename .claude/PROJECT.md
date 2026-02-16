@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-02-16 | 95e316b | feat(l1): implement threat intelligence sync module (P1-04) |
 | 2026-02-16 | ef7c2fa | feat(cli): implement interactive CLI with Rich TUI |
 
 ---

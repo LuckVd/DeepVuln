@@ -1,0 +1,151 @@
+# Threat Intelligence Configuration
+# DeepVuln - Seven-Layer Intelligent Vulnerability Analysis System
+
+# ============================================
+# Synchronization Settings
+# ============================================
+sync:
+  enabled: true
+
+  # Schedule expressions (cron format)
+  schedule:
+    # Sync recent CVEs every hour
+    recent_cves: "0 * * * *"
+    # Full sync daily at 2 AM
+    full_sync: "0 2 * * *"
+    # Sync KEV every 6 hours
+    kev: "0 */6 * * *"
+    # Sync ExploitDB weekly on Monday at 3 AM
+    exploitdb: "0 3 * * 1"
+
+  # Number of days to sync for recent CVEs
+  recent_days: 7
+
+  # Number of days for full sync
+  full_sync_days: 30
+
+
+# ============================================
+# Data Sources
+# ============================================
+sources:
+  # NVD (National Vulnerability Database)
+  nvd:
+    enabled: true
+    # API key for higher rate limits (50 req/30s vs 5 req/30s)
+    # Get from: https://nvd.nist.gov/developers/request-an-api-key
+    api_key: ${NVD_API_KEY:}
+    # Rate limit: requests per 30 seconds
+    rate_limit: 50
+
+  # CISA Known Exploited Vulnerabilities
+  cisa_kev:
+    enabled: true
+    # JSON feed URL
+    url: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+
+  # ExploitDB
+  exploitdb:
+    enabled: true
+    # CSV feed URL
+    csv_url: "https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_csv_exploits.csv"
+    website_url: "https://www.exploit-db.com"
+
+  # GitHub PoC Search
+  github:
+    enabled: true
+    # Personal access token for higher rate limits
+    # Get from: https://github.com/settings/tokens
+    token: ${GITHUB_TOKEN:}
+    # Minimum stars for a repo to be included
+    min_stars: 5
+    # Maximum results per search
+    max_results: 30
+
+  # Google Custom Search
+  google_cse:
+    enabled: false
+    # API key
+    # Get from: https://console.cloud.google.com/apis/credentials
+    api_key: ${GOOGLE_API_KEY:}
+    # Custom Search Engine ID
+    # Create at: https://cse.google.com/
+    cx: ${GOOGLE_CX:}
+    # Daily request limit (free tier: 100)
+    daily_limit: 100
+
+
+# ============================================
+# Storage Settings
+# ============================================
+storage:
+  # Database type: sqlite or postgresql
+  type: sqlite
+
+  # SQLite settings
+  sqlite:
+    path: "./data/threat_intel.db"
+
+  # PostgreSQL settings (for production)
+  postgresql:
+    host: ${DB_HOST:localhost}
+    port: ${DB_PORT:5432}
+    database: ${DB_NAME:deepvuln}
+    user: ${DB_USER:deepvuln}
+    password: ${DB_PASSWORD:}
+
+  # Cache settings
+  cache:
+    enabled: true
+    path: "./data/threat_intel/cache"
+    # Default TTL in seconds
+    default_ttl: 3600
+    # CVE cache TTL (24 hours)
+    cve_ttl: 86400
+    # Search cache TTL (1 hour)
+    search_ttl: 3600
+
+
+# ============================================
+# Logging Settings
+# ============================================
+logging:
+  level: INFO
+  # Log file path (empty for console only)
+  file: ""
+  # Include timestamps
+  timestamps: true
+
+
+# ============================================
+# Security Settings
+# ============================================
+security:
+  # Verify SSL certificates
+  verify_ssl: true
+
+  # User agent for HTTP requests
+  user_agent: "DeepVuln/0.1.0 (Threat Intelligence Collector)"
+
+  # Request timeout in seconds
+  timeout: 30
+
+  # Maximum retries for failed requests
+  max_retries: 3
+
+
+# ============================================
+# Feature Flags
+# ============================================
+features:
+  # Enable automatic CVE enrichment with KEV data
+  auto_kev_enrichment: true
+
+  # Enable automatic PoC search for high-severity CVEs
+  auto_poc_search: true
+
+  # Minimum severity for auto PoC search (critical, high, medium, low)
+  poc_search_min_severity: high
+
+  # Enable search result caching
+  cache_search_results: true

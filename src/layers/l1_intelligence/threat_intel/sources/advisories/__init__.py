@@ -1,0 +1,1 @@
+"""Vendor security advisories."""
