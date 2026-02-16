@@ -321,3 +321,102 @@ def get_local_config() -> dict[str, Any]:
         "copy_to_workspace": copy_to_workspace,
         "workspace_name": workspace_name,
     }
+
+
+def ask_next_action_with_scan() -> str:
+    """Ask user what to do next after fetching, with scan option.
+
+    Returns:
+        Selected action: 'scan', 'analyze', 'new', or 'exit'.
+    """
+    return questionary.select(
+        "What would you like to do next?",
+        choices=[
+            questionary.Choice("🔒 Run security scan (recommended)", value="scan"),
+            questionary.Choice("🔍 Start vulnerability analysis", value="analyze"),
+            questionary.Choice("📥 Fetch another project", value="new"),
+            questionary.Choice("🚪 Exit", value="exit"),
+        ],
+        style=CUSTOM_STYLE,
+    ).ask()
+
+
+def prompt_scan_options() -> dict[str, Any]:
+    """Ask user for scan options.
+
+    Returns:
+        Dictionary with scan options.
+    """
+    include_low = questionary.confirm(
+        "Include low severity vulnerabilities?",
+        default=False,
+        style=CUSTOM_STYLE,
+    ).ask()
+
+    detailed = questionary.confirm(
+        "Show detailed report?",
+        default=False,
+        style=CUSTOM_STYLE,
+    ).ask()
+
+    return {
+        "include_low_severity": include_low or False,
+        "detailed": detailed or False,
+    }
+
+
+def ask_scan_action_after_result(has_issues: bool) -> str:
+    """Ask user what to do after seeing scan results.
+
+    Args:
+        has_issues: Whether vulnerabilities were found.
+
+    Returns:
+        Selected action: 'details', 'export', 'new', or 'exit'.
+    """
+    choices = []
+
+    if has_issues:
+        choices.append(questionary.Choice("📋 View detailed vulnerability list", value="details"))
+
+    choices.extend([
+        questionary.Choice("📄 Export report", value="export"),
+        questionary.Choice("📥 Scan another project", value="new"),
+        questionary.Choice("🚪 Exit", value="exit"),
+    ])
+
+    return questionary.select(
+        "What would you like to do?",
+        choices=choices,
+        style=CUSTOM_STYLE,
+    ).ask()
+
+
+def prompt_export_path(default_name: str = "security_report.txt") -> str | None:
+    """Ask user for export file path.
+
+    Args:
+        default_name: Default file name.
+
+    Returns:
+        File path or None to skip.
+    """
+    return questionary.path(
+        "Enter export file path:",
+        default=default_name,
+        style=CUSTOM_STYLE,
+    ).ask()
+
+
+def prompt_skip_auto_scan() -> bool:
+    """Ask user whether to skip automatic security scan.
+
+    Returns:
+        True to skip, False to run scan.
+    """
+    return questionary.confirm(
+        "Skip automatic security scan?",
+        instruction="(Scan will check dependencies for known vulnerabilities)",
+        default=False,
+        style=CUSTOM_STYLE,
+    ).ask()

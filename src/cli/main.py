@@ -1,6 +1,7 @@
 """Main CLI entry point for DeepVuln."""
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 import click
@@ -9,6 +10,7 @@ from src.cli.display import (
     console,
     create_progress,
     show_banner,
+    show_error,
     show_fetch_result,
     show_goodbye,
     show_info,
@@ -18,10 +20,13 @@ from src.cli.display import (
 )
 from src.cli.intel import intel as intel_group
 from src.cli.prompts import (
-    ask_next_action,
+    ask_next_action_with_scan,
+    ask_scan_action_after_result,
     get_git_config,
     get_local_config,
     prompt_continue_on_error,
+    prompt_export_path,
+    prompt_scan_options,
     select_intel_menu_action,
     select_main_menu_action,
     select_source_type,
@@ -137,10 +142,15 @@ def run_interactive_mode() -> None:
                         break
                     continue
 
-                # Ask what to do next after fetch
-                next_action = ask_next_action()
+                # Ask what to do next after fetch (with scan option)
+                next_action = ask_next_action_with_scan()
                 if next_action == "exit":
                     show_goodbye()
+                    break
+                elif next_action == "scan":
+                    # Run security scan
+                    source_path = Path(fetch_outcome["result"]["source_path"])
+                    run_security_scan_interactive(source_path)
                     break
                 elif next_action == "analyze":
                     show_info(
@@ -221,7 +231,7 @@ def run_intel_search_interactive() -> None:
             cves = await service.search_cves(query, limit=20)
             return cves
 
-    cves = asyncio.get_event_loop().run_until_complete(_search())
+    cves = asyncio.run(_search())
 
     if cves:
         from src.cli.intel_display import show_cve_table
@@ -258,7 +268,7 @@ def run_intel_show_interactive(cve_id: str) -> None:
             pocs = await service.get_pocs_for_cve(cve_id) if cve else []
             return cve, pocs
 
-    cve, pocs = asyncio.get_event_loop().run_until_complete(_show())
+    cve, pocs = asyncio.run(_show())
 
     if cve:
         from src.cli.intel_display import show_cve_detail
@@ -306,7 +316,7 @@ def run_intel_sync_interactive() -> None:
 
                 progress.update(task, completed=True, description="[green]Done!")
 
-    asyncio.get_event_loop().run_until_complete(_sync())
+    asyncio.run(_sync())
     show_success("Sync Complete", "Synced threat intelligence data")
 
 
@@ -319,7 +329,7 @@ def run_intel_kev_interactive() -> None:
             kevs = await service.get_kev_cves(limit=20)
             return kevs
 
-    kevs = asyncio.get_event_loop().run_until_complete(_kev())
+    kevs = asyncio.run(_kev())
 
     if kevs:
         from src.cli.intel_display import show_kev_alerts
@@ -337,11 +347,111 @@ def run_intel_stats_interactive() -> None:
         async with IntelService() as service:
             return await service.get_stats()
 
-    stats = asyncio.get_event_loop().run_until_complete(_stats())
+    stats = asyncio.run(_stats())
 
     from src.cli.intel_display import show_stats
 
     show_stats(stats)
+
+
+def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | None = None) -> None:
+    """Run interactive security scan on source code.
+
+    Args:
+        source_path: Path to the source code.
+        options: Optional scan options.
+    """
+    from src.cli.scan_display import (
+        export_report_text,
+        show_kev_warning,
+        show_quick_scan_result,
+        show_scan_progress,
+        show_security_report,
+    )
+    from src.layers.l1_intelligence.workflow import AutoSecurityScanner, ScanConfig
+
+    console.print()
+    console.rule("[bold cyan]Security Scan[/]")
+    console.print()
+
+    # Get options if not provided
+    if options is None:
+        options = prompt_scan_options() or {}
+
+    # Create scan config
+    config = ScanConfig(
+        include_low_severity=options.get("include_low_severity", False),
+    )
+
+    async def _scan():
+        from src.layers.l1_intelligence.threat_intel import IntelService
+
+        async with IntelService() as service:
+            scanner = AutoSecurityScanner(intel_service=service, config=config)
+
+            # First do a quick scan
+            show_scan_progress("Running quick scan...")
+            quick_result = await scanner.quick_scan(source_path)
+
+            return scanner, quick_result
+
+    # Run scan
+    with create_progress() as progress:
+        task = progress.add_task("[cyan]Scanning for vulnerabilities...", total=None)
+        scanner, quick_result = asyncio.run(_scan())
+        progress.update(task, completed=True, description="[green]Scan complete!")
+
+    # Show quick result first
+    show_quick_scan_result(quick_result)
+
+    if not quick_result.get("success"):
+        show_info("Scan Failed", "\n".join(quick_result.get("errors", ["Unknown error"])))
+        return
+
+    # If issues found, show detailed report
+    if quick_result.get("has_issues"):
+        # Get full report
+        async def _full_scan():
+            from src.layers.l1_intelligence.threat_intel import IntelService
+
+            async with IntelService() as service:
+                scanner = AutoSecurityScanner(intel_service=service, config=config)
+                result = await scanner.scan(source_path)
+                return result
+
+        show_scan_progress("Getting detailed report...")
+        scan_result = asyncio.run(_full_scan())
+
+        if scan_result.success and scan_result.report:
+            # Show KEV warning first if applicable
+            show_kev_warning(scan_result.report)
+
+            # Show full report
+            show_security_report(scan_result.report, detailed=options.get("detailed", False))
+
+            # Ask what to do next
+            while True:
+                action = ask_scan_action_after_result(scan_result.report.has_vulnerabilities)
+
+                if action == "exit":
+                    break
+                elif action == "details":
+                    from src.cli.scan_display import show_vulnerability_list
+
+                    show_vulnerability_list(scan_result.report, show_all=True)
+                elif action == "export":
+                    export_path = prompt_export_path()
+                    if export_path:
+                        report_text = export_report_text(scan_result.report)
+                        Path(export_path).write_text(report_text, encoding="utf-8")
+                        show_success("Export Complete", f"Report saved to {export_path}")
+                elif action == "new":
+                    return  # Return to main flow
+
+            show_goodbye()
+    else:
+        show_success("Scan Complete", "No security issues detected!")
+        show_goodbye()
 
 
 @click.group(invoke_without_command=True)
@@ -447,6 +557,82 @@ def clean() -> None:
     cleaned = fetcher.cleanup_all()
 
     show_success("Cleanup Complete", f"Cleaned up {cleaned} workspace(s)")
+
+
+@main.command()
+@click.option("--path", "-p", required=True, type=click.Path(exists=True), help="Path to source code")
+@click.option("--include-low", is_flag=True, help="Include low severity vulnerabilities")
+@click.option("--detailed", "-d", is_flag=True, help="Show detailed report")
+@click.option("--export", "-e", "export_path", help="Export report to file")
+def scan(path: str, include_low: bool, detailed: bool, export_path: str | None) -> None:
+    """Run security scan on source code.
+
+    This command scans the source code for known vulnerabilities by:
+    - Detecting dependency files (package.json, requirements.txt, etc.)
+    - Identifying the technology stack (frameworks, databases, etc.)
+    - Correlating dependencies with known CVEs
+
+    Example:
+        deepvuln scan --path /path/to/project
+        deepvuln scan -p . --detailed --export report.txt
+    """
+    show_banner()
+
+    source_path = Path(path)
+    options = {
+        "include_low_severity": include_low,
+        "detailed": detailed,
+    }
+
+    if export_path:
+        # Non-interactive mode for export
+        run_security_scan_export(source_path, export_path, options)
+    else:
+        run_security_scan_interactive(source_path, options)
+
+
+def run_security_scan_export(source_path: Path, export_path: str, options: dict[str, Any]) -> None:
+    """Run security scan and export to file.
+
+    Args:
+        source_path: Path to the source code.
+        export_path: Path to export file.
+        options: Scan options.
+    """
+    from src.cli.scan_display import export_report_text
+    from src.layers.l1_intelligence.workflow import AutoSecurityScanner, ScanConfig
+
+    config = ScanConfig(
+        include_low_severity=options.get("include_low_severity", False),
+    )
+
+    async def _scan():
+        from src.layers.l1_intelligence.threat_intel import IntelService
+
+        async with IntelService() as service:
+            scanner = AutoSecurityScanner(intel_service=service, config=config)
+            result = await scanner.scan(source_path)
+            return result
+
+    console.print(f"[cyan]Scanning {source_path}...[/]")
+
+    with create_progress() as progress:
+        task = progress.add_task("[cyan]Analyzing...", total=None)
+        scan_result = asyncio.run(_scan())
+        progress.update(task, completed=True, description="[green]Done!")
+
+    if scan_result.success and scan_result.report:
+        # Export report
+        report_text = export_report_text(scan_result.report)
+        Path(export_path).write_text(report_text, encoding="utf-8")
+
+        console.print()
+        console.print(f"[green]Report exported to: {export_path}[/]")
+        console.print(f"  Dependencies scanned: {scan_result.report.dependencies_scanned}")
+        console.print(f"  Vulnerabilities found: {scan_result.report.total_vulnerabilities}")
+        console.print(f"  KEV (known exploited): {scan_result.report.kev_count}")
+    else:
+        show_error("Scan Failed", "\n".join(scan_result.errors or ["Unknown error"]))
 
 
 # Add intel command group

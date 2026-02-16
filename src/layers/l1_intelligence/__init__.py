@@ -2,6 +2,24 @@
 
 from src.layers.l1_intelligence.fetcher import AssetFetcher
 from src.layers.l1_intelligence.git_operations import GitOperations
+from src.layers.l1_intelligence.security_analyzer import SecurityAnalyzer, SecurityReport
+from src.layers.l1_intelligence.tech_stack_detector import TechStack, TechStackDetector
+from src.layers.l1_intelligence.workflow import AutoSecurityScanner, ScanConfig, ScanResult
 from src.layers.l1_intelligence.workspace import WorkspaceManager
 
-__all__ = ["AssetFetcher", "GitOperations", "WorkspaceManager"]
+__all__ = [
+    # Core components
+    "AssetFetcher",
+    "GitOperations",
+    "WorkspaceManager",
+    # Security analysis
+    "SecurityAnalyzer",
+    "SecurityReport",
+    # Tech stack detection
+    "TechStack",
+    "TechStackDetector",
+    # Auto security workflow
+    "AutoSecurityScanner",
+    "ScanConfig",
+    "ScanResult",
+]
