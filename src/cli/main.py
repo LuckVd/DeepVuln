@@ -35,6 +35,102 @@ from src.layers.l1_intelligence import AssetFetcher
 from src.models.fetcher import FetchResult
 
 
+def _check_and_prompt_sync() -> None:
+    """Check database status and prompt user to sync if needed."""
+    from questionary import confirm, select
+
+    async def check_status():
+        from src.layers.l1_intelligence.threat_intel import IntelService
+        async with IntelService() as service:
+            return await service.check_database_status()
+
+    status = asyncio.run(check_status())
+
+    # Skip if database is ok
+    if status["recommendation"] == "ok":
+        return
+
+    # Show warning based on status
+    if status["recommendation"] == "first_sync":
+        console.print()
+        console.print("[yellow]⚠ CVE database is empty![/]")
+        console.print("[dim]Security scans require CVE data to detect vulnerabilities.[/]")
+        console.print()
+
+        choices = [
+            "Sync now (recommended - takes a few minutes)",
+            "Skip for now",
+        ]
+    elif status["recommendation"] == "update":
+        days = status.get("days_since_sync", "?")
+        console.print()
+        console.print(f"[yellow]⚠ CVE database is outdated ({days} days since last sync)[/]")
+        console.print("[dim]New vulnerabilities may have been published.[/]")
+        console.print()
+
+        choices = [
+            "Update now (recommended)",
+            "Skip for now",
+        ]
+    else:
+        return
+
+    choice = select(
+        "What would you like to do?",
+        choices=choices,
+    ).ask()
+
+    if choice is None or "Skip" in choice:
+        console.print("[dim]You can sync later using: deepvuln intel sync[/]")
+        return
+
+    # Perform sync
+    _run_sync(status["recommendation"] == "first_sync")
+
+
+def _run_sync(is_first_sync: bool) -> None:
+    """Run the CVE sync process."""
+    from src.layers.l1_intelligence.threat_intel import IntelService
+
+    async def do_sync():
+        async with IntelService() as service:
+            with create_progress() as progress:
+                task = progress.add_task("[cyan]Syncing CVE data...", total=None)
+
+                if is_first_sync:
+                    # First sync: get last 30 days
+                    result = await service.sync_all(days=30)
+                else:
+                    # Update: get last 7 days
+                    result = await service.sync_cves(days=7)
+                    await service.sync_kev()
+
+                progress.update(task, completed=True, description="[green]Sync complete!")
+                return result
+
+    console.print()
+    console.print("[cyan]Starting sync...[/]")
+
+    try:
+        result = asyncio.run(do_sync())
+
+        cves_synced = result.get("cves_synced", 0)
+        kev_synced = result.get("kev_synced", 0)
+        errors = result.get("errors", [])
+
+        if errors:
+            console.print(f"[yellow]Sync completed with {len(errors)} warnings[/]")
+
+        show_success(
+            "Sync Complete",
+            f"Synced {cves_synced} CVEs, {kev_synced} KEV entries\n"
+            f"You can now run security scans.",
+        )
+    except Exception as e:
+        show_error("Sync Failed", str(e))
+        console.print("[dim]You can try again later: deepvuln intel sync[/]")
+
+
 def run_interactive_fetch() -> dict[str, Any] | None:
     """Run the interactive fetch wizard.
 
@@ -119,6 +215,9 @@ def run_interactive_mode() -> None:
     """Run the full interactive CLI mode with main menu."""
     show_banner()
     show_welcome()
+
+    # Check database status and prompt for sync if needed
+    _check_and_prompt_sync()
 
     while True:
         try:

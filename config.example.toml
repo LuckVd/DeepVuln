@@ -1,0 +1,55 @@
+# DeepVuln 配置示例
+# 复制此文件为 config.local.toml 并填入实际值
+#
+# 复制命令:
+#   cp config.example.toml config.local.toml
+
+[threat_intel]
+# GitHub Personal Access Token
+# 用于访问 GitHub Advisory Database API，提高请求限制
+#
+# 获取步骤:
+#   1. 登录 GitHub
+#   2. 进入 Settings → Developer settings → Personal access tokens → Tokens (classic)
+#   3. 点击 "Generate new token (classic)"
+#   4. 勾选权限: public_repo
+#   5. 生成并复制 Token
+#
+# 获取地址: https://github.com/settings/tokens
+github_token = "YOUR_GITHUB_TOKEN_HERE"
+
+# NVD API Key (可选)
+# 用于提高 NVD API 请求速率限制
+#
+# 获取地址: https://nvd.nist.gov/developers/request-an-api-key
+nvd_api_key = ""
+
+[scan]
+# 扫描超时时间（秒）
+# 默认: 300
+timeout = 300
+
+# 最大并发扫描数
+# 默认: 10
+max_concurrent = 10
+
+[database]
+# 数据库路径
+# 存储 CVE 和威胁情报数据
+# 默认: "./data/threat_intel.db"
+path = "./data/threat_intel.db"
+
+# 自动同步间隔（天）
+# 超过此天数未同步，CLI 会提示更新
+# 默认: 7
+auto_sync_days = 7
+
+[logging]
+# 日志级别
+# 可选值: DEBUG, INFO, WARNING, ERROR
+# 默认: INFO
+level = "INFO"
+
+# 日志文件路径
+# 默认: "./logs/deepvuln.log"
+file = "./logs/deepvuln.log"

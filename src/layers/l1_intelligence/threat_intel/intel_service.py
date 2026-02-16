@@ -396,6 +396,83 @@ class IntelService:
 
     # ==================== Stats ====================
 
+    async def check_database_status(self) -> dict[str, Any]:
+        """Check database status and return recommendations.
+
+        Returns:
+            Dictionary with status information:
+            - exists: bool - whether database file exists
+            - is_empty: bool - whether database has no CVEs
+            - is_stale: bool - whether database hasn't been synced recently
+            - last_sync: datetime | None - last sync time
+            - total_cves: int - number of CVEs in database
+            - kev_count: int - number of KEV entries
+            - recommendation: str - recommended action
+            - days_since_sync: int | None - days since last sync
+        """
+        from datetime import timedelta
+        from pathlib import Path
+
+        result = {
+            "exists": False,
+            "is_empty": True,
+            "is_stale": False,
+            "last_sync": None,
+            "total_cves": 0,
+            "kev_count": 0,
+            "recommendation": "sync",
+            "days_since_sync": None,
+        }
+
+        # Check if database file exists
+        db_path = Path(self.config.storage_path)
+        result["exists"] = db_path.exists()
+
+        if not result["exists"]:
+            result["recommendation"] = "first_sync"
+            return result
+
+        # Connect and check contents
+        was_initialized = self._initialized
+        if not was_initialized:
+            await self.initialize()
+
+        try:
+            stats = await self.db.get_stats()
+            result["total_cves"] = stats.get("total_cves", 0)
+            result["kev_count"] = stats.get("kev_count", 0)
+            result["is_empty"] = result["total_cves"] == 0
+
+            # Check last sync time
+            nvd_meta = await self.db.get_sync_meta("nvd")
+            if nvd_meta and nvd_meta.get("last_success"):
+                try:
+                    last_sync = datetime.fromisoformat(nvd_meta["last_success"])
+                    result["last_sync"] = last_sync
+                    days_since = (datetime.now() - last_sync).days
+                    result["days_since_sync"] = days_since
+
+                    # Consider stale if > 7 days
+                    if days_since > 7:
+                        result["is_stale"] = True
+                        result["recommendation"] = "update"
+                except Exception:
+                    pass
+
+            # Determine recommendation
+            if result["is_empty"]:
+                result["recommendation"] = "first_sync"
+            elif result["is_stale"]:
+                result["recommendation"] = "update"
+            else:
+                result["recommendation"] = "ok"
+
+        finally:
+            if not was_initialized:
+                await self.close()
+
+        return result
+
     async def get_stats(self) -> dict[str, Any]:
         """Get database statistics.
 

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from src.core.logger.logger import get_logger
 from src.layers.l1_intelligence.dependency_scanner.base_scanner import (
     Dependency,
+    Ecosystem,
     ScanResult,
 )
 from src.layers.l1_intelligence.dependency_scanner.npm_scanner import NpmScanner
@@ -221,7 +222,7 @@ class SecurityAnalyzer:
     async def _lookup_dependency_vulns(
         self, scan_result: ScanResult
     ) -> list[DependencyVuln]:
-        """Look up CVEs for dependencies.
+        """Look up CVEs for dependencies using multiple sources.
 
         Args:
             scan_result: Dependency scan result.
@@ -238,13 +239,42 @@ class SecurityAnalyzer:
         # Group dependencies by ecosystem for efficient lookup
         for dep in scan_result.get_unique_packages():
             try:
-                # Search for CVEs related to this dependency
-                query = dep.to_search_query()
-                cves = await self.intel_service.search_cves(query, limit=10)
+                all_cves: list[CVEInfo] = []
+                seen_cve_ids: set[str] = set()
 
-                if cves:
+                # For Go modules, use GitHub Advisory and Go VulnDB first
+                if dep.ecosystem == Ecosystem.GO:
+                    # Try GitHub Advisory (with token from config)
+                    try:
+                        from src.layers.l1_intelligence.threat_intel.sources.advisories import (
+                            GitHubAdvisoryClient,
+                        )
+                        from src.core.config import get_github_token
+
+                        token = get_github_token()
+                        async with GitHubAdvisoryClient(token=token) as gh_client:
+                            gh_cves = await gh_client.search_go_module(dep.name, limit=10)
+                            for cve in gh_cves:
+                                if cve.cve_id not in seen_cve_ids:
+                                    seen_cve_ids.add(cve.cve_id)
+                                    all_cves.append(cve)
+                    except Exception as e:
+                        self.logger.debug(f"GitHub Advisory lookup failed for {dep.name}: {e}")
+
+                    # Skip Go VulnDB for now (API endpoint issues)
+                    # TODO: Fix Go VulnDB or use OSV API instead
+
+                # Also search local database
+                query = dep.to_search_query()
+                db_cves = await self.intel_service.search_cves(query, limit=10)
+                for cve in db_cves:
+                    if cve.cve_id not in seen_cve_ids:
+                        seen_cve_ids.add(cve.cve_id)
+                        all_cves.append(cve)
+
+                if all_cves:
                     # Filter to relevant CVEs
-                    relevant_cves = self._filter_relevant_cves(cves, dep)
+                    relevant_cves = self._filter_relevant_cves(all_cves, dep)
 
                     if relevant_cves:
                         dep_vuln = DependencyVuln(
@@ -312,21 +342,65 @@ class SecurityAnalyzer:
         Returns:
             Filtered list of relevant CVEs.
         """
+        from src.layers.l1_intelligence.security_analyzer.version_utils import (
+            is_version_vulnerable,
+        )
+
         relevant: list[CVEInfo] = []
         dep_name_lower = dep.name.lower()
 
+        # For Go modules, extract the package name for better matching
+        go_package_name = None
+        if dep.ecosystem == Ecosystem.GO:
+            # Extract package name from module path
+            # e.g., "github.com/gin-gonic/gin" -> "gin"
+            parts = dep.name.split("/")
+            if parts:
+                go_package_name = parts[-1].lower()
+
         for cve in cves:
+            # Check if CVE is from advisory sources (already filtered)
+            if "github-advisory" in cve.tags or "go-vulndb" in cve.tags:
+                # Advisory sources provide precise matches
+                # Still check version if affected_versions is available
+                if cve.affected_versions and dep.version:
+                    if is_version_vulnerable(dep.version, cve.affected_versions):
+                        relevant.append(cve)
+                else:
+                    relevant.append(cve)
+                continue
+
             # Check if CVE description mentions the dependency
             desc_lower = cve.description.lower()
 
-            # Check for dependency name in description or affected products
+            # Check for dependency name in description
             name_match = dep_name_lower in desc_lower
+
+            # For Go modules, also check package name
+            if not name_match and go_package_name:
+                name_match = go_package_name in desc_lower
+
+            # Check for dependency name in affected products
             product_match = any(
                 dep_name_lower in p.lower() for p in cve.affected_products
             )
 
+            # For Go modules, also check if module path matches
+            if not product_match and dep.ecosystem == Ecosystem.GO:
+                product_match = any(
+                    dep_name_lower == p.lower() or
+                    p.lower().startswith(dep_name_lower + "/")
+                    for p in cve.affected_products
+                )
+
             if name_match or product_match:
-                relevant.append(cve)
+                # Check version if affected_versions is specified
+                if cve.affected_versions and dep.version:
+                    if is_version_vulnerable(dep.version, cve.affected_versions):
+                        relevant.append(cve)
+                else:
+                    # No version constraint, include by default
+                    relevant.append(cve)
 
         return relevant
 

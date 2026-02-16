@@ -57,6 +57,10 @@ htmlcov/
 .env
 .env.local
 
+# Local config (contains secrets)
+config.local.toml
+*.local.toml
+
 # OS
 .DS_Store
 Thumbs.db
