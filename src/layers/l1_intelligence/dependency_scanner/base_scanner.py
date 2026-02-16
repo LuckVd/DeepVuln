@@ -257,6 +257,9 @@ class CompositeScanner:
     def __init__(self) -> None:
         """Initialize composite scanner with all available scanners."""
         from src.layers.l1_intelligence.dependency_scanner.go_scanner import GoScanner
+        from src.layers.l1_intelligence.dependency_scanner.maven_scanner import (
+            MavenScanner,
+        )
         from src.layers.l1_intelligence.dependency_scanner.npm_scanner import NpmScanner
         from src.layers.l1_intelligence.dependency_scanner.python_scanner import (
             PythonScanner,
@@ -266,6 +269,7 @@ class CompositeScanner:
             NpmScanner(),
             PythonScanner(),
             GoScanner(),
+            MavenScanner(),
         ]
         self.logger = get_logger(__name__)
 

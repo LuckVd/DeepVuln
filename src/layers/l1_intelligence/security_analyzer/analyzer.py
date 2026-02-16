@@ -236,58 +236,86 @@ class SecurityAnalyzer:
             self.logger.warning("No IntelService available, skipping CVE lookup")
             return vulns
 
-        # Group dependencies by ecosystem for efficient lookup
-        for dep in scan_result.get_unique_packages():
-            try:
-                all_cves: list[CVEInfo] = []
-                seen_cve_ids: set[str] = set()
+        # Ecosystem mapping for OSV API
+        ecosystem_to_osv = {
+            Ecosystem.NPM: "npm",
+            Ecosystem.PYPI: "PyPI",
+            Ecosystem.GO: "Go",
+            Ecosystem.MAVEN: "Maven",
+            Ecosystem.CARGO: "crates.io",
+            Ecosystem.COMPOSER: "Packagist",
+            Ecosystem.GEM: "RubyGems",
+            Ecosystem.NUGET: "NuGet",
+        }
 
-                # For Go modules, use GitHub Advisory and Go VulnDB first
-                if dep.ecosystem == Ecosystem.GO:
-                    # Try GitHub Advisory (with token from config)
-                    try:
-                        from src.layers.l1_intelligence.threat_intel.sources.advisories import (
-                            GitHubAdvisoryClient,
-                        )
-                        from src.core.config import get_github_token
+        # Create OSV client once for all dependencies
+        from src.layers.l1_intelligence.threat_intel.sources.advisories.osv_client import (
+            OSVClient,
+        )
 
-                        token = get_github_token()
-                        async with GitHubAdvisoryClient(token=token) as gh_client:
-                            gh_cves = await gh_client.search_go_module(dep.name, limit=10)
-                            for cve in gh_cves:
+        osv_client: OSVClient | None = None
+        try:
+            osv_client = OSVClient()
+            await osv_client._get_session()  # Pre-initialize session
+            self.logger.info("OSV client initialized for vulnerability lookup")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize OSV client: {e}")
+            osv_client = None
+
+        try:
+            # Group dependencies by ecosystem for efficient lookup
+            unique_packages = scan_result.get_unique_packages()
+            self.logger.info(f"Looking up CVEs for {len(unique_packages)} unique packages")
+
+            for dep in unique_packages:
+                try:
+                    all_cves: list[CVEInfo] = []
+                    seen_cve_ids: set[str] = set()
+
+                    # Try OSV API for ALL supported ecosystems
+                    osv_ecosystem = ecosystem_to_osv.get(dep.ecosystem)
+                    if osv_ecosystem and osv_client:
+                        try:
+                            osv_cves = await osv_client.query_by_package(
+                                package_name=dep.name,
+                                ecosystem=osv_ecosystem,
+                                version=dep.version if dep.version != "*" else None,
+                            )
+                            for cve in osv_cves:
                                 if cve.cve_id not in seen_cve_ids:
                                     seen_cve_ids.add(cve.cve_id)
                                     all_cves.append(cve)
-                    except Exception as e:
-                        self.logger.debug(f"GitHub Advisory lookup failed for {dep.name}: {e}")
+                        except Exception as e:
+                            self.logger.debug(f"OSV lookup failed for {dep.name}: {e}")
 
-                    # Skip Go VulnDB for now (API endpoint issues)
-                    # TODO: Fix Go VulnDB or use OSV API instead
+                    # Also search local database
+                    query = dep.to_search_query()
+                    db_cves = await self.intel_service.search_cves(query, limit=10)
+                    for cve in db_cves:
+                        if cve.cve_id not in seen_cve_ids:
+                            seen_cve_ids.add(cve.cve_id)
+                            all_cves.append(cve)
 
-                # Also search local database
-                query = dep.to_search_query()
-                db_cves = await self.intel_service.search_cves(query, limit=10)
-                for cve in db_cves:
-                    if cve.cve_id not in seen_cve_ids:
-                        seen_cve_ids.add(cve.cve_id)
-                        all_cves.append(cve)
+                    if all_cves:
+                        # Filter to relevant CVEs
+                        relevant_cves = self._filter_relevant_cves(all_cves, dep)
 
-                if all_cves:
-                    # Filter to relevant CVEs
-                    relevant_cves = self._filter_relevant_cves(all_cves, dep)
+                        if relevant_cves:
+                            dep_vuln = DependencyVuln(
+                                dependency=dep,
+                                cves=relevant_cves,
+                                highest_severity=self._get_highest_severity(relevant_cves),
+                                has_kev=any(c.kev for c in relevant_cves),
+                                kev_cves=[c.cve_id for c in relevant_cves if c.kev],
+                            )
+                            vulns.append(dep_vuln)
 
-                    if relevant_cves:
-                        dep_vuln = DependencyVuln(
-                            dependency=dep,
-                            cves=relevant_cves,
-                            highest_severity=self._get_highest_severity(relevant_cves),
-                            has_kev=any(c.kev for c in relevant_cves),
-                            kev_cves=[c.cve_id for c in relevant_cves if c.kev],
-                        )
-                        vulns.append(dep_vuln)
-
-            except Exception as e:
-                self.logger.warning(f"Failed to lookup CVEs for {dep.name}: {e}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to lookup CVEs for {dep.name}: {e}")
+        finally:
+            # Close OSV client session
+            if osv_client:
+                await osv_client.close()
 
         return vulns
 
@@ -358,12 +386,22 @@ class SecurityAnalyzer:
             if parts:
                 go_package_name = parts[-1].lower()
 
+        # For Maven packages, extract artifact ID for matching
+        # Format: "groupId:artifactId" -> extract "artifactId"
+        maven_artifact_id = None
+        maven_group_id = None
+        if dep.ecosystem == Ecosystem.MAVEN and ":" in dep.name:
+            parts = dep.name.split(":")
+            if len(parts) == 2:
+                maven_group_id = parts[0].lower()
+                maven_artifact_id = parts[1].lower()
+
         for cve in cves:
-            # Check if CVE is from advisory sources (already filtered)
-            if "github-advisory" in cve.tags or "go-vulndb" in cve.tags:
-                # Advisory sources provide precise matches
+            # Check if CVE is from advisory sources (already filtered by package name)
+            if "github-advisory" in cve.tags or "go-vulndb" in cve.tags or "osv" in cve.tags:
+                # Advisory sources provide precise matches by package name
                 # Still check version if affected_versions is available
-                if cve.affected_versions and dep.version:
+                if cve.affected_versions and dep.version and dep.version != "*":
                     if is_version_vulnerable(dep.version, cve.affected_versions):
                         relevant.append(cve)
                 else:
@@ -380,6 +418,10 @@ class SecurityAnalyzer:
             if not name_match and go_package_name:
                 name_match = go_package_name in desc_lower
 
+            # For Maven packages, also check artifact ID
+            if not name_match and maven_artifact_id:
+                name_match = maven_artifact_id in desc_lower
+
             # Check for dependency name in affected products
             product_match = any(
                 dep_name_lower in p.lower() for p in cve.affected_products
@@ -390,6 +432,14 @@ class SecurityAnalyzer:
                 product_match = any(
                     dep_name_lower == p.lower() or
                     p.lower().startswith(dep_name_lower + "/")
+                    for p in cve.affected_products
+                )
+
+            # For Maven packages, also check artifact ID in affected products
+            if not product_match and maven_artifact_id:
+                product_match = any(
+                    maven_artifact_id == p.lower() or
+                    maven_artifact_id in p.lower()
                     for p in cve.affected_products
                 )
 

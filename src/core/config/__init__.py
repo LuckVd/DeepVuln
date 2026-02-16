@@ -14,16 +14,28 @@ DEFAULT_CONFIG_PATHS = [
     Path.home() / ".deepvuln" / "config.toml",
 ]
 
+# Config cache to avoid repeated loading
+_config_cache: dict[str, Any] | None = None
+_github_token_cache: str | None = None
+_nvd_api_key_cache: str | None = None
 
-def load_config(config_path: Path | str | None = None) -> dict[str, Any]:
+
+def load_config(config_path: Path | str | None = None, force_reload: bool = False) -> dict[str, Any]:
     """Load configuration from TOML file.
 
     Args:
         config_path: Path to config file. If None, searches default paths.
+        force_reload: Force reload config even if cached.
 
     Returns:
         Configuration dictionary.
     """
+    global _config_cache
+
+    # Return cached config if available and not forcing reload
+    if _config_cache is not None and not force_reload:
+        return _config_cache
+
     try:
         import tomllib
     except ImportError:
@@ -41,16 +53,19 @@ def load_config(config_path: Path | str | None = None) -> dict[str, Any]:
 
     if not path or not path.exists():
         logger.debug("No config file found, using defaults")
-        return get_default_config()
+        _config_cache = get_default_config()
+        return _config_cache
 
     try:
         with open(path, "rb") as f:
             config = tomllib.load(f)
         logger.info(f"Loaded config from {path}")
+        _config_cache = config
         return config
     except Exception as e:
         logger.warning(f"Failed to load config from {path}: {e}")
-        return get_default_config()
+        _config_cache = get_default_config()
+        return _config_cache
 
 
 def get_default_config() -> dict[str, Any]:
@@ -89,16 +104,25 @@ def get_github_token() -> str | None:
     Returns:
         GitHub token or None.
     """
+    global _github_token_cache
+
+    # Return cached token if available
+    if _github_token_cache is not None:
+        return _github_token_cache if _github_token_cache else None
+
     import os
 
     # Check environment first
     token = os.environ.get("GITHUB_TOKEN")
     if token:
+        _github_token_cache = token
         return token
 
     # Check config file
     config = load_config()
-    return config.get("threat_intel", {}).get("github_token")
+    token = config.get("threat_intel", {}).get("github_token")
+    _github_token_cache = token or ""
+    return token
 
 
 def get_nvd_api_key() -> str | None:
@@ -111,16 +135,25 @@ def get_nvd_api_key() -> str | None:
     Returns:
         NVD API key or None.
     """
+    global _nvd_api_key_cache
+
+    # Return cached key if available
+    if _nvd_api_key_cache is not None:
+        return _nvd_api_key_cache if _nvd_api_key_cache else None
+
     import os
 
     # Check environment first
     key = os.environ.get("NVD_API_KEY")
     if key:
+        _nvd_api_key_cache = key
         return key
 
     # Check config file
     config = load_config()
-    return config.get("threat_intel", {}).get("nvd_api_key")
+    key = config.get("threat_intel", {}).get("nvd_api_key")
+    _nvd_api_key_cache = key or ""
+    return key
 
 
 def get_database_path() -> str:
