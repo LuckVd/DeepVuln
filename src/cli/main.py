@@ -738,5 +738,318 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
 main.add_command(intel_group, name="intel")
 
 
+@main.command()
+@click.option("--path", "-p", required=True, type=click.Path(exists=True), help="Path to source file or directory")
+@click.option("--output", "-o", type=click.Path(), help="Output file for JSON report")
+@click.option("--format", "-f", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format")
+@click.option("--call-graph", "-c", is_flag=True, help="Show call graph")
+@click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+def parse(path: str, output: str | None, output_format: str, call_graph: bool, verbose: bool) -> None:
+    """Parse source code structure.
+
+    Extract classes, functions, imports, and call graphs from source code.
+    Supports Java, Python, and Go files.
+
+    Examples:
+        deepvuln parse --path src/main.py
+        deepvuln parse -p ./src -f json -o structure.json
+        deepvuln parse -p . --call-graph --verbose
+    """
+    from pathlib import Path
+
+    from src.layers.l1_intelligence.code_structure import (
+        ParseOptions,
+        parse_file,
+        parse_project,
+    )
+
+    source_path = Path(path)
+
+    if source_path.is_file():
+        # Parse single file
+        options = ParseOptions(build_call_graph=call_graph)
+        module = parse_file(source_path, options)
+
+        if output_format == "json":
+            output_result = _format_module_json(module)
+        else:
+            output_result = _format_module_text(module, verbose)
+
+        if output:
+            Path(output).write_text(output_result if isinstance(output_result, str) else json.dumps(output_result, indent=2), encoding="utf-8")
+            console.print(f"[green]Output written to: {output}[/]")
+        else:
+            if output_format == "json":
+                import json
+                console.print_json(json.dumps(output_result, indent=2))
+            else:
+                console.print(output_result)
+
+    elif source_path.is_dir():
+        # Parse project
+        options = ParseOptions(build_call_graph=call_graph)
+        project = parse_project(source_path, options)
+
+        if output_format == "json":
+            output_result = _format_project_json(project)
+        else:
+            output_result = _format_project_text(project, verbose, call_graph)
+
+        if output:
+            import json
+            Path(output).write_text(output_result if isinstance(output_result, str) else json.dumps(output_result, indent=2), encoding="utf-8")
+            console.print(f"[green]Output written to: {output}[/]")
+        else:
+            if output_format == "json":
+                import json
+                console.print_json(json.dumps(output_result, indent=2))
+            else:
+                console.print(output_result)
+    else:
+        show_error("Invalid Path", f"Path does not exist: {source_path}")
+
+
+def _format_module_text(module, verbose: bool) -> str:
+    """Format module info as text."""
+    from rich.table import Table
+    from io import StringIO
+
+    output = StringIO()
+
+    # Header
+    output.write(f"\n[bold cyan]Module: {module.file_path}[/]\n")
+    output.write(f"[dim]Language: {module.language} | Lines: {module.line_count}[/]\n\n")
+
+    # Package/Module name
+    if module.package:
+        output.write(f"[yellow]Package:[/] {module.package}\n")
+    if module.module_name:
+        output.write(f"[yellow]Module:[/] {module.module_name}\n")
+
+    # Imports
+    if module.imports:
+        output.write(f"\n[green]Imports ({len(module.imports)}):[/]\n")
+        for imp in module.imports[:10]:  # Limit display
+            if imp.is_wildcard:
+                output.write(f"  from {imp.module} import *\n")
+            elif imp.names:
+                output.write(f"  from {imp.module} import {', '.join(imp.names)}\n")
+            else:
+                alias = f" as {imp.alias}" if imp.alias else ""
+                output.write(f"  import {imp.module}{alias}\n")
+        if len(module.imports) > 10:
+            output.write(f"  [dim]... and {len(module.imports) - 10} more[/]\n")
+
+    # Classes
+    if module.classes:
+        output.write(f"\n[green]Classes ({len(module.classes)}):[/]\n")
+        for cls in module.classes:
+            output.write(f"  [bold]{cls.name}[/] ({cls.type.value})\n")
+            if cls.bases:
+                output.write(f"    [dim]extends: {', '.join(cls.bases)}[/]\n")
+            if verbose and cls.methods:
+                output.write(f"    [dim]methods: {', '.join(m.name for m in cls.methods[:5])}[/]\n")
+            if verbose and cls.fields:
+                output.write(f"    [dim]fields: {', '.join(f.name for f in cls.fields[:5])}[/]\n")
+
+    # Functions
+    if module.functions:
+        output.write(f"\n[green]Functions ({len(module.functions)}):[/]\n")
+        for func in module.functions[:10]:
+            params = ", ".join(p.name for p in func.parameters[:3])
+            if len(func.parameters) > 3:
+                params += "..."
+            ret = f" -> {func.return_type}" if func.return_type else ""
+            output.write(f"  [bold]{func.name}[/]({params}){ret}\n")
+        if len(module.functions) > 10:
+            output.write(f"  [dim]... and {len(module.functions) - 10} more[/]\n")
+
+    # Call graph
+    if module.call_graph.edges:
+        output.write(f"\n[green]Call Graph ({len(module.call_graph.edges)} edges):[/]\n")
+        for edge in module.call_graph.edges[:10]:
+            output.write(f"  {edge.caller} -> {edge.callee} (line {edge.line})\n")
+        if len(module.call_graph.edges) > 10:
+            output.write(f"  [dim]... and {len(module.call_graph.edges) - 10} more[/]\n")
+
+    # Errors
+    if module.parse_errors:
+        output.write(f"\n[red]Errors ({len(module.parse_errors)}):[/]\n")
+        for err in module.parse_errors:
+            output.write(f"  {err}\n")
+
+    return output.getvalue()
+
+
+def _format_project_text(project, verbose: bool, show_call_graph: bool) -> str:
+    """Format project structure as text."""
+    from io import StringIO
+
+    output = StringIO()
+
+    # Header
+    output.write(f"\n[bold cyan]Project: {project.root_path}[/]\n")
+    output.write(f"[dim]Files: {project.total_files} | Lines: {project.total_lines}[/]\n")
+    output.write(f"[dim]Languages: {', '.join(project.languages)}[/]\n\n")
+
+    # Statistics
+    output.write("[green]Statistics:[/]\n")
+    output.write(f"  Classes: {len(project.all_classes)}\n")
+    output.write(f"  Functions: {len(project.all_functions)}\n")
+    output.write(f"  Call Graph Edges: {len(project.global_call_graph.edges)}\n")
+
+    # Classes summary by language
+    if project.all_classes and verbose:
+        output.write(f"\n[green]Classes ({len(project.all_classes)}):[/]\n")
+        for name, cls in list(project.all_classes.items())[:15]:
+            output.write(f"  [bold]{name}[/] ({cls.type.value})\n")
+        if len(project.all_classes) > 15:
+            output.write(f"  [dim]... and {len(project.all_classes) - 15} more[/]\n")
+
+    # Functions summary
+    if project.all_functions and verbose:
+        output.write(f"\n[green]Functions ({len(project.all_functions)}):[/]\n")
+        for name, func in list(project.all_functions.items())[:15]:
+            output.write(f"  [bold]{name}[/]\n")
+        if len(project.all_functions) > 15:
+            output.write(f"  [dim]... and {len(project.all_functions) - 15} more[/]\n")
+
+    # Call graph
+    if show_call_graph and project.global_call_graph.edges:
+        output.write(f"\n[green]Call Graph ({len(project.global_call_graph.edges)} edges):[/]\n")
+        for edge in project.global_call_graph.edges[:20]:
+            output.write(f"  {edge.caller} -> {edge.callee}\n")
+        if len(project.global_call_graph.edges) > 20:
+            output.write(f"  [dim]... and {len(project.global_call_graph.edges) - 20} more[/]\n")
+
+    # Parse errors
+    if project.parse_errors:
+        output.write(f"\n[red]Parse Errors ({len(project.parse_errors)} files):[/]\n")
+        for file_path, error in list(project.parse_errors.items())[:5]:
+            output.write(f"  {file_path}: {error[:50]}...\n")
+        if len(project.parse_errors) > 5:
+            output.write(f"  [dim]... and {len(project.parse_errors) - 5} more[/]\n")
+
+    return output.getvalue()
+
+
+def _format_module_json(module) -> dict:
+    """Format module info as JSON-serializable dict."""
+    return {
+        "file_path": module.file_path,
+        "language": module.language,
+        "package": module.package,
+        "module_name": module.module_name,
+        "line_count": module.line_count,
+        "imports": [
+            {
+                "module": imp.module,
+                "names": imp.names,
+                "alias": imp.alias,
+                "is_wildcard": imp.is_wildcard,
+                "line": imp.line,
+            }
+            for imp in module.imports
+        ],
+        "classes": [
+            {
+                "name": cls.name,
+                "full_name": cls.full_name,
+                "type": cls.type.value,
+                "bases": cls.bases,
+                "methods": [
+                    {
+                        "name": m.name,
+                        "full_name": m.full_name,
+                        "parameters": [{"name": p.name, "type": p.type} for p in m.parameters],
+                        "return_type": m.return_type,
+                        "visibility": m.visibility.value,
+                    }
+                    for m in cls.methods
+                ],
+                "fields": [
+                    {
+                        "name": f.name,
+                        "type": f.type,
+                        "visibility": f.visibility.value,
+                    }
+                    for f in cls.fields
+                ],
+            }
+            for cls in module.classes
+        ],
+        "functions": [
+            {
+                "name": func.name,
+                "full_name": func.full_name,
+                "parameters": [{"name": p.name, "type": p.type} for p in func.parameters],
+                "return_type": func.return_type,
+                "visibility": func.visibility.value,
+                "decorators": func.decorators,
+            }
+            for func in module.functions
+        ],
+        "call_graph": {
+            "edges": [
+                {
+                    "caller": edge.caller,
+                    "callee": edge.callee,
+                    "line": edge.line,
+                }
+                for edge in module.call_graph.edges
+            ]
+        },
+        "parse_errors": module.parse_errors,
+    }
+
+
+def _format_project_json(project) -> dict:
+    """Format project structure as JSON-serializable dict."""
+    return {
+        "root_path": project.root_path,
+        "primary_language": project.primary_language,
+        "languages": project.languages,
+        "total_files": project.total_files,
+        "total_lines": project.total_lines,
+        "statistics": {
+            "classes": len(project.all_classes),
+            "functions": len(project.all_functions),
+            "call_graph_edges": len(project.global_call_graph.edges),
+        },
+        "classes": [
+            {
+                "name": cls.name,
+                "full_name": cls.full_name,
+                "type": cls.type.value,
+                "file_path": cls.file_path,
+            }
+            for cls in project.all_classes.values()
+        ],
+        "functions": [
+            {
+                "name": func.name,
+                "full_name": func.full_name,
+                "file_path": func.file_path,
+            }
+            for func in project.all_functions.values()
+        ],
+        "call_graph": {
+            "edges": [
+                {
+                    "caller": edge.caller,
+                    "callee": edge.callee,
+                    "file_path": edge.file_path,
+                    "line": edge.line,
+                }
+                for edge in project.global_call_graph.edges
+            ]
+        },
+        "parse_errors": {
+            path: error
+            for path, error in project.parse_errors.items()
+        },
+    }
+
+
 if __name__ == "__main__":
     main()
