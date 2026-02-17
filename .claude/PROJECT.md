@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-02-18 | 11e0194 | feat(l1): implement P1-10 build configuration security analyzer |
 | 2026-02-18 | 6a4a8a5 | feat(l1): implement P1-07 code structure parser (Java/Python/Go) |
 | 2026-02-17 | 2985add | feat(l1): implement P1-09 Tree-sitter AST-based attack surface detection |
 | 2026-02-17 | 00bd232 | feat(l1): complete P1-08 attack surface detector (Phase 3-4) |

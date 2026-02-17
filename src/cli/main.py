@@ -6,6 +6,7 @@ from typing import Any
 
 import click
 
+from src.cli.config_display import export_config_report_json, export_config_report_text, show_config_report
 from src.cli.display import (
     console,
     create_progress,
@@ -732,6 +733,62 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
         console.print(f"  KEV (known exploited): {scan_result.report.kev_count}")
     else:
         show_error("Scan Failed", "\n".join(scan_result.errors or ["Unknown error"]))
+
+
+@main.command("config-analyze")
+@click.option("--path", "-p", required=True, type=click.Path(exists=True), help="Path to source code")
+@click.option("--output", "-o", "output_path", type=click.Path(), help="Output file for report")
+@click.option("--format", "-f", "output_format", type=click.Choice(["text", "json"]), default="text", help="Output format")
+@click.option("--detailed", "-d", is_flag=True, help="Show detailed findings")
+@click.option("--show-evidence", is_flag=True, help="Show evidence (secrets will be masked)")
+def config_analyze(
+    path: str,
+    output_path: str | None,
+    output_format: str,
+    detailed: bool,
+    show_evidence: bool,
+) -> None:
+    """Analyze build configurations for security issues.
+
+    This command scans build configuration files for security issues:
+    - Hardcoded secrets (API keys, passwords, tokens)
+    - Dockerfile security misconfigurations
+    - CI/CD pipeline security issues
+    - Maven/Gradle/Python build file issues
+
+    Examples:
+        deepvuln config-analyze --path /path/to/project
+        deepvuln config-analyze -p . --detailed --show-evidence
+        deepvuln config-analyze -p . -f json -o report.json
+    """
+    from src.layers.l1_intelligence.build_config.analyzer import BuildConfigAnalyzer
+
+    show_banner()
+    source_path = Path(path)
+
+    console.print(f"[cyan]Analyzing build configurations in {source_path}...[/]\n")
+
+    # Run analysis
+    analyzer = BuildConfigAnalyzer()
+    report = analyzer.analyze(source_path)
+
+    console.print("[green]Analysis complete![/]\n")
+
+    # Output results
+    if output_path:
+        # Export to file
+        if output_format == "json":
+            content = export_config_report_json(report)
+        else:
+            content = export_config_report_text(report)
+
+        Path(output_path).write_text(content, encoding="utf-8")
+        console.print(f"\n[green]Report exported to: {output_path}[/]")
+        console.print(f"  Files scanned: {len(report.scanned_files)}")
+        console.print(f"  Total findings: {len(report.findings)}")
+    else:
+        # Display to console
+        show_config_report(report, detailed=detailed, show_evidence=show_evidence)
 
 
 # Add intel command group

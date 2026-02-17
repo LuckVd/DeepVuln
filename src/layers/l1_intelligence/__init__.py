@@ -45,4 +45,6 @@ __all__ = [
     "AutoSecurityScanner",
     "ScanConfig",
     "ScanResult",
+    # Build config security analysis (lazy import)
+    # Use: from src.layers.l1_intelligence.build_config import BuildConfigAnalyzer
 ]
