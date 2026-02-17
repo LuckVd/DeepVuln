@@ -34,6 +34,11 @@ dependencies = [
     "aiosqlite>=0.19.0",
     "apscheduler>=3.10.0",
     "tomli>=2.0.0;python_version<'3.11'",
+    # Tree-sitter for AST-based code analysis
+    "tree-sitter>=0.23.0",
+    "tree-sitter-java>=0.23.0",
+    "tree-sitter-python>=0.23.0",
+    "tree-sitter-go>=0.23.0",
 ]
 
 [project.optional-dependencies]

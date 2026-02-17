@@ -1,8 +1,11 @@
-"""Main attack surface detector."""
+"""Main attack surface detector with AST and regex support."""
 
 from pathlib import Path
 
 from src.core.logger.logger import get_logger
+from src.layers.l1_intelligence.attack_surface.ast.base import (
+    get_ast_detector_for_file,
+)
 from src.layers.l1_intelligence.attack_surface.http_detector import (
     get_detector_for_file as get_http_detector_for_file,
     get_detector_for_framework as get_http_detector_for_framework,
@@ -137,7 +140,13 @@ class AttackSurfaceDetector:
         rpc_detectors: list,
         mq_detectors: list,
     ) -> list[EntryPoint]:
-        """Scan a single file for entry points."""
+        """Scan a single file for entry points.
+
+        Uses a hybrid strategy:
+        1. Try AST-based detection first (more accurate)
+        2. Fall back to regex-based detection if AST fails or finds nothing
+        3. For .proto/.thrift files, always use regex (no AST support)
+        """
         entry_points: list[EntryPoint] = []
 
         try:
@@ -146,6 +155,25 @@ class AttackSurfaceDetector:
             self.logger.debug(f"Could not read {file_path}: {e}")
             return entry_points
 
+        ext = file_path.suffix
+
+        # Phase 1: Try AST-based detection for supported languages
+        if ext in (".java", ".py", ".go"):
+            ast_detector = get_ast_detector_for_file(file_path)
+            if ast_detector:
+                try:
+                    ast_results = ast_detector.detect(content, file_path)
+                    if ast_results:
+                        self.logger.debug(
+                            f"AST detector found {len(ast_results)} entry points in {file_path}"
+                        )
+                        entry_points.extend(ast_results)
+                        return entry_points  # AST found results, skip regex
+                except Exception as e:
+                    self.logger.debug(f"AST detector failed on {file_path}: {e}")
+
+        # Phase 2: Fall back to regex-based detection
+        # For proto/thrift files, always use regex (no AST support)
         # Try pre-configured HTTP detectors
         for detector in http_detectors:
             if self._file_matches_patterns(file_path, detector.file_patterns):

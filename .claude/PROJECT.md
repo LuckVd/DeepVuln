@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-02-17 | 2985add | feat(l1): implement P1-09 Tree-sitter AST-based attack surface detection |
 | 2026-02-17 | 00bd232 | feat(l1): complete P1-08 attack surface detector (Phase 3-4) |
 | 2026-02-16 | bc12d26 | feat(cli): integrate threat intelligence module into CLI TUI |
 | 2026-02-16 | 95e316b | feat(l1): implement threat intelligence sync module (P1-04) |

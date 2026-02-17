@@ -1,5 +1,11 @@
 """Attack surface detection module."""
 
+from src.layers.l1_intelligence.attack_surface.ast import (
+    ASTDetector,
+    GoASTDetector,
+    JavaASTDetector,
+    PythonASTDetector,
+)
 from src.layers.l1_intelligence.attack_surface.detector import AttackSurfaceDetector
 from src.layers.l1_intelligence.attack_surface.models import (
     AttackSurfaceReport,
@@ -20,11 +26,19 @@ from src.layers.l1_intelligence.attack_surface.rpc_detector import (
 )
 
 __all__ = [
+    # Main detector
     "AttackSurfaceDetector",
+    # Models
     "AttackSurfaceReport",
     "EntryPoint",
     "EntryPointType",
     "HTTPMethod",
+    # AST detectors
+    "ASTDetector",
+    "JavaASTDetector",
+    "PythonASTDetector",
+    "GoASTDetector",
+    # Regex detectors
     "DubboDetector",
     "GrpcDetector",
     "ThriftDetector",
