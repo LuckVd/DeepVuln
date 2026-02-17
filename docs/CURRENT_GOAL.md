@@ -34,9 +34,9 @@
 - [x] 检测路径参数和查询参数
 
 ### Phase 2: RPC 入口点检测
-- [ ] gRPC 服务定义解析（.proto 文件）
-- [ ] Dubbo 服务接口识别
-- [ ] Thrift IDL 解析
+- [x] gRPC 服务定义解析（.proto 文件）
+- [x] Dubbo 服务接口识别
+- [x] Thrift IDL 解析
 
 ### Phase 3: 其他入口点检测
 - [ ] 消息队列消费者（Kafka, RabbitMQ, Redis）
@@ -154,6 +154,10 @@ r.POST("/login", loginHandler)    → POST /login
 | 2026-02-17 | Phase 1 完成：HTTP 入口点检测（Gin, Echo, Spring, Flask, FastAPI） |
 | 2026-02-17 | 创建模块结构：models.py, detector.py, http_detector.py |
 | 2026-02-17 | 添加单元测试：20 个测试全部通过 |
+| 2026-02-17 | Phase 2 完成：RPC 入口点检测（Dubbo, gRPC, Thrift） |
+| 2026-02-17 | 改进 Spring 检测器支持多行注解 |
+| 2026-02-17 | 使用 Dubbo 项目验证：发现 1 Dubbo + 10 gRPC 服务 |
+| 2026-02-17 | 单元测试增加到 26 个 |
 
 ---
 

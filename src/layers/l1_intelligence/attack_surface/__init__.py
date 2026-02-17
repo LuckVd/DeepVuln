@@ -7,6 +7,11 @@ from src.layers.l1_intelligence.attack_surface.models import (
     EntryPointType,
     HTTPMethod,
 )
+from src.layers.l1_intelligence.attack_surface.rpc_detector import (
+    DubboDetector,
+    GrpcDetector,
+    ThriftDetector,
+)
 
 __all__ = [
     "AttackSurfaceDetector",
@@ -14,4 +19,7 @@ __all__ = [
     "EntryPoint",
     "EntryPointType",
     "HTTPMethod",
+    "DubboDetector",
+    "GrpcDetector",
+    "ThriftDetector",
 ]

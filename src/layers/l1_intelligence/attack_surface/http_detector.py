@@ -193,21 +193,51 @@ class SpringDetector(HTTPDetector):
     framework_name = "spring"
     file_patterns = ["*.java"]
 
-    # Pattern for @GetMapping, @PostMapping, etc.
+    # Pattern for @GetMapping, @PostMapping, etc. (single line)
     MAPPING_PATTERN = re.compile(
-        r"""@(Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?['"`]([^'"`]+)['"`]""",
+        r"""@(Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?["']([^"']+)["']""",
         re.VERBOSE,
     )
 
-    # Pattern for @RequestMapping on class
+    # Pattern for multi-line @RequestMapping with value and method
+    MULTILINE_REQUEST_MAPPING = re.compile(
+        r"""@RequestMapping\s*\(
+        [^)]*?
+        value\s*=\s*["']([^"']+)["']
+        [^)]*?
+        (?:method\s*=\s*RequestMethod\.(GET|POST|PUT|DELETE|PATCH))?
+        [^)]*?
+        \)""",
+        re.VERBOSE | re.DOTALL,
+    )
+
+    # Pattern for @RequestMapping with method first
+    MULTILINE_REQUEST_MAPPING_METHOD_FIRST = re.compile(
+        r"""@RequestMapping\s*\(
+        [^)]*?
+        (?:method\s*=\s*RequestMethod\.(GET|POST|PUT|DELETE|PATCH))?
+        [^)]*?
+        value\s*=\s*["']([^"']+)["']
+        [^)]*?
+        \)""",
+        re.VERBOSE | re.DOTALL,
+    )
+
+    # Pattern for @RequestMapping on class (simple format)
     CLASS_MAPPING_PATTERN = re.compile(
-        r"""@RequestMapping\s*\(\s*(?:value\s*=\s*)?['"`]([^'"`]+)['"`]"""
+        r"""@RequestMapping\s*\(\s*(?:value\s*=\s*)?["']([^"']+)["']""",
+        re.VERBOSE,
+    )
+
+    # Pattern for @RestController or @Controller on class
+    CONTROLLER_PATTERN = re.compile(
+        r"""@(RestController|Controller)"""
     )
 
     # Pattern for method handler
-    METHOD_PATTERN = re.compile(
-        r"""@(Get|Post|Put|Delete|Patch|Request)Mapping[^}]*?(?:public|private|protected)?\s+\w+(?:<[^>]+>)?\s+(\w+)\s*\(""",
-        re.VERBOSE | re.DOTALL,
+    HANDLER_PATTERN = re.compile(
+        r"""(?:public|private|protected)?\s*\w+(?:<[^>]+>)?\s+(\w+)\s*\([^)]*\)""",
+        re.VERBOSE,
     )
 
     def detect(self, content: str, file_path: Path) -> list[EntryPoint]:
@@ -220,60 +250,97 @@ class SpringDetector(HTTPDetector):
         if class_match:
             class_prefix = class_match.group(1)
 
-        # Find method-level mappings
-        # Split by @XxxMapping to find individual methods
+        # Normalize content for multi-line matching (but keep track of original lines)
         lines = content.split("\n")
-        current_line = 0
 
-        for i, line in enumerate(lines):
-            # Check for mapping annotation
-            match = self.MAPPING_PATTERN.search(line)
-            if match:
-                mapping_type = match.group(1)
-                path = match.group(2)
+        # Find all @XxxMapping annotations (both single and multi-line)
+        # Use a combined approach
 
-                # Determine HTTP method
-                method_map = {
-                    "Get": HTTPMethod.GET,
-                    "Post": HTTPMethod.POST,
-                    "Put": HTTPMethod.PUT,
-                    "Delete": HTTPMethod.DELETE,
-                    "Patch": HTTPMethod.PATCH,
-                    "Request": HTTPMethod.ALL,
-                }
-                method = method_map.get(mapping_type, HTTPMethod.GET)
+        # 1. Find single-line @GetMapping, @PostMapping, etc.
+        for match in self.MAPPING_PATTERN.finditer(content):
+            mapping_type = match.group(1)
+            path = match.group(2)
 
-                # Find handler method name (look ahead a few lines)
-                handler = self._find_handler_name(lines, i)
+            method = self._get_method_from_mapping_type(mapping_type)
+            handler = self._find_handler_name(content, match.end())
+            line_num = content[: match.start()].count("\n") + 1
 
-                # Combine class prefix with method path
-                full_path = class_prefix + path if class_prefix else path
+            full_path = class_prefix + path if class_prefix else path
 
-                entry = EntryPoint(
-                    type=EntryPointType.HTTP,
-                    method=method,
-                    path=full_path,
-                    handler=handler,
-                    file=str(file_path),
-                    line=i + 1,
-                    framework=self.framework_name,
-                )
-                entry_points.append(entry)
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=method,
+                path=full_path,
+                handler=handler,
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+            )
+            entry_points.append(entry)
+
+        # 2. Find multi-line @RequestMapping with value
+        for match in self.MULTILINE_REQUEST_MAPPING.finditer(content):
+            path = match.group(1)
+            method_str = match.group(2) if match.group(2) else None
+
+            method = self._get_method_from_string(method_str) if method_str else HTTPMethod.ALL
+            handler = self._find_handler_name(content, match.end())
+            line_num = content[: match.start()].count("\n") + 1
+
+            full_path = class_prefix + path if class_prefix else path
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=method,
+                path=full_path,
+                handler=handler,
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+            )
+            entry_points.append(entry)
 
         return entry_points
 
-    def _find_handler_name(self, lines: list[str], start_idx: int) -> str:
+    def _get_method_from_mapping_type(self, mapping_type: str) -> HTTPMethod:
+        """Get HTTP method from mapping type."""
+        method_map = {
+            "Get": HTTPMethod.GET,
+            "Post": HTTPMethod.POST,
+            "Put": HTTPMethod.PUT,
+            "Delete": HTTPMethod.DELETE,
+            "Patch": HTTPMethod.PATCH,
+            "Request": HTTPMethod.ALL,
+        }
+        return method_map.get(mapping_type, HTTPMethod.GET)
+
+    def _get_method_from_string(self, method_str: str | None) -> HTTPMethod:
+        """Get HTTP method from string."""
+        if not method_str:
+            return HTTPMethod.ALL
+        method_map = {
+            "GET": HTTPMethod.GET,
+            "POST": HTTPMethod.POST,
+            "PUT": HTTPMethod.PUT,
+            "DELETE": HTTPMethod.DELETE,
+            "PATCH": HTTPMethod.PATCH,
+        }
+        return method_map.get(method_str.upper(), HTTPMethod.ALL)
+
+    def _find_handler_name(self, content: str, start_pos: int) -> str:
         """Find handler method name from annotation position."""
-        # Look for method signature in next few lines
-        for i in range(start_idx, min(start_idx + 10, len(lines))):
-            line = lines[i]
-            # Match: public ReturnType methodName(
-            match = re.search(r"\s+(\w+)\s*\(", line)
-            if match:
-                # Skip common keywords
-                name = match.group(1)
-                if name not in ("public", "private", "protected", "static", "final", "class", "interface"):
-                    return name
+        # Look for method signature after the annotation
+        # Find the next method definition
+        search_content = content[start_pos : start_pos + 500]
+
+        # Look for: public ReturnType methodName(
+        match = self.HANDLER_PATTERN.search(search_content)
+        if match:
+            name = match.group(1)
+            # Skip common keywords
+            if name not in ("public", "private", "protected", "static", "final", "class", "interface", "void"):
+                return name
+
         return "unknown"
 
 

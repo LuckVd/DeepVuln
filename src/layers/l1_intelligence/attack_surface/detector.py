@@ -4,12 +4,16 @@ from pathlib import Path
 
 from src.core.logger.logger import get_logger
 from src.layers.l1_intelligence.attack_surface.http_detector import (
-    get_detector_for_file,
-    get_detector_for_framework,
+    get_detector_for_file as get_http_detector_for_file,
+    get_detector_for_framework as get_http_detector_for_framework,
 )
 from src.layers.l1_intelligence.attack_surface.models import (
     AttackSurfaceReport,
     EntryPoint,
+)
+from src.layers.l1_intelligence.attack_surface.rpc_detector import (
+    get_rpc_detector_for_file,
+    get_rpc_detector_for_framework,
 )
 
 logger = get_logger(__name__)
@@ -36,13 +40,17 @@ class AttackSurfaceDetector:
 
         report = AttackSurfaceReport(source_path=str(source_path))
 
-        # Get framework-specific detectors
-        framework_detectors = []
+        # Get framework-specific detectors (both HTTP and RPC)
+        http_detectors = []
+        rpc_detectors = []
         if frameworks:
             for fw in frameworks:
-                detector = get_detector_for_framework(fw)
-                if detector:
-                    framework_detectors.append(detector)
+                http_det = get_http_detector_for_framework(fw)
+                if http_det:
+                    http_detectors.append(http_det)
+                rpc_det = get_rpc_detector_for_framework(fw)
+                if rpc_det:
+                    rpc_detectors.append(rpc_det)
 
         # Scan source files
         source_files = self._find_source_files(source_path)
@@ -50,7 +58,7 @@ class AttackSurfaceDetector:
 
         for file_path in source_files:
             try:
-                entry_points = self._scan_file(file_path, framework_detectors)
+                entry_points = self._scan_file(file_path, http_detectors, rpc_detectors)
                 for entry in entry_points:
                     report.add_entry_point(entry)
                     if entry.framework and entry.framework not in report.frameworks_detected:
@@ -62,7 +70,7 @@ class AttackSurfaceDetector:
 
         self.logger.info(
             f"Attack surface detection complete: {report.total_entry_points} entry points "
-            f"(HTTP: {report.http_endpoints}, RPC: {report.rpc_services})"
+            f"(HTTP: {report.http_endpoints}, RPC: {report.rpc_services}, gRPC: {report.grpc_services})"
         )
 
         return report
@@ -78,8 +86,8 @@ class AttackSurfaceDetector:
         """
         source_files: list[Path] = []
 
-        # Extensions to scan
-        extensions = {".go", ".java", ".py", ".kt", ".ts", ".js"}
+        # Extensions to scan (including RPC definition files)
+        extensions = {".go", ".java", ".py", ".kt", ".ts", ".js", ".proto", ".thrift"}
 
         for ext in extensions:
             for file_path in source_path.rglob(f"*{ext}"):
@@ -123,13 +131,14 @@ class AttackSurfaceDetector:
         return False
 
     def _scan_file(
-        self, file_path: Path, framework_detectors: list
+        self, file_path: Path, http_detectors: list, rpc_detectors: list
     ) -> list[EntryPoint]:
         """Scan a single file for entry points.
 
         Args:
             file_path: Path to source file.
-            framework_detectors: Pre-configured framework detectors.
+            http_detectors: Pre-configured HTTP detectors.
+            rpc_detectors: Pre-configured RPC detectors.
 
         Returns:
             List of detected entry points.
@@ -142,8 +151,8 @@ class AttackSurfaceDetector:
             self.logger.debug(f"Could not read {file_path}: {e}")
             return entry_points
 
-        # Try framework-specific detectors first
-        for detector in framework_detectors:
+        # Try HTTP detectors
+        for detector in http_detectors:
             if any(
                 file_path.suffix == p[1:] if p.startswith("*.") else file_path.match(p)
                 for p in detector.file_patterns
@@ -152,17 +161,39 @@ class AttackSurfaceDetector:
                     detected = detector.detect(content, file_path)
                     entry_points.extend(detected)
                 except Exception as e:
-                    self.logger.debug(f"Detector {detector.framework_name} failed on {file_path}: {e}")
+                    self.logger.debug(f"HTTP detector {detector.framework_name} failed on {file_path}: {e}")
 
-        # If no results, try auto-detection based on file type
-        if not entry_points:
-            file_detectors = get_detector_for_file(file_path)
-            for detector in file_detectors:
+        # Try RPC detectors
+        for detector in rpc_detectors:
+            if any(
+                file_path.suffix == p[1:] if p.startswith("*.") else file_path.match(p)
+                for p in detector.file_patterns
+            ):
                 try:
                     detected = detector.detect(content, file_path)
                     entry_points.extend(detected)
                 except Exception as e:
-                    self.logger.debug(f"Detector {detector.framework_name} failed on {file_path}: {e}")
+                    self.logger.debug(f"RPC detector {detector.framework_name} failed on {file_path}: {e}")
+
+        # If no results from pre-configured detectors, try auto-detection
+        if not entry_points:
+            # Try HTTP auto-detection
+            file_http_detectors = get_http_detector_for_file(file_path)
+            for detector in file_http_detectors:
+                try:
+                    detected = detector.detect(content, file_path)
+                    entry_points.extend(detected)
+                except Exception as e:
+                    self.logger.debug(f"HTTP detector {detector.framework_name} failed on {file_path}: {e}")
+
+            # Try RPC auto-detection
+            file_rpc_detectors = get_rpc_detector_for_file(file_path)
+            for detector in file_rpc_detectors:
+                try:
+                    detected = detector.detect(content, file_path)
+                    entry_points.extend(detected)
+                except Exception as e:
+                    self.logger.debug(f"RPC detector {detector.framework_name} failed on {file_path}: {e}")
 
         return entry_points
 

@@ -18,6 +18,11 @@ from src.layers.l1_intelligence.attack_surface.models import (
     EntryPointType,
     HTTPMethod,
 )
+from src.layers.l1_intelligence.attack_surface.rpc_detector import (
+    DubboDetector,
+    GrpcDetector,
+    ThriftDetector,
+)
 
 
 class TestGinDetector:
@@ -466,3 +471,154 @@ class TestAttackSurfaceReport:
         unauth = report.get_unauthenticated()
         assert len(unauth) == 1
         assert unauth[0].path == "/public"
+
+
+class TestDubboDetector:
+    """Tests for Dubbo RPC detector."""
+
+    def test_detect_dubbo_service(self, tmp_path: Path) -> None:
+        """Test detecting Dubbo service."""
+        detector = DubboDetector()
+        code = '''
+package com.example.service;
+
+import org.apache.dubbo.config.annotation.DubboService;
+
+@DubboService(version = "1.0.0")
+public class UserServiceImpl implements UserService {
+    public User getUser(Long id) {
+        return null;
+    }
+}
+'''
+        java_file = tmp_path / "UserServiceImpl.java"
+        java_file.write_text(code)
+
+        entry_points = detector.detect(code, java_file)
+
+        assert len(entry_points) == 1
+        assert entry_points[0].type == EntryPointType.RPC
+        assert entry_points[0].framework == "dubbo"
+        assert "UserServiceImpl" in entry_points[0].handler
+
+    def test_detect_dubbo_service_with_group(self, tmp_path: Path) -> None:
+        """Test detecting Dubbo service with group."""
+        detector = DubboDetector()
+        code = '''
+@DubboService(group = "user", version = "2.0.0")
+public class OrderServiceImpl implements OrderService {
+}
+'''
+        java_file = tmp_path / "OrderServiceImpl.java"
+        java_file.write_text(code)
+
+        entry_points = detector.detect(code, java_file)
+
+        assert len(entry_points) == 1
+        assert "user" in entry_points[0].path
+
+
+class TestGrpcDetector:
+    """Tests for gRPC detector."""
+
+    def test_detect_grpc_service(self, tmp_path: Path) -> None:
+        """Test detecting gRPC service."""
+        detector = GrpcDetector()
+        code = '''
+syntax = "proto3";
+
+package helloworld;
+
+service Greeter {
+  rpc SayHello(HelloRequest) returns (HelloReply) {}
+  rpc SayHelloStream(HelloRequest) returns (stream HelloReply) {}
+}
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+}
+'''
+        proto_file = tmp_path / "helloworld.proto"
+        proto_file.write_text(code)
+
+        entry_points = detector.detect(code, proto_file)
+
+        assert len(entry_points) == 2
+        assert entry_points[0].type == EntryPointType.GRPC
+        assert entry_points[0].framework == "grpc"
+        assert "Greeter" in entry_points[0].path
+
+
+class TestThriftDetector:
+    """Tests for Thrift detector."""
+
+    def test_detect_thrift_service(self, tmp_path: Path) -> None:
+        """Test detecting Thrift service."""
+        detector = ThriftDetector()
+        code = '''
+namespace java com.example
+
+service UserService {
+    User getUser(1: i64 id),
+    void createUser(1: User user),
+}
+'''
+        thrift_file = tmp_path / "user.thrift"
+        thrift_file.write_text(code)
+
+        entry_points = detector.detect(code, thrift_file)
+
+        assert len(entry_points) == 2
+        assert entry_points[0].type == EntryPointType.RPC
+        assert entry_points[0].framework == "thrift"
+        assert "UserService" in entry_points[0].path
+
+
+class TestAttackSurfaceDetectorRPC:
+    """Tests for AttackSurfaceDetector with RPC detection."""
+
+    def test_detect_dubbo_project(self, tmp_path: Path) -> None:
+        """Test detecting Dubbo project."""
+        java_dir = tmp_path / "src" / "main" / "java" / "com" / "example"
+        java_dir.mkdir(parents=True)
+        java_file = java_dir / "ServiceImpl.java"
+        java_file.write_text('''
+package com.example;
+
+import org.apache.dubbo.config.annotation.DubboService;
+
+@DubboService(version = "1.0.0")
+public class HelloServiceImpl implements HelloService {
+    public String sayHello(String name) {
+        return "Hello " + name;
+    }
+}
+''')
+
+        detector = AttackSurfaceDetector()
+        report = detector.detect(tmp_path, frameworks=["dubbo"])
+
+        assert report.rpc_services >= 1
+        assert "dubbo" in report.frameworks_detected
+
+    def test_detect_grpc_project(self, tmp_path: Path) -> None:
+        """Test detecting gRPC project."""
+        proto_dir = tmp_path / "proto"
+        proto_dir.mkdir()
+        proto_file = proto_dir / "service.proto"
+        proto_file.write_text('''
+syntax = "proto3";
+service MyService {
+  rpc DoSomething(Request) returns (Response) {}
+}
+''')
+
+        detector = AttackSurfaceDetector()
+        report = detector.detect(tmp_path, frameworks=["grpc"])
+
+        assert report.grpc_services >= 1
+        assert "grpc" in report.frameworks_detected
