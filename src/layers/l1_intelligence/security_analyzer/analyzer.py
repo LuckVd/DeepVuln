@@ -264,8 +264,9 @@ class SecurityAnalyzer:
 
             # Get framework names for better detection
             frameworks = [f.name.lower() for f in tech_stack.frameworks]
-            if tech_stack.primary_language:
-                frameworks.append(tech_stack.primary_language.lower())
+            # Add primary language if available
+            if tech_stack.languages:
+                frameworks.append(tech_stack.languages[0].value.lower())
 
             attack_report = detector.detect(source_path, frameworks=frameworks)
 
