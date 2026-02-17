@@ -4,6 +4,7 @@
 
 | 时间 | Commit | 简介 |
 |------|--------|------|
+| 2026-02-17 14:30 | 00bd232 | feat(l1): 完成 P1-08 攻击面探测器 Phase 3-4，MQ/Cron 检测 + CLI 集成 |
 | 2026-02-16 23:25 | d253b33 | feat(l1): 增强 CVE 关联能力，添加配置系统、GitHub Advisory、版本过滤 |
 | 2026-02-16 21:10 | f82cb4c | feat(l1): 添加 GoScanner 和安全扫描工作流，支持 Go/NPM/PyPI 依赖扫描 |
 | 2026-02-16 18:00 | bc12d26 | feat(cli): 集成威胁情报模块到 CLI TUI，新增 8 个 intel 子命令 |

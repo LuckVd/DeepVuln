@@ -63,6 +63,20 @@ def show_security_summary(report: SecurityReport) -> None:
     kev_text.append("vulnerabilities", style="dim")
     stats_panels.append(Panel(kev_text, title="[bold]KEV[/]", border_style=kev_color))
 
+    # Attack surface panel
+    if report.has_attack_surface:
+        attack_color = "yellow" if report.total_entry_points > 10 else "cyan"
+        attack_text = Text()
+        attack_text.append(f"{report.total_entry_points}", style=f"bold {attack_color}")
+        attack_text.append(" entry points\n")
+        if report.http_endpoints > 0:
+            attack_text.append(f"HTTP: {report.http_endpoints} ", style="dim")
+        if report.rpc_services > 0:
+            attack_text.append(f"RPC: {report.rpc_services} ", style="dim")
+        if report.grpc_services > 0:
+            attack_text.append(f"gRPC: {report.grpc_services}", style="dim")
+        stats_panels.append(Panel(attack_text, title="[bold]Attack Surface[/]", border_style=attack_color))
+
     console.print(Columns(stats_panels))
     console.print()
 
@@ -179,6 +193,71 @@ def show_vulnerability_list(report: SecurityReport, show_all: bool = False) -> N
     console.print()
 
 
+def show_attack_surface(report: SecurityReport) -> None:
+    """Display attack surface entry points.
+
+    Args:
+        report: Security report to display.
+    """
+    if not report.has_attack_surface or not report.attack_surface:
+        return
+
+    console.print(Panel("[bold]Attack Surface[/]", border_style="yellow"))
+
+    attack_surface = report.attack_surface
+
+    # Summary table
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column("Type", style="cyan", width=15)
+    table.add_column("Count", width=8, justify="right")
+    table.add_column("Description", width=40)
+
+    entry_types = [
+        ("HTTP Endpoints", report.http_endpoints, "REST API, web routes"),
+        ("RPC Services", report.rpc_services, "Dubbo, Thrift services"),
+        ("gRPC Services", report.grpc_services, "gRPC proto services"),
+        ("MQ Consumers", report.mq_consumers, "Kafka, RabbitMQ, Redis"),
+        ("Cron Jobs", report.cron_jobs, "Scheduled tasks"),
+    ]
+
+    for type_name, count, desc in entry_types:
+        if count > 0:
+            color = "yellow" if count > 5 else "green"
+            table.add_row(
+                type_name,
+                f"[bold {color}]{count}[/]",
+                f"[dim]{desc}[/]",
+            )
+
+    console.print(table)
+
+    # Show entry points if not too many
+    if attack_surface.entry_points and len(attack_surface.entry_points) <= 20:
+        console.print()
+        ep_table = Table(title="[bold]Entry Points[/]", show_lines=False)
+        ep_table.add_column("Type", width=8)
+        ep_table.add_column("Path/Name", style="cyan", width=30)
+        ep_table.add_column("Handler", width=20)
+        ep_table.add_column("File", style="dim", width=25)
+
+        for ep in attack_surface.entry_points[:20]:
+            # Truncate file path
+            file_display = ep.file
+            if len(file_display) > 25:
+                file_display = "..." + file_display[-22:]
+
+            ep_table.add_row(
+                ep.type.value.upper(),
+                ep.path,
+                ep.handler,
+                file_display,
+            )
+
+        console.print(ep_table)
+
+    console.print()
+
+
 def show_tech_stack(tech_stack: TechStack) -> None:
     """Display detected technology stack.
 
@@ -246,6 +325,10 @@ def show_security_report(report: SecurityReport, detailed: bool = False) -> None
     # Show severity breakdown
     if report.has_vulnerabilities:
         show_severity_breakdown(report)
+
+    # Show attack surface
+    if report.has_attack_surface:
+        show_attack_surface(report)
 
     # Show tech stack
     if report.tech_stack:
@@ -357,6 +440,30 @@ def export_report_text(report: SecurityReport) -> str:
         f"Known exploited (KEV): {report.kev_count}",
         "",
     ]
+
+    # Attack Surface
+    if report.has_attack_surface:
+        lines.extend([
+            "-" * 60,
+            "Attack Surface",
+            "-" * 60,
+            f"Total entry points: {report.total_entry_points}",
+            f"  HTTP endpoints: {report.http_endpoints}",
+            f"  RPC services: {report.rpc_services}",
+            f"  gRPC services: {report.grpc_services}",
+            f"  MQ consumers: {report.mq_consumers}",
+            f"  Cron jobs: {report.cron_jobs}",
+            "",
+        ])
+
+        # Entry points detail
+        if report.attack_surface and report.attack_surface.entry_points:
+            lines.append("Entry Points:")
+            for ep in report.attack_surface.entry_points[:50]:
+                lines.append(f"  - [{ep.type.value.upper()}] {ep.path} ({ep.handler})")
+            if len(report.attack_surface.entry_points) > 50:
+                lines.append(f"  ... and {len(report.attack_surface.entry_points) - 50} more")
+            lines.append("")
 
     # Tech stack
     if report.tech_stack:

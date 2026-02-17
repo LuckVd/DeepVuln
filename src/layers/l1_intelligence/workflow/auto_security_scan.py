@@ -20,6 +20,7 @@ class ScanConfig(BaseModel):
     # Scan options
     scan_dependencies: bool = True
     scan_frameworks: bool = True
+    scan_attack_surface: bool = True  # Attack surface detection
     scan_code_patterns: bool = False  # Future: code pattern analysis
 
     # CVE lookup options

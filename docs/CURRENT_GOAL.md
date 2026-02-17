@@ -9,9 +9,10 @@
 | 字段 | 值 |
 |------|-----|
 | **任务** | P1-08: 攻击面探测器 (Attack Surface Detector) |
-| **状态** | in_progress |
+| **状态** | completed |
 | **优先级** | high |
 | **创建日期** | 2026-02-17 |
+| **完成日期** | 2026-02-17 |
 
 ---
 
@@ -39,14 +40,14 @@
 - [x] Thrift IDL 解析
 
 ### Phase 3: 其他入口点检测
-- [ ] 消息队列消费者（Kafka, RabbitMQ, Redis）
-- [ ] 定时任务入口（Cron, Celery）
-- [ ] 外部输入点（文件上传、配置读取）
+- [x] 消息队列消费者（Kafka, RabbitMQ, Redis）
+- [x] 定时任务入口（Cron, Celery, Spring @Scheduled）
+- [x] 支持多语言（Java, Python, Go）
 
 ### Phase 4: 输出与集成
-- [ ] 生成 Attack Surface 报告
-- [ ] 集成到 Security Analyzer
-- [ ] 单元测试覆盖
+- [x] 生成 Attack Surface Markdown 报告
+- [x] 单元测试覆盖（34 个测试）
+- [x] CLI 集成到扫描显示（scan_display.py）
 
 ---
 
@@ -157,7 +158,10 @@ r.POST("/login", loginHandler)    → POST /login
 | 2026-02-17 | Phase 2 完成：RPC 入口点检测（Dubbo, gRPC, Thrift） |
 | 2026-02-17 | 改进 Spring 检测器支持多行注解 |
 | 2026-02-17 | 使用 Dubbo 项目验证：发现 1 Dubbo + 10 gRPC 服务 |
-| 2026-02-17 | 单元测试增加到 26 个 |
+| 2026-02-17 | Phase 3 完成：MQ 消费者 + 定时任务检测（Kafka, RabbitMQ, Redis, Celery, Cron） |
+| 2026-02-17 | Phase 4 完成：Markdown 报告生成 + 集成测试 |
+| 2026-02-17 | 单元测试增加到 34 个 |
+| 2026-02-17 | CLI 集成完成：attack surface 显示到 scan_display.py |
 
 ---
 

@@ -23,6 +23,12 @@ from src.layers.l1_intelligence.attack_surface.rpc_detector import (
     GrpcDetector,
     ThriftDetector,
 )
+from src.layers.l1_intelligence.attack_surface.mq_detector import (
+    KafkaDetector,
+    RabbitMQDetector,
+    RedisDetector,
+    CronDetector,
+)
 
 
 class TestGinDetector:
@@ -622,3 +628,183 @@ service MyService {
 
         assert report.grpc_services >= 1
         assert "grpc" in report.frameworks_detected
+
+
+class TestKafkaDetector:
+    """Tests for Kafka detector."""
+
+    def test_detect_java_kafka_listener(self, tmp_path: Path) -> None:
+        """Test detecting Java Spring Kafka listener."""
+        detector = KafkaDetector()
+        code = '''
+@KafkaListener(topics = "user-events")
+public void consumeUserEvent(UserEvent event) {
+    processEvent(event);
+}
+'''
+        java_file = tmp_path / "Consumer.java"
+        java_file.write_text(code)
+
+        entry_points = detector.detect(code, java_file)
+
+        assert len(entry_points) == 1
+        assert entry_points[0].type == EntryPointType.MQ
+        assert entry_points[0].framework == "kafka"
+        assert "user-events" in entry_points[0].path
+
+    def test_detect_python_kafka_subscribe(self, tmp_path: Path) -> None:
+        """Test detecting Python Kafka subscribe."""
+        detector = KafkaDetector()
+        code = '''
+consumer.subscribe(['orders'])
+for msg in consumer:
+    process_order(msg)
+'''
+        py_file = tmp_path / "consumer.py"
+        py_file.write_text(code)
+
+        entry_points = detector.detect(code, py_file)
+
+        assert len(entry_points) == 1
+        assert "orders" in entry_points[0].path
+
+
+class TestRabbitMQDetector:
+    """Tests for RabbitMQ detector."""
+
+    def test_detect_java_rabbit_listener(self, tmp_path: Path) -> None:
+        """Test detecting Java Spring RabbitMQ listener."""
+        detector = RabbitMQDetector()
+        code = '''
+@RabbitListener(queues = "task-queue")
+public void handleTask(Task task) {
+    executeTask(task);
+}
+'''
+        java_file = tmp_path / "TaskConsumer.java"
+        java_file.write_text(code)
+
+        entry_points = detector.detect(code, java_file)
+
+        assert len(entry_points) == 1
+        assert entry_points[0].type == EntryPointType.MQ
+        assert entry_points[0].framework == "rabbitmq"
+
+
+class TestCronDetector:
+    """Tests for Cron/Scheduled task detector."""
+
+    def test_detect_java_scheduled(self, tmp_path: Path) -> None:
+        """Test detecting Java Spring @Scheduled."""
+        detector = CronDetector()
+        code = '''
+@Scheduled(cron = "0 0 12 * * ?")
+public void dailyCleanup() {
+    cleanupOldData();
+}
+'''
+        java_file = tmp_path / "ScheduledTasks.java"
+        java_file.write_text(code)
+
+        entry_points = detector.detect(code, java_file)
+
+        assert len(entry_points) == 1
+        assert entry_points[0].type == EntryPointType.CRON
+        assert "dailyCleanup" in entry_points[0].handler
+
+    def test_detect_celery_task(self, tmp_path: Path) -> None:
+        """Test detecting Python Celery task."""
+        detector = CronDetector()
+        code = '''
+@app.task
+def send_email(to, subject, body):
+    mailer.send(to, subject, body)
+'''
+        py_file = tmp_path / "tasks.py"
+        py_file.write_text(code)
+
+        entry_points = detector.detect(code, py_file)
+
+        assert len(entry_points) == 1
+        assert entry_points[0].framework == "celery"
+        assert "send_email" in entry_points[0].handler
+
+    def test_detect_go_cron(self, tmp_path: Path) -> None:
+        """Test detecting Go cron job."""
+        detector = CronDetector()
+        code = '''
+c := cron.New()
+c.AddFunc("0 * * * *", hourlyCleanup)
+c.Start()
+'''
+        go_file = tmp_path / "scheduler.go"
+        go_file.write_text(code)
+
+        entry_points = detector.detect(code, go_file)
+
+        assert len(entry_points) == 1
+        assert entry_points[0].type == EntryPointType.CRON
+        assert "hourlyCleanup" in entry_points[0].handler
+
+
+class TestAttackSurfaceDetectorFull:
+    """Full integration tests for AttackSurfaceDetector."""
+
+    def test_detect_full_project(self, tmp_path: Path) -> None:
+        """Test detecting all entry point types."""
+        # Create HTTP endpoint
+        http_dir = tmp_path / "api"
+        http_dir.mkdir()
+        http_file = http_dir / "routes.py"
+        http_file.write_text('''
+from flask import Flask
+app = Flask(__name__)
+@app.route("/api/users", methods=["GET"])
+def get_users():
+    pass
+''')
+
+        # Create gRPC service
+        proto_dir = tmp_path / "proto"
+        proto_dir.mkdir()
+        proto_file = proto_dir / "service.proto"
+        proto_file.write_text('''
+service UserService {
+  rpc GetUser(GetUserRequest) returns (User) {}
+}
+''')
+
+        # Create scheduled task
+        task_file = tmp_path / "tasks.py"
+        task_file.write_text('''
+@app.task
+def cleanup_expired_sessions():
+    pass
+''')
+
+        detector = AttackSurfaceDetector()
+        report = detector.detect(tmp_path)
+
+        # Should detect at least HTTP and gRPC
+        assert report.total_entry_points >= 2
+        assert report.http_endpoints >= 1
+        assert report.grpc_services >= 1
+
+    def test_generate_markdown_report(self, tmp_path: Path) -> None:
+        """Test markdown report generation."""
+        py_file = tmp_path / "app.py"
+        py_file.write_text('''
+from flask import Flask
+app = Flask(__name__)
+@app.route("/health", methods=["GET"])
+def health():
+    return "OK"
+''')
+
+        detector = AttackSurfaceDetector()
+        report = detector.detect(tmp_path)
+        markdown = detector.generate_report_markdown(report)
+
+        assert "# Attack Surface Report" in markdown
+        assert "HTTP Endpoints" in markdown
+        assert "/health" in markdown

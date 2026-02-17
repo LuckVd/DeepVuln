@@ -78,6 +78,15 @@ class SecurityReport(BaseModel):
     kev_count: int = 0
     kev_packages: list[str] = Field(default_factory=list)
 
+    # Attack surface info
+    attack_surface: Any = None  # AttackSurfaceReport
+    http_endpoints: int = 0
+    rpc_services: int = 0
+    grpc_services: int = 0
+    mq_consumers: int = 0
+    cron_jobs: int = 0
+    total_entry_points: int = 0
+
     # Detailed results
     dependency_vulns: list[DependencyVuln] = Field(default_factory=list)
     framework_vulns: list[FrameworkVuln] = Field(default_factory=list)
@@ -104,6 +113,11 @@ class SecurityReport(BaseModel):
         """Check if any known exploited vulnerabilities."""
         return self.kev_count > 0
 
+    @property
+    def has_attack_surface(self) -> bool:
+        """Check if any attack surface entry points were found."""
+        return self.total_entry_points > 0
+
     def get_summary(self) -> dict[str, Any]:
         """Get summary of the report.
 
@@ -120,6 +134,14 @@ class SecurityReport(BaseModel):
             "medium": self.medium_count,
             "low": self.low_count,
             "kev": self.kev_count,
+            "attack_surface": {
+                "http_endpoints": self.http_endpoints,
+                "rpc_services": self.rpc_services,
+                "grpc_services": self.grpc_services,
+                "mq_consumers": self.mq_consumers,
+                "cron_jobs": self.cron_jobs,
+                "total": self.total_entry_points,
+            },
         }
 
 
@@ -176,17 +198,21 @@ class SecurityAnalyzer:
             report.tech_stack = tech_stack
             report.frameworks_detected = len(tech_stack.frameworks)
 
-            # Step 3: Lookup CVEs for dependencies
+            # Step 3: Detect attack surface
+            self.logger.info("Detecting attack surface...")
+            self._detect_attack_surface(report, source_path, tech_stack)
+
+            # Step 4: Lookup CVEs for dependencies
             self.logger.info("Looking up CVEs for dependencies...")
             dep_vulns = await self._lookup_dependency_vulns(scan_result)
             report.dependency_vulns = dep_vulns
 
-            # Step 4: Lookup CVEs for frameworks
+            # Step 5: Lookup CVEs for frameworks
             self.logger.info("Looking up CVEs for frameworks...")
             fw_vulns = await self._lookup_framework_vulns(tech_stack)
             report.framework_vulns = fw_vulns
 
-            # Step 5: Calculate statistics
+            # Step 6: Calculate statistics
             self._calculate_statistics(report)
 
         except Exception as e:
@@ -218,6 +244,49 @@ class SecurityAnalyzer:
 
         scanner = CompositeScanner()
         return scanner.scan(source_path)
+
+    def _detect_attack_surface(
+        self, report: SecurityReport, source_path: Path, tech_stack: TechStack
+    ) -> None:
+        """Detect attack surface entry points.
+
+        Args:
+            report: Security report to update.
+            source_path: Path to the source code.
+            tech_stack: Detected tech stack.
+        """
+        from src.layers.l1_intelligence.attack_surface.detector import (
+            AttackSurfaceDetector,
+        )
+
+        try:
+            detector = AttackSurfaceDetector()
+
+            # Get framework names for better detection
+            frameworks = [f.name.lower() for f in tech_stack.frameworks]
+            if tech_stack.primary_language:
+                frameworks.append(tech_stack.primary_language.lower())
+
+            attack_report = detector.detect(source_path, frameworks=frameworks)
+
+            # Update report with attack surface info
+            report.attack_surface = attack_report
+            report.http_endpoints = attack_report.http_endpoints
+            report.rpc_services = attack_report.rpc_services
+            report.grpc_services = attack_report.grpc_services
+            report.mq_consumers = attack_report.mq_consumers
+            report.cron_jobs = attack_report.cron_jobs
+            report.total_entry_points = attack_report.total_entry_points
+
+            self.logger.info(
+                f"Attack surface detected: {report.total_entry_points} entry points "
+                f"(HTTP: {report.http_endpoints}, RPC: {report.rpc_services}, "
+                f"gRPC: {report.grpc_services}, MQ: {report.mq_consumers}, Cron: {report.cron_jobs})"
+            )
+
+        except Exception as e:
+            self.logger.warning(f"Attack surface detection failed: {e}")
+            report.errors.append(f"Attack surface detection: {e}")
 
     async def _lookup_dependency_vulns(
         self, scan_result: ScanResult

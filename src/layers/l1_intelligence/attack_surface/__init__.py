@@ -7,6 +7,12 @@ from src.layers.l1_intelligence.attack_surface.models import (
     EntryPointType,
     HTTPMethod,
 )
+from src.layers.l1_intelligence.attack_surface.mq_detector import (
+    CronDetector,
+    KafkaDetector,
+    RabbitMQDetector,
+    RedisDetector,
+)
 from src.layers.l1_intelligence.attack_surface.rpc_detector import (
     DubboDetector,
     GrpcDetector,
@@ -22,4 +28,8 @@ __all__ = [
     "DubboDetector",
     "GrpcDetector",
     "ThriftDetector",
+    "KafkaDetector",
+    "RabbitMQDetector",
+    "RedisDetector",
+    "CronDetector",
 ]
