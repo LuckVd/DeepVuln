@@ -65,10 +65,23 @@ class TestDependency:
             version="^4.18.0",
             ecosystem=Ecosystem.NPM,
             source_file="package.json",
+            version_confidence=1.0,  # Explicit version has full confidence
         )
         query = dep.to_search_query()
         assert "express" in query
         assert "4.18.0" in query
+
+    def test_to_search_query_unresolved_version(self):
+        """Test search query with unresolved version returns name only."""
+        dep = Dependency(
+            name="express",
+            version=None,
+            ecosystem=Ecosystem.NPM,
+            source_file="package.json",
+            version_confidence=0.0,
+        )
+        query = dep.to_search_query()
+        assert query == "express"  # No version in query
 
     def test_dependency_hash_and_equality(self):
         """Test dependency hash and equality."""

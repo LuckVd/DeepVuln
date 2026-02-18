@@ -55,6 +55,18 @@ class FrameworkVuln(BaseModel):
         return len(self.cves)
 
 
+class UnresolvedDependency(BaseModel):
+    """Dependency with unresolved version that needs manual review."""
+
+    name: str
+    raw_version: str | None = None
+    version_source: str = "unknown"
+    version_confidence: float = 0.0
+    skip_reason: str = ""
+    source_file: str = ""
+    ecosystem: str = ""
+
+
 class SecurityReport(BaseModel):
     """Security analysis report."""
 
@@ -91,6 +103,10 @@ class SecurityReport(BaseModel):
     dependency_vulns: list[DependencyVuln] = Field(default_factory=list)
     framework_vulns: list[FrameworkVuln] = Field(default_factory=list)
 
+    # Unresolved dependencies (need manual review)
+    unresolved_dependencies: list[UnresolvedDependency] = Field(default_factory=list)
+    unresolved_count: int = 0
+
     # Tech stack
     tech_stack: TechStack | None = None
 
@@ -118,6 +134,11 @@ class SecurityReport(BaseModel):
         """Check if any attack surface entry points were found."""
         return self.total_entry_points > 0
 
+    @property
+    def has_unresolved(self) -> bool:
+        """Check if any dependencies need manual review."""
+        return self.unresolved_count > 0
+
     def get_summary(self) -> dict[str, Any]:
         """Get summary of the report.
 
@@ -134,6 +155,7 @@ class SecurityReport(BaseModel):
             "medium": self.medium_count,
             "low": self.low_count,
             "kev": self.kev_count,
+            "unresolved_dependencies": self.unresolved_count,
             "attack_surface": {
                 "http_endpoints": self.http_endpoints,
                 "rpc_services": self.rpc_services,
@@ -204,8 +226,10 @@ class SecurityAnalyzer:
 
             # Step 4: Lookup CVEs for dependencies
             self.logger.info("Looking up CVEs for dependencies...")
-            dep_vulns = await self._lookup_dependency_vulns(scan_result)
+            dep_vulns, unresolved_deps = await self._lookup_dependency_vulns(scan_result)
             report.dependency_vulns = dep_vulns
+            report.unresolved_dependencies = unresolved_deps
+            report.unresolved_count = len(unresolved_deps)
 
             # Step 5: Lookup CVEs for frameworks
             self.logger.info("Looking up CVEs for frameworks...")
@@ -291,14 +315,14 @@ class SecurityAnalyzer:
 
     async def _lookup_dependency_vulns(
         self, scan_result: ScanResult
-    ) -> list[DependencyVuln]:
+    ) -> tuple[list[DependencyVuln], list[UnresolvedDependency]]:
         """Look up CVEs for dependencies using multiple sources.
 
         Args:
             scan_result: Dependency scan result.
 
         Returns:
-            List of dependency vulnerability info.
+            Tuple of (list of dependency vulnerability info, list of unresolved dependencies).
         """
         vulns: list[DependencyVuln] = []
 
@@ -337,8 +361,28 @@ class SecurityAnalyzer:
             unique_packages = scan_result.get_unique_packages()
             self.logger.info(f"Looking up CVEs for {len(unique_packages)} unique packages")
 
+            # Track skipped dependencies for reporting
+            skipped_deps: list[UnresolvedDependency] = []
+
             for dep in unique_packages:
                 try:
+                    # ZERO FALSE POSITIVE: Skip dependencies without resolved versions
+                    if not dep.has_resolved_version():
+                        skip_reason = self._get_skip_reason(dep)
+                        skipped_deps.append(
+                            UnresolvedDependency(
+                                name=dep.name,
+                                raw_version=dep.raw_version,
+                                version_source=dep.version_source.value if dep.version_source else "unknown",
+                                version_confidence=dep.version_confidence,
+                                skip_reason=skip_reason,
+                                source_file=dep.source_file,
+                                ecosystem=dep.ecosystem.value if dep.ecosystem else "",
+                            )
+                        )
+                        self.logger.debug(f"Skipping CVE lookup for {dep.name}: {skip_reason}")
+                        continue
+
                     all_cves: list[CVEInfo] = []
                     seen_cve_ids: set[str] = set()
 
@@ -346,10 +390,11 @@ class SecurityAnalyzer:
                     osv_ecosystem = ecosystem_to_osv.get(dep.ecosystem)
                     if osv_ecosystem and osv_client:
                         try:
+                            # Always pass version - we already verified has_resolved_version()
                             osv_cves = await osv_client.query_by_package(
                                 package_name=dep.name,
                                 ecosystem=osv_ecosystem,
-                                version=dep.version if dep.version != "*" else None,
+                                version=dep.version,
                             )
                             for cve in osv_cves:
                                 if cve.cve_id not in seen_cve_ids:
@@ -382,12 +427,18 @@ class SecurityAnalyzer:
 
                 except Exception as e:
                     self.logger.warning(f"Failed to lookup CVEs for {dep.name}: {e}")
+
+            # Log skipped dependencies summary
+            if skipped_deps:
+                self.logger.info(
+                    f"Skipped CVE lookup for {len(skipped_deps)} dependencies with unresolved versions"
+                )
         finally:
             # Close OSV client session
             if osv_client:
                 await osv_client.close()
 
-        return vulns
+        return vulns, skipped_deps
 
     async def _lookup_framework_vulns(self, tech_stack: TechStack) -> list[FrameworkVuln]:
         """Look up CVEs for frameworks.
@@ -427,6 +478,31 @@ class SecurityAnalyzer:
                 self.logger.warning(f"Failed to lookup CVEs for {framework.name}: {e}")
 
         return vulns
+
+    def _get_skip_reason(self, dep: Dependency) -> str:
+        """Get reason for skipping CVE lookup.
+
+        Args:
+            dep: Dependency to check.
+
+        Returns:
+            Human-readable skip reason.
+        """
+        if dep.version is None:
+            if dep.raw_version:
+                return f"unresolved property '{dep.raw_version}'"
+            return "no version specified"
+
+        if dep.version == "*":
+            return "version is wildcard"
+
+        if "${" in dep.version:
+            return f"unresolved property in version '{dep.version}'"
+
+        if dep.version_confidence < 0.5:
+            return f"low confidence version ({dep.version_confidence:.0%})"
+
+        return "version not resolved"
 
     def _filter_relevant_cves(
         self, cves: list[CVEInfo], dep: Dependency

@@ -77,6 +77,15 @@ def show_security_summary(report: SecurityReport) -> None:
             attack_text.append(f"gRPC: {report.grpc_services}", style="dim")
         stats_panels.append(Panel(attack_text, title="[bold]Attack Surface[/]", border_style=attack_color))
 
+    # Unresolved dependencies panel
+    if report.has_unresolved:
+        unresolved_color = "yellow"
+        unresolved_text = Text()
+        unresolved_text.append(f"{report.unresolved_count}", style=f"bold {unresolved_color}")
+        unresolved_text.append(" dependencies\n")
+        unresolved_text.append("need review", style="dim")
+        stats_panels.append(Panel(unresolved_text, title="[bold]Manual Review[/]", border_style=unresolved_color))
+
     console.print(Columns(stats_panels))
     console.print()
 
@@ -338,12 +347,82 @@ def show_security_report(report: SecurityReport, detailed: bool = False) -> None
     if report.has_vulnerabilities:
         show_vulnerability_list(report, show_all=detailed)
 
+    # Show unresolved dependencies (need manual review)
+    if report.has_unresolved:
+        show_unresolved_dependencies(report, show_all=detailed)
+
     # Show scan info
     console.print(f"[dim]Scan duration: {report.scan_duration_seconds:.2f}s[/]")
     if report.errors:
         console.print(f"[yellow]Warnings: {len(report.errors)}[/]")
         for error in report.errors[:3]:
             console.print(f"  [dim]- {error}[/]")
+    console.print()
+
+
+def show_unresolved_dependencies(report: SecurityReport, show_all: bool = False) -> None:
+    """Display unresolved dependencies that need manual review.
+
+    Args:
+        report: Security report to display.
+        show_all: Whether to show all unresolved or just first 10.
+    """
+    if not report.has_unresolved:
+        return
+
+    unresolved = report.unresolved_dependencies
+    display_count = len(unresolved) if show_all else min(10, len(unresolved))
+
+    console.print()
+    console.print(
+        Panel(
+            f"[bold yellow]Attention Required: {report.unresolved_count} Dependencies Need Manual Review[/]\n\n"
+            f"These dependencies have unresolved version references.\n"
+            f"CVE lookup was skipped to prevent false positives.\n"
+            f"[dim]Use --detailed to see all items.[/]",
+            title="[bold]Unresolved Dependencies[/]",
+            border_style="yellow",
+        )
+    )
+
+    # Create table
+    table = Table(show_lines=False)
+    table.add_column("Package", style="cyan", width=35)
+    table.add_column("Raw Version", width=25)
+    table.add_column("Source", width=10)
+    table.add_column("Reason", width=30)
+
+    for dep in unresolved[:display_count]:
+        # Truncate long values
+        raw_ver = dep.raw_version or "(none)"
+        if len(raw_ver) > 23:
+            raw_ver = raw_ver[:20] + "..."
+
+        reason = dep.skip_reason
+        if len(reason) > 28:
+            reason = reason[:25] + "..."
+
+        # Color code by source
+        source_color = {
+            "explicit": "green",
+            "property": "cyan",
+            "parent": "blue",
+            "bom": "magenta",
+            "unknown": "yellow",
+        }.get(dep.version_source, "white")
+
+        table.add_row(
+            dep.name,
+            f"[dim]{raw_ver}[/]",
+            f"[{source_color}]{dep.version_source}[/{source_color}]",
+            reason,
+        )
+
+    console.print(table)
+
+    if len(unresolved) > display_count:
+        console.print(f"\n[dim]... and {len(unresolved) - display_count} more (use --detailed to see all)[/]")
+
     console.print()
 
 
@@ -499,6 +578,28 @@ def export_report_text(report: SecurityReport) -> str:
             lines.append(f"\n{fv.framework.name} ({fv.highest_severity.value})")
             for cve in fv.cves:
                 lines.append(f"  - {cve.cve_id}: {cve.description[:80]}...")
+
+    # Unresolved dependencies
+    if report.has_unresolved:
+        lines.extend([
+            "",
+            "-" * 60,
+            f"Unresolved Dependencies ({report.unresolved_count})",
+            "-" * 60,
+            "NOTE: CVE lookup was skipped for these to prevent false positives.",
+            "Please review manually if these dependencies are security-critical.",
+            "",
+        ])
+
+        for dep in report.unresolved_dependencies[:50]:
+            lines.append(f"  - {dep.name}")
+            lines.append(f"    Raw version: {dep.raw_version or '(none)'}")
+            lines.append(f"    Source: {dep.version_source}, Confidence: {dep.version_confidence:.0%}")
+            lines.append(f"    Reason: {dep.skip_reason}")
+            lines.append("")
+
+        if len(report.unresolved_dependencies) > 50:
+            lines.append(f"  ... and {len(report.unresolved_dependencies) - 50} more")
 
     lines.extend([
         "",

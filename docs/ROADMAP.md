@@ -184,9 +184,9 @@ DeepVuln/
 
 | 字段 | 值 |
 |------|-----|
-| **阶段** | Phase 2 - 核心分析能力 |
-| **目标** | （待设置） |
-| **重点模块** | L3-Analysis |
+| **阶段** | Phase 1 优化 - CVE 零误报 |
+| **目标** | CVE 漏洞匹配零误报优化 |
+| **重点模块** | L1-Intelligence (dependency_scanner, security_analyzer) |
 
 ---
 

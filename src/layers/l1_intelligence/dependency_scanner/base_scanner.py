@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,6 +25,17 @@ class Ecosystem(str, Enum):
     NUGET = "nuget"
 
 
+class VersionSource(str, Enum):
+    """Source of version information."""
+
+    EXPLICIT = "explicit"  # Directly specified in dependency declaration
+    PROPERTY = "property"  # Resolved from properties (<properties> or ext)
+    PARENT = "parent"  # Inherited from parent POM
+    BOM = "bom"  # From dependencyManagement/BOM
+    PLUGIN = "plugin"  # From plugin management
+    UNKNOWN = "unknown"  # Could not determine version
+
+
 class DependencyFile(BaseModel):
     """Represents a dependency file."""
 
@@ -41,12 +52,26 @@ class Dependency(BaseModel):
     """Represents a project dependency."""
 
     name: str = Field(..., description="Package name")
-    version: str = Field(..., description="Package version")
+    version: str | None = Field(default=None, description="Package version (None if unresolved)")
     ecosystem: Ecosystem = Field(..., description="Package ecosystem")
     source_file: str = Field(..., description="Source file path")
     is_direct: bool = Field(default=True, description="Is direct dependency")
     is_dev: bool = Field(default=False, description="Is dev dependency")
     is_optional: bool = Field(default=False, description="Is optional dependency")
+
+    # Version resolution metadata
+    raw_version: str | None = Field(
+        default=None, description="Original version string before resolution (e.g., '${spring.version}')"
+    )
+    version_source: VersionSource = Field(
+        default=VersionSource.UNKNOWN, description="Source of version information"
+    )
+    version_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence level of version (1.0 = explicit, 0.0 = unknown)",
+    )
 
     # Additional metadata
     license: str | None = Field(default=None, description="License type")
@@ -54,14 +79,32 @@ class Dependency(BaseModel):
     homepage: str | None = Field(default=None, description="Homepage URL")
     repository: str | None = Field(default=None, description="Repository URL")
 
+    def has_resolved_version(self) -> bool:
+        """Check if version is properly resolved.
+
+        Returns:
+            True if version is resolved and usable for CVE lookup.
+        """
+        if self.version is None:
+            return False
+        if self.version == "*":
+            return False
+        if "${" in self.version:
+            return False
+        if self.version_confidence < 0.5:
+            return False
+        return True
+
     def to_search_query(self) -> str:
         """Generate search query for CVE lookup.
 
         Returns:
             Search query string.
         """
+        if not self.has_resolved_version():
+            return self.name  # Version-only query without version
         # Clean version string (remove prefixes like ^, ~, >=, etc.)
-        clean_version = self.version.lstrip("^~>=")
+        clean_version = self.version.lstrip("^~>=") if self.version else ""
         return f"{self.name} {clean_version}"
 
     def __hash__(self) -> int:

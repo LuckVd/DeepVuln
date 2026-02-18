@@ -558,9 +558,10 @@ dependencies {
         )
 
         deps = scanner.scan(tmp_path)
-        # Should still include the dependency with version "*"
+        # Should still include the dependency with version None (unresolved)
         assert len(deps) == 1
-        assert deps[0].version == "*"
+        assert deps[0].version is None
+        assert deps[0].version_confidence == 0.0
 
     def test_scan_empty_dependencies(self, tmp_path: Path) -> None:
         """Test scanning pom.xml with no dependencies."""
@@ -586,3 +587,143 @@ dependencies {
         deps = scanner.scan(tmp_path)
         # Should handle gracefully and return empty list
         assert deps == []
+
+    def test_scan_pom_with_bom_versions(self, tmp_path: Path) -> None:
+        """Test scanning pom.xml with dependencyManagement (BOM) versions."""
+        scanner = MavenScanner()
+        pom_xml = tmp_path / "pom.xml"
+        pom_xml.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-framework-bom</artifactId>
+                <version>5.3.25</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo</artifactId>
+                <version>3.2.0</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Version from BOM -->
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo</artifactId>
+            <!-- No version, should use BOM version -->
+        </dependency>
+        <!-- Explicit version -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.12.0</version>
+        </dependency>
+    </dependencies>
+</project>
+"""
+        )
+
+        deps = scanner.scan(tmp_path)
+        assert len(deps) == 2
+
+        # Check dubbo dependency got version from BOM
+        dubbo_dep = next((d for d in deps if "dubbo" in d.name), None)
+        assert dubbo_dep is not None
+        assert dubbo_dep.version == "3.2.0"
+        assert dubbo_dep.version_source.value == "bom"
+        assert dubbo_dep.version_confidence == 0.8
+
+        # Check commons-lang3 has explicit version
+        commons_dep = next((d for d in deps if "commons-lang3" in d.name), None)
+        assert commons_dep is not None
+        assert commons_dep.version == "3.12.0"
+        assert commons_dep.version_source.value == "explicit"
+
+    def test_scan_pom_with_bom_and_properties(self, tmp_path: Path) -> None:
+        """Test BOM with property substitution."""
+        scanner = MavenScanner()
+        pom_xml = tmp_path / "pom.xml"
+        pom_xml.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+
+    <properties>
+        <dubbo.version>3.2.0</dubbo.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo</artifactId>
+                <version>${dubbo.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo</artifactId>
+        </dependency>
+    </dependencies>
+</project>
+"""
+        )
+
+        deps = scanner.scan(tmp_path)
+        assert len(deps) == 1
+
+        # Check version resolved via BOM + property
+        dubbo_dep = deps[0]
+        assert dubbo_dep.version == "3.2.0"
+
+    def test_scan_pom_bom_unresolved_version(self, tmp_path: Path) -> None:
+        """Test BOM with unresolved property version."""
+        scanner = MavenScanner()
+        pom_xml = tmp_path / "pom.xml"
+        pom_xml.write_text(
+            """<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo</artifactId>
+                <version>${dubbo.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo</artifactId>
+        </dependency>
+    </dependencies>
+</project>
+"""
+        )
+
+        deps = scanner.scan(tmp_path)
+        assert len(deps) == 1
+
+        # Version should be None since property is not defined
+        # But confidence is 0.4 (BOM source but unresolved)
+        dubbo_dep = deps[0]
+        assert dubbo_dep.version is None
+        assert dubbo_dep.version_source.value == "bom"
+        assert dubbo_dep.version_confidence == 0.4
+
