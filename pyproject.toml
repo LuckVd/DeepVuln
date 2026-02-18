@@ -50,6 +50,10 @@ dev = [
     "ruff>=0.1.6",
     "types-PyYAML>=6.0.12",
 ]
+analysis = [
+    # L3 Analysis Layer - Static Analysis Engines
+    "semgrep>=1.50.0",
+]
 
 [project.scripts]
 deepvuln = "src.cli:main"

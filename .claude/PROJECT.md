@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-02-18 | 9a69205 | chore(config): add uv environment configuration and set P2-01 goal |
 | 2026-02-18 | 063ae45 | feat(l1): implement CVE zero false positive optimization |
 | 2026-02-18 | 11e0194 | feat(l1): implement P1-10 build configuration security analyzer |
 | 2026-02-18 | 6a4a8a5 | feat(l1): implement P1-07 code structure parser (Java/Python/Go) |
