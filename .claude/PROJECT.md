@@ -85,7 +85,9 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-02-20 | 9e01851 | feat(l3): implement P2-06 multi-round audit system and fix bugs |
 | 2026-02-19 | 438f51d | style: clean up unused imports and optimize f-strings |
+| 2026-02-19 | 6839a6c | feat(l3): implement P2-04 strategy engine and P2-05 task dispatcher |
 | 2026-02-19 | 7f6fbb6 | feat(l3): implement P2-01 Semgrep engine integration |
 | 2026-02-18 | 9a69205 | chore(config): add uv environment configuration and set P2-01 goal |
 | 2026-02-18 | 063ae45 | feat(l1): implement CVE zero false positive optimization |

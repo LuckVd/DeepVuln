@@ -15,7 +15,14 @@
       "Bash(git push:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(source:*)",
+      "Bash(python -m src.cli.main:*)",
+      "Bash(codeql version:*)",
+      "Bash(python -c:*)",
+      "Bash(curl:*)",
+      "Bash(semgrep:*)",
+      "Bash(pip show:*)"
     ]
   }
 }

@@ -59,11 +59,12 @@ def show_success(title: str, message: str) -> None:
 
 def show_error(title: str, message: str) -> None:
     """Display an error message."""
+    from rich.markup import escape
     console.print()
     console.print(
         Panel(
-            f"[bold red]{message}[/]",
-            title=f"[bold]{title}[/]",
+            f"[bold red]{escape(message)}[/]",
+            title=f"[bold]{escape(title)}[/]",
             border_style="red",
         )
     )

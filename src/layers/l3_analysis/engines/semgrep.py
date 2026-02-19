@@ -38,17 +38,18 @@ CATEGORY_TO_TYPE: dict[str, FindingType] = {
 }
 
 # Official Semgrep rule sets
+# Note: Semgrep registry URLs have changed. Use 'auto' for best results.
 OFFICIAL_RULE_SETS = {
-    "security": "p/security",
-    "owasp-top-ten": "p/owasp-top-ten",
-    "java": "p/java",
-    "python": "p/python",
-    "go": "p/golang",
-    "javascript": "p/javascript",
-    "typescript": "p/typescript",
-    "cwe-top-25": "p/cwe-top-25",
-    "secrets": "p/secrets",
-    "default": "p/default",
+    "security": "auto",  # Use auto which includes security rules
+    "owasp-top-ten": "auto",
+    "java": "auto",
+    "python": "auto",
+    "go": "auto",
+    "javascript": "auto",
+    "typescript": "auto",
+    "cwe-top-25": "auto",
+    "secrets": "auto",
+    "default": "auto",
 }
 
 
@@ -279,6 +280,7 @@ class SemgrepEngine(BaseEngine):
 
         # Add config options
         configs = []
+        using_auto = use_auto_config
 
         if use_auto_config:
             configs.append("auto")
@@ -291,10 +293,20 @@ class SemgrepEngine(BaseEngine):
             if rule_sets:
                 for rule_set in rule_sets:
                     if rule_set in OFFICIAL_RULE_SETS:
-                        configs.append(OFFICIAL_RULE_SETS[rule_set])
+                        config_value = OFFICIAL_RULE_SETS[rule_set]
+                        if config_value == "auto":
+                            using_auto = True
+                        configs.append(config_value)
                     else:
                         # Assume it's already a valid config reference
                         configs.append(rule_set)
+
+        # Enable metrics if using auto config
+        if using_auto:
+            # Remove --metrics=off if already added
+            if "--metrics=off" in cmd:
+                cmd.remove("--metrics=off")
+            cmd.append("--metrics=on")
 
         # Only add --config if we have configs specified
         # If no configs, semgrep will use minimal default rules

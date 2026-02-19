@@ -15,6 +15,7 @@ Core components:
 - SmartScanner: Intelligent scanner with auto rule selection
 - StrategyEngine: Priority-based audit strategy generation
 - TaskDispatcher: Agent task dispatch and execution
+- RoundController: Multi-round audit management
 """
 
 from src.layers.l3_analysis.models import (
@@ -51,6 +52,18 @@ from src.layers.l3_analysis.task import (
     TaskGenerator,
     TaskDispatcher,
     ContextBuilder,
+)
+from src.layers.l3_analysis.rounds import (
+    RoundStatus,
+    RoundResult,
+    RoundController,
+    RoundOneExecutor,
+    VulnerabilityCandidate,
+    ConfidenceLevel,
+    AnalysisDepth,
+    CoverageStats,
+    EngineStats,
+    AuditSession,
 )
 
 __all__ = [
@@ -90,4 +103,15 @@ __all__ = [
     "TaskGenerator",
     "TaskDispatcher",
     "ContextBuilder",
+    # Rounds
+    "RoundStatus",
+    "RoundResult",
+    "RoundController",
+    "RoundOneExecutor",
+    "VulnerabilityCandidate",
+    "ConfidenceLevel",
+    "AnalysisDepth",
+    "CoverageStats",
+    "EngineStats",
+    "AuditSession",
 ]

@@ -8,65 +8,62 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | P2-05 Agent 任务分配器 |
+| **任务** | P2-06 多轮审计 - 第一轮攻击面侦察 |
 | **状态** | completed |
 | **优先级** | high |
 | **创建日期** | 2026-02-19 |
-| **完成日期** | 2026-02-19 |
+| **完成日期** | 2026-02-20 |
 
 ---
 
 ## 完成总结
 
-### Phase 1: 任务模型 ✅
-- [x] 创建 `AgentTask` 任务模型
-- [x] 创建 `TaskContext` 上下文模型
-- [x] 创建 `TaskResult` 结果模型
-- [x] 创建 `TaskPriority` 任务优先级枚举
-- [x] 创建 `TaskType` 任务类型枚举
-- [x] 创建 `TaskStatus` 任务状态枚举
-- [x] 创建 `TaskBatch` 批量任务模型
+### Phase 1: 轮次控制器 ✅
+- [x] 创建 `RoundController` 类
+- [x] 实现轮次状态管理
+- [x] 实现轮次进度追踪
 
-### Phase 2: 任务生成器 ✅
-- [x] 实现 `TaskGenerator` 类
-- [x] 从 AuditTarget 生成 Agent 任务
-- [x] 任务类型自动判断
-- [x] 优先级映射
-- [x] 任务去重和合并
-- [x] 任务优化（token/时间预算）
+### Phase 2: 第一轮执行器 ✅
+- [x] 创建 `RoundOneExecutor` 类
+- [x] 集成 Semgrep 快速扫描
+- [x] 集成 Agent 入口点分析
+- [x] 实现结果合并逻辑
 
-### Phase 3: 任务分配器 ✅
-- [x] 实现 `TaskDispatcher` 类
-- [x] 并行任务调度（semaphore 控制）
-- [x] 任务队列管理（优先级排序）
-- [x] 失败重试机制
-- [x] 统计信息收集
+### Phase 3: 候选漏洞模型 ✅
+- [x] 创建 `VulnerabilityCandidate` 模型
+- [x] 创建 `RoundResult` 结果模型
+- [x] 实现候选漏洞优先级排序
 
-### Phase 4: 上下文构建器 ✅
-- [x] 实现 `ContextBuilder` 类
-- [x] 代码片段提取
-- [x] 导入语句提取
-- [x] 相关函数提取
-- [x] 上下文大小控制
-
-### Phase 5: 集成与测试 ✅
+### Phase 4: 集成与测试 ✅
 - [x] 集成到 L3 模块导出
-- [x] 单元测试覆盖（48 tests）
+- [x] 单元测试覆盖（37 tests）
+
+---
+
+## Bug 修复
+
+| Bug | 文件 | 修复内容 |
+|-----|------|----------|
+| Rich 标记解析错误 | `display.py` | 添加 `escape()` 转义错误消息 |
+| 循环导入 | `config/__init__.py` | 改用延迟加载 logger |
+| Semgrep 规则集 404 | `semgrep.py` | 更新为 auto 配置 |
 
 ---
 
 ## 创建的文件
 
 ### 新建文件
-- `src/layers/l3_analysis/task/__init__.py` - 模块导出
-- `src/layers/l3_analysis/task/models.py` - 任务模型定义
-- `src/layers/l3_analysis/task/generator.py` - 任务生成器
-- `src/layers/l3_analysis/task/dispatcher.py` - 任务分配器
-- `src/layers/l3_analysis/task/context_builder.py` - 上下文构建器
-- `tests/unit/test_l3/test_task.py` - 单元测试（48 tests）
+- `src/layers/l3_analysis/rounds/__init__.py` - 模块导出
+- `src/layers/l3_analysis/rounds/models.py` - 轮次模型
+- `src/layers/l3_analysis/rounds/controller.py` - 轮次控制器
+- `src/layers/l3_analysis/rounds/round_one.py` - 第一轮执行器
+- `tests/unit/test_l3/test_rounds.py` - 单元测试（37 tests）
 
 ### 修改文件
-- `src/layers/l3_analysis/__init__.py` - 导出任务模块类
+- `src/layers/l3_analysis/__init__.py` - 导出轮次模块类
+- `src/cli/display.py` - 修复 Rich 标记错误
+- `src/core/config/__init__.py` - 修复循环导入
+- `src/layers/l3_analysis/engines/semgrep.py` - 修复规则集
 
 ---
 
@@ -74,26 +71,35 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-02-19 | 设置新目标：P2-05 Agent 任务分配器 |
-| 2026-02-19 | 完成 Phase 1：任务模型（7个类/枚举） |
-| 2026-02-19 | 完成 Phase 2：任务生成器 |
-| 2026-02-19 | 完成 Phase 3：任务分配器（并行调度） |
-| 2026-02-19 | 完成 Phase 4：上下文构建器 |
-| 2026-02-19 | 完成 Phase 5：集成与测试（48 tests passed） |
-| 2026-02-19 | ✅ 目标完成 |
+| 2026-02-19 | 设置新目标：P2-06 多轮审计 - 第一轮攻击面侦察 |
+| 2026-02-19 | 完成 Phase 1：轮次控制器 |
+| 2026-02-19 | 完成 Phase 2：第一轮执行器 |
+| 2026-02-19 | 完成 Phase 3：候选漏洞模型 |
+| 2026-02-20 | 完成 Phase 4：集成与测试（37 tests passed） |
+| 2026-02-20 | 修复 Semgrep 规则集、循环导入、Rich 标记错误 |
+| 2026-02-20 | ✅ 目标完成 |
 
 ---
 
 ## 测试结果
 
 ```
-tests/unit/test_l3/test_task.py 48 passed
+tests/unit/test_l3/test_rounds.py 37 passed
 ```
+
+---
+
+## 漏洞检出测试
+
+使用测试文件验证 Semgrep 检出能力：
+- SQL 注入: ✅ 正确检出 (HIGH)
+- XSS: ✅ 正确检出 (MEDIUM)
 
 ---
 
 ## 下一步建议
 
 可以继续进行：
-- P2-06: 结果聚合器
+- P2-07: 第二轮深度追踪
+- P2-08: 第三轮关联验证
 - 或者根据 ROADMAP 继续其他任务

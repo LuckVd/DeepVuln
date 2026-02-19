@@ -3,9 +3,15 @@
 from pathlib import Path
 from typing import Any
 
-from src.core.logger.logger import get_logger
+# Lazy logger to avoid circular import
+_logger = None
 
-logger = get_logger(__name__)
+def _get_logger():
+    global _logger
+    if _logger is None:
+        from src.core.logger.logger import get_logger
+        _logger = get_logger(__name__)
+    return _logger
 
 # Default config paths
 DEFAULT_CONFIG_PATHS = [
@@ -52,18 +58,18 @@ def load_config(config_path: Path | str | None = None, force_reload: bool = Fals
                 break
 
     if not path or not path.exists():
-        logger.debug("No config file found, using defaults")
+        _get_logger().debug("No config file found, using defaults")
         _config_cache = get_default_config()
         return _config_cache
 
     try:
         with open(path, "rb") as f:
             config = tomllib.load(f)
-        logger.info(f"Loaded config from {path}")
+        _get_logger().info(f"Loaded config from {path}")
         _config_cache = config
         return config
     except Exception as e:
-        logger.warning(f"Failed to load config from {path}: {e}")
+        _get_logger().warning(f"Failed to load config from {path}: {e}")
         _config_cache = get_default_config()
         return _config_cache
 
