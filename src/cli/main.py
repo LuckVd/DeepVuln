@@ -1509,5 +1509,269 @@ def _export_codeql_result(result, output_path: str, output_format: str) -> None:
     Path(output_path).write_text(content, encoding="utf-8")
 
 
+@main.command("agent")
+@click.option("--path", "-p", required=True, type=click.Path(exists=True), help="Path to source code")
+@click.option("--provider", type=click.Choice(["openai", "azure", "ollama"]), default="openai", help="LLM provider")
+@click.option("--model", "-m", help="Model name (e.g., gpt-4, llama2)")
+@click.option("--language", "-l", help="Programming language (auto-detected if not specified)")
+@click.option("--files", "-f", "target_files", multiple=True, help="Specific files to analyze")
+@click.option("--focus", multiple=True, type=click.Choice(["sql_injection", "xss", "command_injection", "path_traversal", "ssrf", "xxe", "deserialization", "hardcoded_secrets", "crypto_weakness", "auth_bypass", "idor", "open_redirect"]), help="Vulnerability types to focus on")
+@click.option("--severity", multiple=True, type=click.Choice(["critical", "high", "medium", "low", "info"]), help="Filter by severity")
+@click.option("--output", "-o", type=click.Path(), help="Output file for report")
+@click.option("--format", "output_format", type=click.Choice(["text", "json", "markdown"]), default="text", help="Output format")
+@click.option("--max-files", type=int, default=50, help="Maximum number of files to analyze")
+@click.option("--max-concurrent", type=int, default=3, help="Maximum concurrent LLM requests")
+def agent_scan(
+    path: str,
+    provider: str,
+    model: str | None,
+    language: str | None,
+    target_files: tuple[str, ...],
+    focus: tuple[str, ...],
+    severity: tuple[str, ...],
+    output: str | None,
+    output_format: str,
+    max_files: int,
+    max_concurrent: int,
+) -> None:
+    """Run AI-powered deep security audit using LLM.
+
+    This command uses Large Language Models to perform semantic code analysis
+    for security vulnerabilities. It complements pattern-based tools like
+    Semgrep and CodeQL with deeper understanding of code context.
+
+    LLM Configuration:
+        OPENAI_API_KEY    - API key for OpenAI (required for openai provider)
+        AZURE_OPENAI_KEY  - API key for Azure OpenAI (required for azure provider)
+        OLLAMA_BASE_URL   - Ollama server URL (default: http://localhost:11434)
+
+    Vulnerability Focus Options:
+        sql_injection      - SQL injection vulnerabilities
+        xss               - Cross-site scripting
+        command_injection - Command/OS injection
+        path_traversal    - Path traversal attacks
+        ssrf              - Server-side request forgery
+        xxe               - XML external entity
+        deserialization   - Unsafe deserialization
+        hardcoded_secrets - Hardcoded credentials
+        crypto_weakness   - Cryptographic weaknesses
+        auth_bypass       - Authentication bypass
+        idor              - Insecure direct object reference
+        open_redirect     - Open redirect vulnerabilities
+
+    Examples:
+        deepvuln agent --path ./src
+        deepvuln agent -p . --provider ollama --model llama2
+        deepvuln agent -p . --focus sql_injection --focus xss
+        deepvuln agent -p . -f src/api.py -f src/db.py --severity high
+        deepvuln agent -p . --max-files 20 -f json -o report.json
+    """
+    from src.layers.l3_analysis import OpenCodeAgent, SeverityLevel
+
+    show_banner()
+    source_path = Path(path)
+
+    console.print(f"[cyan]Running AI security audit on {source_path}...[/]")
+    console.print(f"[dim]Provider: {provider} | Model: {model or 'default'}[/]\n")
+
+    # Create engine
+    engine = OpenCodeAgent(
+        provider=provider,
+        model=model,
+        max_files=max_files,
+        max_concurrent=max_concurrent,
+    )
+
+    # Check availability
+    if not engine.is_available():
+        if provider == "openai":
+            show_error(
+                "LLM Not Available",
+                "OpenAI API key not configured.\n\n"
+                "Set the OPENAI_API_KEY environment variable:\n"
+                "  export OPENAI_API_KEY=sk-...",
+            )
+        elif provider == "azure":
+            show_error(
+                "LLM Not Available",
+                "Azure OpenAI not configured.\n\n"
+                "Set the required environment variables:\n"
+                "  export AZURE_OPENAI_KEY=...\n"
+                "  export AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/",
+            )
+        elif provider == "ollama":
+            show_error(
+                "LLM Not Available",
+                "Ollama server is not running.\n\n"
+                "Start Ollama:\n"
+                "  ollama serve\n\n"
+                "Or install from: https://ollama.ai",
+            )
+        else:
+            show_error("LLM Not Available", "LLM client is not configured.")
+        return
+
+    # Build severity filter
+    severity_filter = None
+    if severity:
+        severity_map = {
+            "critical": SeverityLevel.CRITICAL,
+            "high": SeverityLevel.HIGH,
+            "medium": SeverityLevel.MEDIUM,
+            "low": SeverityLevel.LOW,
+            "info": SeverityLevel.INFO,
+        }
+        severity_filter = [severity_map[s] for s in severity]
+
+    # Build vulnerability focus
+    vuln_focus = list(focus) if focus else None
+
+    # Run scan
+    async def _scan():
+        return await engine.scan(
+            source_path=source_path,
+            language=language,
+            files=list(target_files) if target_files else None,
+            vulnerability_focus=vuln_focus,
+            severity_filter=severity_filter,
+        )
+
+    with create_progress() as progress:
+        task = progress.add_task("[cyan]Analyzing code with AI...", total=None)
+        result = asyncio.run(_scan())
+        progress.update(task, completed=True, description="[green]Analysis complete!")
+
+    # Handle scan failure
+    if not result.success:
+        show_error("Scan Failed", result.error_message or "Unknown error")
+        return
+
+    # Output results
+    if output:
+        _export_agent_result(result, output, output_format)
+        console.print(f"\n[green]Report exported to: {output}[/]")
+    else:
+        _display_agent_result(result, output_format, engine)
+
+
+def _display_agent_result(result, output_format: str, engine) -> None:
+    """Display AI agent scan results."""
+    from rich.table import Table
+
+    console.print()
+    console.rule("[bold cyan]AI Security Audit Results[/]")
+    console.print()
+
+    # Summary
+    console.print(f"[dim]Source:[/] {result.source_path}")
+    console.print(f"[dim]Engine:[/] {result.engine}")
+    console.print(f"[dim]Duration:[/] {result.duration_seconds:.2f}s")
+
+    # Token usage
+    if result.raw_output:
+        tokens = result.raw_output.get("total_tokens", 0)
+        provider = result.raw_output.get("provider", "unknown")
+        model = result.raw_output.get("model", "unknown")
+        console.print(f"[dim]Tokens Used:[/] {tokens} | [dim]Provider:[/] {provider} | [dim]Model:[/] {model}")
+
+    console.print()
+
+    # Statistics
+    console.print(f"[bold]Total Findings:[/] {result.total_findings}")
+
+    if result.total_findings > 0:
+        # Severity breakdown
+        sev_table = Table(title="By Severity", show_header=True)
+        sev_table.add_column("Severity", style="cyan")
+        sev_table.add_column("Count", justify="right")
+
+        severity_colors = {
+            "critical": "red",
+            "high": "orange3",
+            "medium": "yellow",
+            "low": "blue",
+            "info": "dim",
+        }
+
+        for sev in ["critical", "high", "medium", "low", "info"]:
+            count = result.by_severity.get(sev, 0)
+            if count > 0:
+                color = severity_colors.get(sev, "white")
+                sev_table.add_row(f"[{color}]{sev.upper()}[/{color}]", str(count))
+
+        console.print(sev_table)
+        console.print()
+
+    if output_format == "json":
+        console.print_json(result.to_json())
+    elif output_format == "markdown":
+        console.print(result.to_markdown())
+    else:
+        # Text format - show findings
+        if result.findings:
+            findings_table = Table(title="Findings", show_header=True)
+            findings_table.add_column("Severity", width=10)
+            findings_table.add_column("Confidence", width=10)
+            findings_table.add_column("Location", width=30)
+            findings_table.add_column("Title", width=45)
+
+            for finding in result.findings[:50]:  # Limit display
+                color = severity_colors.get(finding.severity.value, "white")
+                conf = f"{finding.confidence:.0%}"
+                findings_table.add_row(
+                    f"[{color}]{finding.severity.value.upper()}[/{color}]",
+                    conf,
+                    finding.location.to_display(),
+                    finding.title[:45] + "..." if len(finding.title) > 45 else finding.title,
+                )
+
+            console.print(findings_table)
+
+            if len(result.findings) > 50:
+                console.print(f"\n[dim]... and {len(result.findings) - 50} more findings[/]")
+
+            # Show detailed descriptions for high severity
+            from src.layers.l3_analysis import SeverityLevel as SL
+            high_severity = [f for f in result.findings if f.severity in (SL.CRITICAL, SL.HIGH)]
+            if high_severity:
+                console.print()
+                console.rule("[bold red]High Severity Details[/]")
+                for finding in high_severity[:5]:
+                    console.print(f"\n[bold]{finding.title}[/]")
+                    console.print(f"[dim]Location:[/] {finding.location.to_display()}")
+                    if finding.cwe:
+                        console.print(f"[dim]CWE:[/] {finding.cwe}")
+                    console.print(f"\n{finding.description}")
+                    if finding.fix_suggestion:
+                        console.print(f"\n[green]Recommendation:[/] {finding.fix_suggestion}")
+        else:
+            console.print("[green]No findings![/]")
+
+
+def _export_agent_result(result, output_path: str, output_format: str) -> None:
+    """Export AI agent results to file."""
+    if output_format == "json":
+        content = result.to_json()
+    elif output_format == "markdown":
+        content = result.to_markdown()
+    else:
+        content = result.to_summary()
+        content += f"\n\nToken Usage: {result.raw_output.get('total_tokens', 'N/A') if result.raw_output else 'N/A'}"
+        if result.findings:
+            content += "\n\n## Findings\n\n"
+            for finding in result.findings:
+                content += f"- [{finding.severity.value.upper()}] (Confidence: {finding.confidence:.0%}) {finding.title}\n"
+                content += f"  Location: {finding.location.to_display()}\n"
+                if finding.cwe:
+                    content += f"  CWE: {finding.cwe}\n"
+                if finding.description:
+                    content += f"  Description: {finding.description}\n"
+                if finding.fix_suggestion:
+                    content += f"  Recommendation: {finding.fix_suggestion}\n"
+                content += "\n"
+
+    Path(output_path).write_text(content, encoding="utf-8")
+
+
 if __name__ == "__main__":
     main()

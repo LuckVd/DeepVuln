@@ -120,7 +120,7 @@ DeepVuln/
 |------|------|------|------|
 | P2-01 | Semgrep 引擎集成 | P1-06 | **done** |
 | P2-02 | CodeQL 引擎集成 | P1-07 | **done** |
-| P2-03 | OpenCode Agent 基础框架 | P1-08 | todo |
+| P2-03 | OpenCode Agent 基础框架 | P1-08 | **done** |
 | P2-04 | 审计策略引擎（优先级计算） | P1-08 | todo |
 | P2-05 | Agent 任务分配器 | P2-04 | todo |
 | P2-06 | 第一轮：攻击面侦察 | P2-01, P2-02, P2-03 | todo |
@@ -172,6 +172,7 @@ DeepVuln/
 | v0.1 | L1 + L2 | 支持源码获取、技术栈识别、攻击面探测 | done | 2026-02 |
 | v0.2 | + Semgrep | 支持 Semgrep 模式匹配扫描 | done | 2026-02 |
 | v0.2.1 | + CodeQL | 支持 CodeQL 深度数据流分析 | done | 2026-02 |
+| v0.2.2 | + Agent | 支持 AI 驱动的深度安全审计 | done | 2026-02 |
 | v0.3 | + L3 | 支持三引擎分析、多轮审计、漏洞候选 | dev | - |
 | v0.5 | + L4 + L5 | 支持环境构建、PoC 生成与验证 | todo | - |
 | v0.7 | + L6 | 支持去重、优先级评分、报告生成 | todo | - |
@@ -187,9 +188,9 @@ DeepVuln/
 | 字段 | 值 |
 |------|-----|
 | **阶段** | Phase 2 - 核心分析能力 |
-| **目标** | P2-02 CodeQL 引擎集成（已完成） |
-| **下一步** | P2-03 OpenCode Agent 基础框架 |
-| **重点模块** | L3-Analysis (CodeQLEngine, SemgrepEngine, SmartScanner) |
+| **目标** | P2-03 OpenCode Agent 基础框架（已完成） |
+| **下一步** | P2-04 审计策略引擎（优先级计算） |
+| **重点模块** | L3-Analysis (OpenCodeAgent, CodeQLEngine, SemgrepEngine) |
 
 ---
 
