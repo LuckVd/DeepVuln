@@ -1,0 +1,56 @@
+# CodeQL Rules Configuration
+
+version: "1.0"
+description: "CodeQL security queries for DeepVuln"
+
+# Default query suites by language
+default_suites:
+  java:
+    - java-security-extended
+    - java-code-scanning
+  python:
+    - python-security-extended
+    - python-code-scanning
+  go:
+    - go-security-extended
+    - go-code-scanning
+  javascript:
+    - javascript-security-extended
+    - javascript-code-scanning
+  cpp:
+    - cpp-security-extended
+    - cpp-code-scanning
+  csharp:
+    - csharp-security-extended
+    - csharp-code-scanning
+
+# Custom query directories
+custom_queries:
+  java: java/
+  python: python/
+  go: go/
+  javascript: javascript/
+
+# Severity mappings
+severity_overrides:
+  # Override specific rules to higher severity
+  "java/sql-injection": critical
+  "python/sql-injection": critical
+  "java/command-injection": critical
+  "python/command-injection": critical
+  "java/path-injection": high
+  "python/path-injection": high
+
+# Exclude patterns for queries
+excluded_queries:
+  # Queries that are too noisy
+  - "java/unused-parameter"
+  - "python/unused-parameter"
+
+# Query categories to include
+categories:
+  - security
+  - correctness
+
+# Minimum confidence threshold (0.0 - 1.0)
+min_confidence: 0.5

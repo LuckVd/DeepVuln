@@ -1304,5 +1304,210 @@ def _export_semgrep_result(result, output_path: str, output_format: str) -> None
     Path(output_path).write_text(content, encoding="utf-8")
 
 
+@main.command("codeql")
+@click.option("--path", "-p", required=True, type=click.Path(exists=True), help="Path to source code")
+@click.option("--language", "-l", type=click.Choice(["java", "python", "go", "javascript", "typescript", "c", "cpp", "csharp", "ruby"]), help="Programming language (auto-detected if not specified)")
+@click.option("--queries", "-q", multiple=True, help="Custom query files to run")
+@click.option("--suite", "-s", help="Query suite name (e.g., java-security-extended)")
+@click.option("--database", "-d", type=click.Path(), help="Path to store/load CodeQL database")
+@click.option("--severity", multiple=True, type=click.Choice(["critical", "high", "medium", "low", "info"]), help="Filter by severity")
+@click.option("--output", "-o", type=click.Path(), help="Output file for report")
+@click.option("--format", "-f", "output_format", type=click.Choice(["text", "json", "markdown"]), default="text", help="Output format")
+@click.option("--overwrite", is_flag=True, default=True, help="Overwrite existing database (default: True)")
+def codeql_scan(
+    path: str,
+    language: str | None,
+    queries: tuple[str, ...],
+    suite: str | None,
+    database: str | None,
+    severity: tuple[str, ...],
+    output: str | None,
+    output_format: str,
+    overwrite: bool,
+) -> None:
+    """Run CodeQL deep dataflow analysis scan.
+
+    CodeQL is a powerful code analysis engine that performs deep dataflow
+    analysis to find complex vulnerabilities. This command integrates
+    CodeQL into DeepVuln.
+
+    CodeQL requires the CodeQL CLI to be installed separately:
+        https://github.com/github/codeql-cli-binaries/releases
+
+    Query Suites:
+        java-security-extended    - Extended Java security rules
+        python-security-extended  - Extended Python security rules
+        go-security-extended      - Extended Go security rules
+        javascript-security-extended - Extended JavaScript security rules
+
+    Examples:
+        deepvuln codeql --path ./src
+        deepvuln codeql -p . --language java
+        deepvuln codeql -p . -s java-security-extended
+        deepvuln codeql -p . -q custom.ql --severity high
+        deepvuln codeql -p . -d ./codeql-db -f json -o report.json
+    """
+    from src.layers.l3_analysis import CodeQLEngine, SeverityLevel
+
+    show_banner()
+    source_path = Path(path)
+
+    console.print(f"[cyan]Running CodeQL analysis on {source_path}...[/]\n")
+
+    # Create engine
+    engine = CodeQLEngine()
+
+    # Check availability
+    if not engine.is_available():
+        show_error(
+            "CodeQL Not Available",
+            "CodeQL CLI is not installed or not found in PATH.\n\n"
+            "Install CodeQL CLI from:\n"
+            "  https://github.com/github/codeql-cli-binaries/releases\n\n"
+            "After installation, ensure 'codeql' is in your PATH.",
+        )
+        return
+
+    # Build severity filter
+    severity_filter = None
+    if severity:
+        severity_map = {
+            "critical": SeverityLevel.CRITICAL,
+            "high": SeverityLevel.HIGH,
+            "medium": SeverityLevel.MEDIUM,
+            "low": SeverityLevel.LOW,
+            "info": SeverityLevel.INFO,
+        }
+        severity_filter = [severity_map[s] for s in severity]
+
+    # Run scan
+    async def _scan():
+        return await engine.scan(
+            source_path=source_path,
+            language=language,
+            queries=list(queries) if queries else None,
+            query_suite=suite,
+            severity_filter=severity_filter,
+            database_path=Path(database) if database else None,
+            overwrite_database=overwrite,
+        )
+
+    with create_progress() as progress:
+        task = progress.add_task("[cyan]Creating database and analyzing...", total=None)
+        result = asyncio.run(_scan())
+        progress.update(task, completed=True, description="[green]Analysis complete!")
+
+    # Handle scan failure
+    if not result.success:
+        show_error("Scan Failed", result.error_message or "Unknown error")
+        return
+
+    # Deduplicate findings
+    duplicates = result.deduplicate_findings()
+    if duplicates > 0:
+        console.print(f"[dim]Removed {duplicates} duplicate findings[/]")
+
+    # Output results
+    if output:
+        _export_codeql_result(result, output, output_format)
+        console.print(f"\n[green]Report exported to: {output}[/]")
+    else:
+        _display_codeql_result(result, output_format)
+
+
+def _display_codeql_result(result, output_format: str) -> None:
+    """Display CodeQL scan results."""
+    from rich.table import Table
+
+    console.print()
+    console.rule("[bold cyan]CodeQL Results[/]")
+    console.print()
+
+    # Summary
+    console.print(f"[dim]Source:[/] {result.source_path}")
+    console.print(f"[dim]Engine:[/] {result.engine}")
+    console.print(f"[dim]Duration:[/] {result.duration_seconds:.2f}s")
+    console.print(f"[dim]Queries Used:[/] {', '.join(result.rules_used) or 'default'}")
+    console.print()
+
+    # Statistics
+    console.print(f"[bold]Total Findings:[/] {result.total_findings}")
+
+    if result.total_findings > 0:
+        # Severity breakdown
+        sev_table = Table(title="By Severity", show_header=True)
+        sev_table.add_column("Severity", style="cyan")
+        sev_table.add_column("Count", justify="right")
+
+        severity_colors = {
+            "critical": "red",
+            "high": "orange3",
+            "medium": "yellow",
+            "low": "blue",
+            "info": "dim",
+        }
+
+        for sev in ["critical", "high", "medium", "low", "info"]:
+            count = result.by_severity.get(sev, 0)
+            if count > 0:
+                color = severity_colors.get(sev, "white")
+                sev_table.add_row(f"[{color}]{sev.upper()}[/{color}]", str(count))
+
+        console.print(sev_table)
+        console.print()
+
+    if output_format == "json":
+        console.print_json(result.to_json())
+    elif output_format == "markdown":
+        console.print(result.to_markdown())
+    else:
+        # Text format - show findings
+        if result.findings:
+            findings_table = Table(title="Findings", show_header=True)
+            findings_table.add_column("Severity", width=10)
+            findings_table.add_column("Location", width=30)
+            findings_table.add_column("Title", width=50)
+            findings_table.add_column("Rule", width=30)
+
+            for finding in result.findings[:50]:  # Limit display
+                color = severity_colors.get(finding.severity.value, "white")
+                findings_table.add_row(
+                    f"[{color}]{finding.severity.value.upper()}[/{color}]",
+                    finding.location.to_display(),
+                    finding.title[:50] + "..." if len(finding.title) > 50 else finding.title,
+                    finding.rule_id or "-",
+                )
+
+            console.print(findings_table)
+
+            if len(result.findings) > 50:
+                console.print(f"\n[dim]... and {len(result.findings) - 50} more findings[/]")
+        else:
+            console.print("[green]No findings![/]")
+
+
+def _export_codeql_result(result, output_path: str, output_format: str) -> None:
+    """Export CodeQL results to file."""
+    if output_format == "json":
+        content = result.to_json()
+    elif output_format == "markdown":
+        content = result.to_markdown()
+    else:
+        content = result.to_summary()
+        if result.findings:
+            content += "\n\n## Findings\n\n"
+            for finding in result.findings:
+                content += f"- [{finding.severity.value.upper()}] {finding.title}\n"
+                content += f"  Location: {finding.location.to_display()}\n"
+                content += f"  Rule: {finding.rule_id or 'N/A'}\n"
+                if finding.cwe:
+                    content += f"  CWE: {finding.cwe}\n"
+                if finding.description:
+                    content += f"  Description: {finding.description}\n"
+                content += "\n"
+
+    Path(output_path).write_text(content, encoding="utf-8")
+
+
 if __name__ == "__main__":
     main()

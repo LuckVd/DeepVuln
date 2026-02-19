@@ -8,129 +8,97 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | P2-01 Semgrep 引擎集成 |
+| **任务** | P2-02 CodeQL 引擎集成 |
 | **状态** | completed |
 | **优先级** | high |
-| **创建日期** | 2026-02-18 |
+| **创建日期** | 2026-02-19 |
 | **完成日期** | 2026-02-19 |
 
 ---
 
 ## 背景说明
 
-Semgrep 是一个快速、可定制的静态分析工具，通过模式匹配检测代码中的安全问题。作为 L3 层的第一个组件，Semgrep 负责：
+CodeQL 是 GitHub 开发的代码分析引擎，通过构建代码数据库进行深度数据流分析。相比 Semgrep 的模式匹配，CodeQL 提供：
 
-1. **快速扫描**：秒级完成代码扫描
-2. **模式匹配**：检测已知漏洞模式（SQL注入、XSS、命令注入等）
-3. **结果归一化**：将扫描结果转换为统一的 `Finding` 模型
-4. **规则管理**：支持自定义规则 + 官方规则集
+1. **深度数据流分析**：追踪数据从源点到汇点的完整路径
+2. **污点分析**：检测用户输入如何影响敏感操作
+3. **跨函数/跨文件追踪**：发现复杂调用链中的漏洞
+4. **自定义查询**：使用 QL 语言编写精确的漏洞查询
 
-**为什么选择 Semgrep 作为 L3 第一个组件**：
-- 实现简单，快速产出价值
-- 无需构建索引（相比 CodeQL）
-- 支持多语言（Java/Python/Go/JavaScript 等）
-- 可与后续 Agent 形成互补
+**为什么需要 CodeQL**：
+- Semgrep 擅长快速模式匹配，但缺乏数据流追踪
+- CodeQL 能发现 Semgrep 漏掉的复杂漏洞
+- 两者互补，提高检测覆盖率
 
 ---
 
 ## 完成标准
 
-### Phase 1: 核心引擎实现
-- [x] 创建 `src/layers/l3_analysis/` 目录结构
-- [x] 实现 `SemgrepEngine` 类
-- [x] 实现 `Finding` 通用数据模型
-- [x] 支持基本扫描功能
+### Phase 1: 环境准备
+- [x] CodeQL CLI 安装验证
+- [x] 创建 `CodeQLEngine` 类框架
+- [x] 数据库构建功能（create database）
 
-### Phase 2: 规则管理
-- [x] 创建 `rules/semgrep/` 规则目录
-- [x] 支持加载自定义规则
-- [x] 支持选择官方规则集（security、audit 等）
-- [x] 根据技术栈自动选择规则（SmartScanner）
+### Phase 2: 核心功能
+- [x] 支持多种语言数据库构建（Java/Python/Go/JavaScript/C#/Ruby/C++）
+- [x] 执行 QL 查询并解析结果
+- [x] 转换为统一的 `Finding` 模型
+- [x] 集成到 `EngineRegistry`
 
-### Phase 3: 结果处理
-- [x] 解析 Semgrep JSON 输出
-- [x] 转换为 `Finding` 模型
-- [x] 支持严重性过滤
-- [x] 支持结果去重
+### Phase 3: 查询管理
+- [x] 创建 `rules/codeql/` 目录
+- [x] 支持自定义 QL 查询
+- [x] 内置常用安全查询（SQL注入、XSS、命令注入等）
 
 ### Phase 4: 集成与测试
-- [x] 与 L1 层技术栈检测集成（SmartScanner）
-- [x] 单元测试覆盖（41 tests）
-- [x] 集成测试（使用测试项目）
-- [x] CLI 命令支持（`deepvuln semgrep`）
+- [x] 与 SmartScanner 集成
+- [x] 单元测试覆盖（35个测试用例）
+- [x] CLI 命令支持（`deepvuln codeql`）
 
 ---
 
-## 已实现功能
+## 技术要点
 
-### 核心组件
-
-| 组件 | 文件 | 说明 |
-|------|------|------|
-| Finding | `models.py` | 通用漏洞发现模型 |
-| CodeLocation | `models.py` | 代码位置模型 |
-| ScanResult | `models.py` | 扫描结果模型（含去重、导出） |
-| BaseEngine | `engines/base.py` | 分析引擎基类 |
-| EngineRegistry | `engines/base.py` | 引擎注册表 |
-| SemgrepEngine | `engines/semgrep.py` | Semgrep 引擎实现 |
-| SmartScanner | `smart_scanner.py` | 智能扫描器（自动规则选择） |
-
-### CLI 命令
+### CodeQL CLI 依赖
 
 ```bash
-# 基本扫描
-deepvuln semgrep --path ./src
+# 下载 CodeQL CLI
+# https://github.com/github/codeql-cli-binaries/releases
 
-# 自动规则检测
-deepvuln semgrep -p . --auto
+# 构建数据库
+codeql database create <db-path> --language=<lang> --source-root=<src>
 
-# 指定规则集
-deepvuln semgrep -p . -s security -s owasp-top-ten
-
-# 自定义规则
-deepvuln semgrep -p . -r rules/custom.yaml
-
-# 严重性过滤
-deepvuln semgrep -p . --severity high --severity critical
-
-# 导出报告
-deepvuln semgrep -p . -f json -o report.json
-deepvuln semgrep -p . -f markdown -o report.md
+# 执行查询
+codeql database analyze <db-path> <query-pack> --format=sarif-latest --output=<output.sarif>
 ```
 
-### 规则目录
+### 支持的语言
 
-```
-rules/semgrep/
-├── config.yaml              # 规则配置
-├── python/
-│   ├── sql-injection.yaml
-│   └── command-injection.yaml
-├── java/
-│   ├── sql-injection.yaml
-│   └── xss.yaml
-└── go/
-    └── sql-injection.yaml
-```
+| 语言 | CodeQL 支持 | 优先级 |
+|------|-------------|--------|
+| Java | ✅ | P0 |
+| Python | ✅ | P0 |
+| Go | ✅ | P1 |
+| JavaScript | ✅ | P1 |
+| C/C++ | ✅ | P2 |
+
+### 输出格式
+
+CodeQL 输出 SARIF 格式，需要解析为 Finding 模型。
 
 ---
 
 ## 关联文件
 
-### 已创建
-- `src/layers/l3_analysis/__init__.py` - 模块入口
-- `src/layers/l3_analysis/models.py` - 数据模型
-- `src/layers/l3_analysis/smart_scanner.py` - 智能扫描器
-- `src/layers/l3_analysis/engines/__init__.py` - 引擎模块
-- `src/layers/l3_analysis/engines/base.py` - 引擎基类
-- `src/layers/l3_analysis/engines/semgrep.py` - Semgrep 实现
-- `rules/semgrep/` - Semgrep 规则目录
-- `tests/unit/test_l3/__init__.py` - 测试目录
-- `tests/unit/test_l3/test_semgrep_engine.py` - 单元测试（29 tests）
-- `tests/unit/test_l3/test_semgrep_integration.py` - 集成测试（12 tests）
+### 待创建
+- `src/layers/l3_analysis/engines/codeql.py` - CodeQL 引擎实现
+- `rules/codeql/` - CodeQL 查询目录
+- `tests/unit/test_l3/test_codeql_engine.py` - 单元测试
 
-### 已修改
-- `src/cli/main.py` - 添加 `semgrep` CLI 命令
+### 待修改
+- `src/layers/l3_analysis/__init__.py` - 导出 CodeQLEngine
+- `src/layers/l3_analysis/engines/__init__.py` - 注册 CodeQL
+- `src/cli/main.py` - 添加 `codeql` CLI 命令
 
 ---
 
@@ -138,33 +106,33 @@ rules/semgrep/
 
 | 时间 | 进展 |
 |------|------|
-| 2026-02-18 | 设置新目标：P2-01 Semgrep 引擎集成 |
-| 2026-02-18 | 完成 uv 环境配置，添加 semgrep 依赖 |
-| 2026-02-19 | 实现 L3 核心数据模型（Finding, CodeLocation, ScanResult） |
-| 2026-02-19 | 实现 BaseEngine 基类和 EngineRegistry |
-| 2026-02-19 | 实现 SemgrepEngine 完整功能 |
-| 2026-02-19 | 创建 rules/semgrep 规则目录和示例规则 |
-| 2026-02-19 | 实现 SmartScanner 智能扫描器 |
-| 2026-02-19 | 添加 CLI `deepvuln semgrep` 命令 |
-| 2026-02-19 | 编写 41 个测试用例，全部通过 |
-| 2026-02-19 | **目标完成** |
+| 2026-02-19 | 设置新目标：P2-02 CodeQL 引擎集成 |
+| 2026-02-19 | 完成 CodeQLEngine 核心实现（数据库创建、分析、SARIF解析） |
+| 2026-02-19 | 安装 CodeQL CLI v2.24.1 到 /opt/codeql/ |
+| 2026-02-19 | 创建 rules/codeql/ 目录及示例查询 |
+| 2026-02-19 | 添加 CLI 命令 `deepvuln codeql` |
+| 2026-02-19 | 编写 35 个单元测试 |
+| 2026-02-19 | 修复数据库创建路径重复问题（cwd=None） |
+| 2026-02-19 | 修复查询包兼容性问题（使用特定安全查询目录） |
+| 2026-02-19 | ✅ CodeQL 扫描测试成功（0 findings，符合预期） |
 
 ---
 
-## 测试覆盖
+## 风险与缓解
 
-| 测试类型 | 数量 | 状态 |
-|----------|------|------|
-| 单元测试 | 29 | 全部通过 |
-| 集成测试 | 12 | 全部通过 |
-| **总计** | **41** | **全部通过** |
+| 风险 | 影响 | 缓解措施 |
+|------|------|----------|
+| CodeQL CLI 安装复杂 | 高 | 提供安装脚本，支持自动下载 |
+| 数据库构建失败 | 中 | 降级到 Semgrep + Agent 方案 |
+| 内存消耗大 | 中 | 限制项目大小，提供增量构建 |
+| 查询学习曲线 | 低 | 提供内置查询库，降低使用门槛 |
 
 ---
 
-## 下一步建议
+## 下一步
 
-P2-01 已完成，建议继续 Phase 2 其他任务：
+1. ~~验证 CodeQL CLI 是否已安装~~ ✅
+2. ~~创建 CodeQLEngine 基础框架~~ ✅
+3. ~~实现数据库构建功能~~ ✅
 
-1. **P2-02 CodeQL 引擎集成** - 深度数据流分析
-2. **P2-03 OpenCode Agent 基础框架** - AI 驱动的代码审计
-3. **P2-04 审计策略引擎** - 优先级计算和任务分配
+**目标已完成！** 建议下一个目标：P2-03 OpenCode Agent 基础框架
