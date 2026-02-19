@@ -42,13 +42,13 @@
 | project-docs | `docs/*.md`, `README.md` | todo | active |
 | l1-intelligence | `src/layers/l1_intelligence/**` | done | stable |
 | l2-understanding | `src/layers/l2_understanding/**` | todo | active |
-| l3-analysis | `src/layers/l3_analysis/**` | todo | active |
+| l3-analysis | `src/layers/l3_analysis/**` | done | stable |
 | l4-environment | `src/layers/l4_environment/**` | todo | active |
 | l5-verification | `src/layers/l5_verification/**` | todo | active |
 | l6-fusion | `src/layers/l6_fusion/**` | todo | active |
 | l7-governance | `src/layers/l7_governance/**` | todo | active |
 | core-modules | `src/core/**`, `src/models/**` | done | stable |
-| rules-library | `rules/**` | todo | active |
+| rules-library | `rules/**` | dev | active |
 | cli-entry | `src/cli/**` | done | stable |
 | deployment | `deploy/**` | todo | active |
 
@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-02-19 | 7f6fbb6 | feat(l3): implement P2-01 Semgrep engine integration |
 | 2026-02-18 | 9a69205 | chore(config): add uv environment configuration and set P2-01 goal |
 | 2026-02-18 | 063ae45 | feat(l1): implement CVE zero false positive optimization |
 | 2026-02-18 | 11e0194 | feat(l1): implement P1-10 build configuration security analyzer |

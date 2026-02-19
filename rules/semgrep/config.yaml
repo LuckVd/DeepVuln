@@ -1,0 +1,68 @@
+# Semgrep Rules Configuration
+#
+# This file configures which rules to use for different project types.
+
+# Default ruleset - used when no specific rules are specified
+default:
+  rule_sets:
+    - security  # Official security rules
+  custom_rules:
+    - rules/semgrep/python/
+    - rules/semgrep/java/
+    - rules/semgrep/go/
+
+# Java project configuration
+java:
+  rule_sets:
+    - java
+    - security
+    - owasp-top-ten
+  custom_rules:
+    - rules/semgrep/java/
+  exclude:
+    - "**/test/**"
+    - "**/tests/**"
+
+# Python project configuration
+python:
+  rule_sets:
+    - python
+    - security
+    - owasp-top-ten
+  custom_rules:
+    - rules/semgrep/python/
+  exclude:
+    - "**/test/**"
+    - "**/tests/**"
+    - "**/*_test.py"
+
+# Go project configuration
+go:
+  rule_sets:
+    - go
+    - security
+  custom_rules:
+    - rules/semgrep/go/
+  exclude:
+    - "**/*_test.go"
+
+# JavaScript/TypeScript configuration
+javascript:
+  rule_sets:
+    - javascript
+    - typescript
+    - security
+  exclude:
+    - "**/node_modules/**"
+    - "**/test/**"
+    - "**/__tests__/**"
+
+# Full security scan - all available rules
+full-security:
+  rule_sets:
+    - security
+    - owasp-top-ten
+    - cwe-top-25
+    - secrets
+  custom_rules:
+    - rules/semgrep/

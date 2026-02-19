@@ -1,0 +1,20 @@
+rules:
+  - id: python.command-injection.os-system
+    patterns:
+      - pattern-either:
+          - pattern: os.system($CMD)
+          - pattern: os.popen($CMD)
+          - pattern: subprocess.call($CMD, shell=True)
+          - pattern: subprocess.Popen($CMD, shell=True)
+      - pattern-not: os.system("...")
+      - pattern-not: os.popen("...")
+    message: "Potential command injection - user input may be passed to system command"
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      cwe: "CWE-78"
+      owasp: "A03:2021 - Injection"
+      confidence: HIGH
+      references:
+        - https://cwe.mitre.org/data/definitions/78.html

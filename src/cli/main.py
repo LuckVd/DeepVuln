@@ -1108,5 +1108,201 @@ def _format_project_json(project) -> dict:
     }
 
 
+@main.command("semgrep")
+@click.option("--path", "-p", required=True, type=click.Path(exists=True), help="Path to source code")
+@click.option("--rules", "-r", multiple=True, help="Custom rule files or directories")
+@click.option("--rule-sets", "-s", multiple=True, help="Official rule sets (security, owasp-top-ten, java, python, etc.)")
+@click.option("--auto", "-a", is_flag=True, help="Auto-detect rules based on project")
+@click.option("--severity", multiple=True, type=click.Choice(["critical", "high", "medium", "low", "info"]), help="Filter by severity")
+@click.option("--output", "-o", type=click.Path(), help="Output file for report")
+@click.option("--format", "-f", "output_format", type=click.Choice(["text", "json", "markdown"]), default="text", help="Output format")
+@click.option("--lang", "languages", multiple=True, help="Restrict to specific languages")
+def semgrep_scan(
+    path: str,
+    rules: tuple[str, ...],
+    rule_sets: tuple[str, ...],
+    auto: bool,
+    severity: tuple[str, ...],
+    output: str | None,
+    output_format: str,
+    languages: tuple[str, ...],
+) -> None:
+    """Run Semgrep static analysis scan.
+
+    Semgrep is a fast static analysis tool that finds bugs and vulnerabilities
+    using pattern matching. This command integrates Semgrep into DeepVuln.
+
+    Rule Sets:
+        security      - General security rules
+        owasp-top-ten - OWASP Top 10 vulnerabilities
+        java          - Java-specific rules
+        python        - Python-specific rules
+        go            - Go-specific rules
+        secrets       - Secret detection rules
+
+    Examples:
+        deepvuln semgrep --path ./src
+        deepvuln semgrep -p . --auto
+        deepvuln semgrep -p . -s security -s owasp-top-ten
+        deepvuln semgrep -p . -r rules/custom.yaml --severity high
+        deepvuln semgrep -p . -f json -o report.json
+    """
+    from src.layers.l3_analysis import SemgrepEngine, SeverityLevel
+
+    show_banner()
+    source_path = Path(path)
+
+    console.print(f"[cyan]Running Semgrep scan on {source_path}...[/]\n")
+
+    # Create engine
+    engine = SemgrepEngine()
+
+    # Check availability
+    if not engine.is_available():
+        show_error(
+            "Semgrep Not Available",
+            "Semgrep is not installed or not found in PATH.\n"
+            "Install with: pip install semgrep",
+        )
+        return
+
+    # Build severity filter
+    severity_filter = None
+    if severity:
+        severity_map = {
+            "critical": SeverityLevel.CRITICAL,
+            "high": SeverityLevel.HIGH,
+            "medium": SeverityLevel.MEDIUM,
+            "low": SeverityLevel.LOW,
+            "info": SeverityLevel.INFO,
+        }
+        severity_filter = [severity_map[s] for s in severity]
+
+    # Run scan
+    async def _scan():
+        return await engine.scan(
+            source_path=source_path,
+            rules=list(rules) if rules else None,
+            rule_sets=list(rule_sets) if rule_sets else None,
+            languages=list(languages) if languages else None,
+            severity_filter=severity_filter,
+            use_auto_config=auto,
+        )
+
+    with create_progress() as progress:
+        task = progress.add_task("[cyan]Scanning...", total=None)
+        result = asyncio.run(_scan())
+        progress.update(task, completed=True, description="[green]Scan complete!")
+
+    # Handle scan failure
+    if not result.success:
+        show_error("Scan Failed", result.error_message or "Unknown error")
+        return
+
+    # Deduplicate findings
+    duplicates = result.deduplicate_findings()
+    if duplicates > 0:
+        console.print(f"[dim]Removed {duplicates} duplicate findings[/]")
+
+    # Output results
+    if output:
+        _export_semgrep_result(result, output, output_format)
+        console.print(f"\n[green]Report exported to: {output}[/]")
+    else:
+        _display_semgrep_result(result, output_format)
+
+
+def _display_semgrep_result(result, output_format: str) -> None:
+    """Display Semgrep scan results."""
+    from rich.table import Table
+
+    console.print()
+    console.rule("[bold cyan]Scan Results[/]")
+    console.print()
+
+    # Summary
+    console.print(f"[dim]Source:[/] {result.source_path}")
+    console.print(f"[dim]Engine:[/] {result.engine}")
+    console.print(f"[dim]Duration:[/] {result.duration_seconds:.2f}s")
+    console.print(f"[dim]Rules Used:[/] {', '.join(result.rules_used) or 'default'}")
+    console.print()
+
+    # Statistics
+    console.print(f"[bold]Total Findings:[/] {result.total_findings}")
+
+    if result.total_findings > 0:
+        # Severity breakdown
+        sev_table = Table(title="By Severity", show_header=True)
+        sev_table.add_column("Severity", style="cyan")
+        sev_table.add_column("Count", justify="right")
+
+        severity_colors = {
+            "critical": "red",
+            "high": "orange3",
+            "medium": "yellow",
+            "low": "blue",
+            "info": "dim",
+        }
+
+        for sev in ["critical", "high", "medium", "low", "info"]:
+            count = result.by_severity.get(sev, 0)
+            if count > 0:
+                color = severity_colors.get(sev, "white")
+                sev_table.add_row(f"[{color}]{sev.upper()}[/{color}]", str(count))
+
+        console.print(sev_table)
+        console.print()
+
+    if output_format == "json":
+        console.print_json(result.to_json())
+    elif output_format == "markdown":
+        console.print(result.to_markdown())
+    else:
+        # Text format - show findings
+        if result.findings:
+            findings_table = Table(title="Findings", show_header=True)
+            findings_table.add_column("Severity", width=10)
+            findings_table.add_column("Location", width=30)
+            findings_table.add_column("Title", width=50)
+            findings_table.add_column("Rule", width=25)
+
+            for finding in result.findings[:50]:  # Limit display
+                color = severity_colors.get(finding.severity.value, "white")
+                findings_table.add_row(
+                    f"[{color}]{finding.severity.value.upper()}[/{color}]",
+                    finding.location.to_display(),
+                    finding.title[:50] + "..." if len(finding.title) > 50 else finding.title,
+                    finding.rule_id or "-",
+                )
+
+            console.print(findings_table)
+
+            if len(result.findings) > 50:
+                console.print(f"\n[dim]... and {len(result.findings) - 50} more findings[/]")
+        else:
+            console.print("[green]No findings![/]")
+
+
+def _export_semgrep_result(result, output_path: str, output_format: str) -> None:
+    """Export Semgrep results to file."""
+    if output_format == "json":
+        content = result.to_json()
+    elif output_format == "markdown":
+        content = result.to_markdown()
+    else:
+        content = result.to_summary()
+        if result.findings:
+            content += "\n\n## Findings\n\n"
+            for finding in result.findings:
+                content += f"- [{finding.severity.value.upper()}] {finding.title}\n"
+                content += f"  Location: {finding.location.to_display()}\n"
+                content += f"  Rule: {finding.rule_id or 'N/A'}\n"
+                if finding.description:
+                    content += f"  Description: {finding.description}\n"
+                content += "\n"
+
+    Path(output_path).write_text(content, encoding="utf-8")
+
+
 if __name__ == "__main__":
     main()

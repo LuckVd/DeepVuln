@@ -1,0 +1,18 @@
+rules:
+  - id: java.xss.servlet-response
+    patterns:
+      - pattern-either:
+          - pattern: $WRITER.write($INPUT);
+          - pattern: $RESPONSE.getWriter().write($INPUT);
+          - pattern: $RESPONSE.getOutputStream().write(...);
+      - pattern-not: $WRITER.write("...");
+    message: "Potential XSS vulnerability - unescaped output written to response"
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: security
+      cwe: "CWE-79"
+      owasp: "A03:2021 - Injection"
+      confidence: MEDIUM
+      references:
+        - https://cwe.mitre.org/data/definitions/79.html
