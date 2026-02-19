@@ -28,6 +28,18 @@ from src.layers.l3_analysis.rounds.models import (
 )
 from src.layers.l3_analysis.rounds.controller import RoundController
 from src.layers.l3_analysis.rounds.round_one import RoundOneExecutor
+from src.layers.l3_analysis.rounds.round_two import RoundTwoExecutor
+from src.layers.l3_analysis.rounds.dataflow import (
+    DataFlowPath,
+    DeepAnalysisResult,
+    PathNode,
+    Sanitizer,
+    SanitizerType,
+    SinkType,
+    SourceType,
+    TaintSink,
+    TaintSource,
+)
 from src.layers.l3_analysis.strategy.models import (
     AuditPriority,
     AuditPriorityLevel,
@@ -482,6 +494,468 @@ class TestRoundOneExecutor:
 
         assert result.status == RoundStatus.COMPLETED
         assert result.engine_stats["semgrep"].executed is True
+
+
+class TestSourceType:
+    """Tests for SourceType enum."""
+
+    def test_types_exist(self):
+        """Test that all expected source types exist."""
+        assert SourceType.HTTP_PARAM.value == "http_param"
+        assert SourceType.HTTP_HEADER.value == "http_header"
+        assert SourceType.HTTP_BODY.value == "http_body"
+        assert SourceType.USER_INPUT.value == "user_input"
+
+
+class TestSinkType:
+    """Tests for SinkType enum."""
+
+    def test_types_exist(self):
+        """Test that all expected sink types exist."""
+        assert SinkType.SQL_QUERY.value == "sql_query"
+        assert SinkType.COMMAND_EXEC.value == "command_exec"
+        assert SinkType.HTTP_RESPONSE.value == "http_response"
+
+
+class TestSanitizerType:
+    """Tests for SanitizerType enum."""
+
+    def test_types_exist(self):
+        """Test that all expected sanitizer types exist."""
+        assert SanitizerType.SQL_ESCAPE.value == "sql_escape"
+        assert SanitizerType.HTML_ENCODE.value == "html_encode"
+        assert SanitizerType.PREPARED_STMT.value == "prepared_stmt"
+
+
+class TestTaintSource:
+    """Tests for TaintSource model."""
+
+    @pytest.fixture
+    def sample_location(self):
+        """Create a sample code location."""
+        return CodeLocation(file="test.py", line=10, function="get_input")
+
+    def test_default_init(self, sample_location):
+        """Test default initialization."""
+        source = TaintSource(
+            id="source-001",
+            location=sample_location,
+            source_type=SourceType.HTTP_PARAM,
+        )
+        assert source.id == "source-001"
+        assert source.source_type == SourceType.HTTP_PARAM
+        assert source.user_controlled is True
+
+    def test_to_prompt_context(self, sample_location):
+        """Test prompt context generation."""
+        source = TaintSource(
+            id="source-001",
+            location=sample_location,
+            source_type=SourceType.HTTP_PARAM,
+            variable_name="user_input",
+            parameter_name="id",
+        )
+        context = source.to_prompt_context()
+        assert "http_param" in context
+        assert "user_input" in context
+        assert "id" in context
+
+
+class TestTaintSink:
+    """Tests for TaintSink model."""
+
+    @pytest.fixture
+    def sample_location(self):
+        """Create a sample code location."""
+        return CodeLocation(file="db.py", line=50, function="execute_query")
+
+    def test_default_init(self, sample_location):
+        """Test default initialization."""
+        sink = TaintSink(
+            id="sink-001",
+            location=sample_location,
+            sink_type=SinkType.SQL_QUERY,
+        )
+        assert sink.id == "sink-001"
+        assert sink.sink_type == SinkType.SQL_QUERY
+        assert sink.dangerous_if_tainted is True
+
+    def test_to_prompt_context(self, sample_location):
+        """Test prompt context generation."""
+        sink = TaintSink(
+            id="sink-001",
+            location=sample_location,
+            sink_type=SinkType.SQL_QUERY,
+            function_name="execute",
+            vulnerability_class=["SQL Injection"],
+        )
+        context = sink.to_prompt_context()
+        assert "sql_query" in context
+        assert "execute" in context
+        assert "SQL Injection" in context
+
+
+class TestSanitizer:
+    """Tests for Sanitizer model."""
+
+    @pytest.fixture
+    def sample_location(self):
+        """Create a sample code location."""
+        return CodeLocation(file="utils.py", line=20)
+
+    def test_default_init(self, sample_location):
+        """Test default initialization."""
+        sanitizer = Sanitizer(
+            id="sanitizer-001",
+            location=sample_location,
+            sanitizer_type=SanitizerType.PREPARED_STMT,
+        )
+        assert sanitizer.id == "sanitizer-001"
+        assert sanitizer.sanitizer_type == SanitizerType.PREPARED_STMT
+        assert sanitizer.effective is True
+
+
+class TestPathNode:
+    """Tests for PathNode model."""
+
+    @pytest.fixture
+    def sample_location(self):
+        """Create a sample code location."""
+        return CodeLocation(file="flow.py", line=30, function="process")
+
+    def test_default_init(self, sample_location):
+        """Test default initialization."""
+        node = PathNode(
+            location=sample_location,
+            node_type="propagation",
+            variable_name="data",
+        )
+        assert node.node_type == "propagation"
+        assert node.variable_name == "data"
+        assert node.is_interprocedural is False
+
+
+class TestDataFlowPath:
+    """Tests for DataFlowPath model."""
+
+    @pytest.fixture
+    def sample_source(self):
+        """Create a sample source."""
+        return TaintSource(
+            id="source-001",
+            location=CodeLocation(file="input.py", line=10),
+            source_type=SourceType.HTTP_PARAM,
+            variable_name="user_id",
+        )
+
+    @pytest.fixture
+    def sample_sink(self):
+        """Create a sample sink."""
+        return TaintSink(
+            id="sink-001",
+            location=CodeLocation(file="db.py", line=50),
+            sink_type=SinkType.SQL_QUERY,
+            function_name="execute",
+        )
+
+    def test_default_init(self, sample_source, sample_sink):
+        """Test default initialization."""
+        path = DataFlowPath(
+            id="path-001",
+            source=sample_source,
+            sink=sample_sink,
+        )
+        assert path.id == "path-001"
+        assert path.source == sample_source
+        assert path.sink == sample_sink
+        assert path.is_complete is False
+        assert path.path_length == 0
+
+    def test_add_node(self, sample_source, sample_sink):
+        """Test adding a node."""
+        path = DataFlowPath(
+            id="path-001",
+            source=sample_source,
+            sink=sample_sink,
+        )
+        node = PathNode(
+            location=CodeLocation(file="flow.py", line=30),
+            node_type="propagation",
+        )
+        path.add_node(node)
+        assert path.path_length == 1
+        assert node in path.path_nodes
+
+    def test_add_interprocedural_node(self, sample_source, sample_sink):
+        """Test adding an interprocedural node."""
+        path = DataFlowPath(
+            id="path-001",
+            source=sample_source,
+            sink=sample_sink,
+        )
+        node = PathNode(
+            location=CodeLocation(file="flow.py", line=30),
+            node_type="propagation",
+            is_interprocedural=True,
+        )
+        path.add_node(node)
+        assert path.is_interprocedural is True
+
+    def test_add_sanitizer(self, sample_source, sample_sink):
+        """Test adding a sanitizer."""
+        path = DataFlowPath(
+            id="path-001",
+            source=sample_source,
+            sink=sample_sink,
+        )
+        sanitizer = Sanitizer(
+            id="san-001",
+            location=CodeLocation(file="sanitize.py", line=15),
+            sanitizer_type=SanitizerType.PREPARED_STMT,
+            effective=True,
+        )
+        path.add_sanitizer(sanitizer)
+        assert len(path.sanitizers) == 1
+        assert path.has_effective_sanitizer is True
+
+    def test_get_summary(self, sample_source, sample_sink):
+        """Test summary generation."""
+        path = DataFlowPath(
+            id="path-001",
+            source=sample_source,
+            sink=sample_sink,
+        )
+        summary = path.get_summary()
+        assert "http_param" in summary
+        assert "sql_query" in summary
+
+    def test_to_prompt_context(self, sample_source, sample_sink):
+        """Test prompt context generation."""
+        path = DataFlowPath(
+            id="path-001",
+            source=sample_source,
+            sink=sample_sink,
+            is_complete=True,
+            path_confidence=0.9,
+        )
+        context = path.to_prompt_context()
+        assert "Data Flow Path" in context
+        assert "Source" in context
+        assert "Sink" in context
+
+
+class TestDeepAnalysisResult:
+    """Tests for DeepAnalysisResult model."""
+
+    def test_default_init(self):
+        """Test default initialization."""
+        result = DeepAnalysisResult(
+            id="deep-001",
+            candidate_id="candidate-001",
+        )
+        assert result.id == "deep-001"
+        assert result.candidate_id == "candidate-001"
+        assert result.confirmed_vulnerability is False
+        assert result.false_positive is False
+
+    def test_add_dataflow_path(self):
+        """Test adding a dataflow path."""
+        result = DeepAnalysisResult(
+            id="deep-001",
+            candidate_id="candidate-001",
+        )
+        source = TaintSource(
+            id="source-001",
+            location=CodeLocation(file="test.py", line=10),
+            source_type=SourceType.HTTP_PARAM,
+        )
+        sink = TaintSink(
+            id="sink-001",
+            location=CodeLocation(file="test.py", line=20),
+            sink_type=SinkType.SQL_QUERY,
+        )
+        path = DataFlowPath(
+            id="path-001",
+            source=source,
+            sink=sink,
+            is_complete=True,
+        )
+        result.add_dataflow_path(path)
+        assert len(result.dataflow_paths) == 1
+        assert result.complete_paths == 1
+
+    def test_mark_confirmed(self):
+        """Test marking as confirmed."""
+        result = DeepAnalysisResult(
+            id="deep-001",
+            candidate_id="candidate-001",
+        )
+        result.mark_confirmed("Complete data flow path found")
+        assert result.confirmed_vulnerability is True
+        assert result.false_positive is False
+        assert result.updated_confidence == "high"
+
+    def test_mark_false_positive(self):
+        """Test marking as false positive."""
+        result = DeepAnalysisResult(
+            id="deep-001",
+            candidate_id="candidate-001",
+        )
+        result.mark_false_positive("Input is properly sanitized")
+        assert result.false_positive is True
+        assert result.confirmed_vulnerability is False
+        assert result.updated_confidence == "low"
+
+    def test_get_summary(self):
+        """Test summary generation."""
+        result = DeepAnalysisResult(
+            id="deep-001",
+            candidate_id="candidate-001",
+        )
+        summary = result.get_summary()
+        assert "Needs Review" in summary
+
+        result.mark_confirmed("Test")
+        summary = result.get_summary()
+        assert "Confirmed" in summary
+
+    def test_to_prompt_context(self):
+        """Test prompt context generation."""
+        result = DeepAnalysisResult(
+            id="deep-001",
+            candidate_id="candidate-001",
+            original_confidence="medium",
+            updated_confidence="high",
+        )
+        context = result.to_prompt_context()
+        assert "candidate-001" in context
+        assert "medium" in context
+        assert "high" in context
+
+
+class TestRoundTwoExecutor:
+    """Tests for RoundTwoExecutor."""
+
+    @pytest.fixture
+    def executor(self, tmp_path):
+        """Create an executor instance."""
+        return RoundTwoExecutor(source_path=tmp_path)
+
+    @pytest.fixture
+    def sample_strategy(self, tmp_path):
+        """Create a sample strategy."""
+        target = AuditTarget(
+            id="target-001",
+            name="test.py",
+            target_type="file",
+            file_path="test.py",
+            priority=AuditPriority(level=AuditPriorityLevel.HIGH),
+        )
+        return AuditStrategy(
+            project_name="test-project",
+            source_path=str(tmp_path),
+            targets=[target],
+            total_targets=1,
+        )
+
+    @pytest.fixture
+    def sample_previous_round(self):
+        """Create a sample previous round result with candidates."""
+        finding = Finding(
+            id="finding-001",
+            severity=SeverityLevel.HIGH,
+            title="SQL Injection",
+            description="Test SQL injection",
+            location=CodeLocation(file="test.py", line=10, function="get_user"),
+            source="semgrep",
+            tags=["sql", "injection"],
+        )
+        candidate = VulnerabilityCandidate(
+            id="candidate-001",
+            finding=finding,
+            confidence=ConfidenceLevel.MEDIUM,
+            discovered_in_round=1,
+        )
+        round_result = RoundResult(
+            round_number=1,
+            status=RoundStatus.COMPLETED,
+        )
+        round_result.add_candidate(candidate)
+        return round_result
+
+    def test_default_init(self, executor):
+        """Test default initialization."""
+        assert executor.source_path is not None
+        assert executor._codeql_engine is None
+        assert executor._agent_executor is None
+
+    @pytest.mark.asyncio
+    async def test_execute_without_previous_round(self, executor, sample_strategy):
+        """Test execution without previous round."""
+        result = await executor.execute(sample_strategy, previous_round=None)
+        assert result.round_number == 2
+        assert result.status == RoundStatus.COMPLETED
+        assert result.total_candidates == 0
+
+    @pytest.mark.asyncio
+    async def test_execute_without_candidates(self, executor, sample_strategy):
+        """Test execution without candidates in previous round."""
+        previous = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        result = await executor.execute(sample_strategy, previous_round=previous)
+        assert result.round_number == 2
+        assert result.status == RoundStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_execute_with_candidates(self, executor, sample_strategy, sample_previous_round):
+        """Test execution with candidates."""
+        result = await executor.execute(sample_strategy, previous_round=sample_previous_round)
+        assert result.round_number == 2
+        assert result.status == RoundStatus.COMPLETED
+        assert "codeql" in result.engine_stats
+        assert "agent" in result.engine_stats
+
+    @pytest.mark.asyncio
+    async def test_execute_with_agent_executor(self, executor, sample_strategy, sample_previous_round):
+        """Test execution with agent executor."""
+        async def mock_agent(context):
+            return {
+                "confirmed": True,
+                "false_positive": False,
+                "tokens_used": 100,
+            }
+
+        executor._agent_executor = mock_agent
+        result = await executor.execute(sample_strategy, previous_round=sample_previous_round)
+        assert result.status == RoundStatus.COMPLETED
+        assert result.engine_stats["agent"].executed is True
+
+    def test_infer_source_type(self, executor):
+        """Test source type inference."""
+        finding = Finding(
+            id="test",
+            severity=SeverityLevel.HIGH,
+            title="SQL Injection",
+            description="Test",
+            location=CodeLocation(file="test.py", line=10),
+            source="semgrep",
+            tags=["sqli"],
+        )
+        source_type = executor._infer_source_type(finding)
+        assert source_type == SourceType.HTTP_PARAM
+
+    def test_infer_sink_type(self, executor):
+        """Test sink type inference."""
+        finding = Finding(
+            id="test",
+            severity=SeverityLevel.HIGH,
+            title="SQL Injection",
+            description="Test",
+            location=CodeLocation(file="test.py", line=10),
+            source="semgrep",
+            tags=["sqli"],
+        )
+        sink_type = executor._infer_sink_type(finding)
+        assert sink_type == SinkType.SQL_QUERY
 
 
 class TestIntegration:

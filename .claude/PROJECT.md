@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-02-20 | 69eed1c | feat(l3): implement P2-07 round two deep tracking |
 | 2026-02-20 | 9e01851 | feat(l3): implement P2-06 multi-round audit system and fix bugs |
 | 2026-02-19 | 438f51d | style: clean up unused imports and optimize f-strings |
 | 2026-02-19 | 6839a6c | feat(l3): implement P2-04 strategy engine and P2-05 task dispatcher |
