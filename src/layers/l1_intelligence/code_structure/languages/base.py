@@ -9,13 +9,10 @@ from ..models import (
     CallEdge,
     CallGraph,
     ClassDef,
-    FieldDef,
     FunctionDef,
     ImportDef,
     ModuleInfo,
-    Parameter,
     ParseOptions,
-    Visibility,
 )
 
 

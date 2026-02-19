@@ -1,9 +1,6 @@
 """Unit tests for Go dependency scanner."""
 
-import tempfile
 from pathlib import Path
-
-import pytest
 
 from src.layers.l1_intelligence.dependency_scanner.base_scanner import Ecosystem
 from src.layers.l1_intelligence.dependency_scanner.go_scanner import GoScanner

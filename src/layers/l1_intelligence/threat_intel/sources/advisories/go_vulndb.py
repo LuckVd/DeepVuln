@@ -4,7 +4,6 @@ Go maintains an official vulnerability database at https://vuln.go.dev/
 This module provides a client to query this database.
 """
 
-import asyncio
 from datetime import datetime
 from typing import Any
 

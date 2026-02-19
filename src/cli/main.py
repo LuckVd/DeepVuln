@@ -6,7 +6,11 @@ from typing import Any
 
 import click
 
-from src.cli.config_display import export_config_report_json, export_config_report_text, show_config_report
+from src.cli.config_display import (
+    export_config_report_json,
+    export_config_report_text,
+    show_config_report,
+)
 from src.cli.display import (
     console,
     create_progress,
@@ -38,7 +42,7 @@ from src.models.fetcher import FetchResult
 
 def _check_and_prompt_sync() -> None:
     """Check database status and prompt user to sync if needed."""
-    from questionary import confirm, select
+    from questionary import select
 
     async def check_status():
         from src.layers.l1_intelligence.threat_intel import IntelService
@@ -868,7 +872,6 @@ def parse(path: str, output: str | None, output_format: str, call_graph: bool, v
 
 def _format_module_text(module, verbose: bool) -> str:
     """Format module info as text."""
-    from rich.table import Table
     from io import StringIO
 
     output = StringIO()

@@ -8,7 +8,6 @@ import pytest
 from src.layers.l1_intelligence.build_config.analyzers.dockerfile_analyzer import DockerfileAnalyzer
 from src.layers.l1_intelligence.build_config.models import (
     BuildConfigReport,
-    FindingCategory,
     SecurityRisk,
 )
 

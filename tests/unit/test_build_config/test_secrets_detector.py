@@ -8,7 +8,6 @@ import pytest
 from src.layers.l1_intelligence.build_config.analyzers.secrets_detector import SecretsDetector
 from src.layers.l1_intelligence.build_config.models import (
     BuildConfigReport,
-    FindingCategory,
     SecurityRisk,
 )
 

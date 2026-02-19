@@ -8,6 +8,8 @@ from src.layers.l1_intelligence.attack_surface.ast.base import (
 )
 from src.layers.l1_intelligence.attack_surface.http_detector import (
     get_detector_for_file as get_http_detector_for_file,
+)
+from src.layers.l1_intelligence.attack_surface.http_detector import (
     get_detector_for_framework as get_http_detector_for_framework,
 )
 from src.layers.l1_intelligence.attack_surface.models import (

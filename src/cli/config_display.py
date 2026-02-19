@@ -112,9 +112,9 @@ def _show_summary_header(report: BuildConfigReport) -> None:
     # Create header
     header_text = Text()
     header_text.append("Build Configuration Security Report\n", style="bold cyan")
-    header_text.append(f"Source: ", style="dim")
+    header_text.append("Source: ", style="dim")
     header_text.append(f"{report.source_path}\n", style="white")
-    header_text.append(f"Total Findings: ", style="dim")
+    header_text.append("Total Findings: ", style="dim")
     header_text.append(f"{len(report.findings)}", style="bold")
 
     console.print(Panel(header_text, border_style="cyan"))

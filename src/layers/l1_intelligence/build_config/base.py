@@ -173,7 +173,6 @@ class BaseConfigAnalyzer(ABC):
             "example",
             "xxx",
             "****",
-            "****",
             "<set",
             "your_",
         }

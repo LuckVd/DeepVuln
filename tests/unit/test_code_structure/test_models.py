@@ -1,13 +1,11 @@
 """Tests for code structure data models."""
 
-import pytest
 
 from src.layers.l1_intelligence.code_structure.models import (
     CallEdge,
     CallGraph,
     ClassDef,
     ClassType,
-    FieldDef,
     FunctionDef,
     ImportDef,
     ModuleInfo,

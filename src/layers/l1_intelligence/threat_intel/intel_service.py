@@ -410,7 +410,6 @@ class IntelService:
             - recommendation: str - recommended action
             - days_since_sync: int | None - days since last sync
         """
-        from datetime import timedelta
         from pathlib import Path
 
         result = {

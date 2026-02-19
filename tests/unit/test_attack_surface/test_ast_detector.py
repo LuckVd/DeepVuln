@@ -1,6 +1,5 @@
 """Tests for AST-based attack surface detectors."""
 
-import tempfile
 from pathlib import Path
 
 import pytest

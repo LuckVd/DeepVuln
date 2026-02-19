@@ -1,6 +1,5 @@
 """Unit tests for version comparison utilities."""
 
-import pytest
 
 from src.layers.l1_intelligence.security_analyzer.version_utils import (
     VersionRange,

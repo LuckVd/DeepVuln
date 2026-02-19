@@ -358,7 +358,7 @@ class PythonAnalyzer(BaseConfigAnalyzer):
                         "receives security updates.",
                         file_path=source_file,
                         evidence=f"Python {version}",
-                        recommendation=f"Upgrade to a supported Python version (3.11+ recommended).",
+                        recommendation="Upgrade to a supported Python version (3.11+ recommended).",
                         references=[
                             "https://devguide.python.org/versions/",
                         ],

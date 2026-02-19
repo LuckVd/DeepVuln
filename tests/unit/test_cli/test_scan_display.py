@@ -5,8 +5,8 @@ from datetime import datetime
 from src.cli.scan_display import (
     export_report_text,
     show_quick_scan_result,
-    show_severity_breakdown,
     show_security_summary,
+    show_severity_breakdown,
     show_tech_stack,
     show_vulnerability_list,
 )
@@ -16,7 +16,6 @@ from src.layers.l1_intelligence.dependency_scanner.base_scanner import (
 )
 from src.layers.l1_intelligence.security_analyzer.analyzer import (
     DependencyVuln,
-    FrameworkVuln,
     SecurityReport,
 )
 from src.layers.l1_intelligence.tech_stack_detector.detector import (

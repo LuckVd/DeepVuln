@@ -1,15 +1,13 @@
 """Main code structure parser for parsing projects and directories."""
 
 import logging
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterator
 
 from .base import CodeStructureParser
 from .models import (
-    CallEdge,
     ClassDef,
-    FunctionDef,
     ModuleInfo,
     ParseOptions,
     ProjectStructure,

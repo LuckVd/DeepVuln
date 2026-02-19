@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from src.layers.l1_intelligence.attack_surface.detector import AttackSurfaceDetector
 from src.layers.l1_intelligence.attack_surface.http_detector import (
     EchoDetector,
@@ -18,16 +16,15 @@ from src.layers.l1_intelligence.attack_surface.models import (
     EntryPointType,
     HTTPMethod,
 )
+from src.layers.l1_intelligence.attack_surface.mq_detector import (
+    CronDetector,
+    KafkaDetector,
+    RabbitMQDetector,
+)
 from src.layers.l1_intelligence.attack_surface.rpc_detector import (
     DubboDetector,
     GrpcDetector,
     ThriftDetector,
-)
-from src.layers.l1_intelligence.attack_surface.mq_detector import (
-    KafkaDetector,
-    RabbitMQDetector,
-    RedisDetector,
-    CronDetector,
 )
 
 
