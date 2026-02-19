@@ -13,6 +13,8 @@ Core components:
 - CodeQLEngine: CodeQL integration
 - OpenCodeAgent: AI-powered security audit
 - SmartScanner: Intelligent scanner with auto rule selection
+- StrategyEngine: Priority-based audit strategy generation
+- TaskDispatcher: Agent task dispatch and execution
 """
 
 from src.layers.l3_analysis.models import (
@@ -27,6 +29,29 @@ from src.layers.l3_analysis.engines.codeql import CodeQLEngine
 from src.layers.l3_analysis.engines.opencode_agent import OpenCodeAgent
 from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
 from src.layers.l3_analysis.smart_scanner import SmartScanner, create_smart_scanner
+from src.layers.l3_analysis.strategy import (
+    AuditPriority,
+    AuditPriorityLevel,
+    AuditTarget,
+    AuditStrategy,
+    EngineAllocation,
+    TargetGroup,
+    PriorityScore,
+    PriorityCalculator,
+    StrategyEngine,
+)
+from src.layers.l3_analysis.task import (
+    AgentTask,
+    TaskType,
+    TaskPriority,
+    TaskStatus,
+    TaskContext,
+    TaskResult,
+    TaskBatch,
+    TaskGenerator,
+    TaskDispatcher,
+    ContextBuilder,
+)
 
 __all__ = [
     # Models
@@ -44,4 +69,25 @@ __all__ = [
     # Scanner
     "SmartScanner",
     "create_smart_scanner",
+    # Strategy
+    "AuditPriority",
+    "AuditPriorityLevel",
+    "AuditTarget",
+    "AuditStrategy",
+    "EngineAllocation",
+    "TargetGroup",
+    "PriorityScore",
+    "PriorityCalculator",
+    "StrategyEngine",
+    # Task
+    "AgentTask",
+    "TaskType",
+    "TaskPriority",
+    "TaskStatus",
+    "TaskContext",
+    "TaskResult",
+    "TaskBatch",
+    "TaskGenerator",
+    "TaskDispatcher",
+    "ContextBuilder",
 ]

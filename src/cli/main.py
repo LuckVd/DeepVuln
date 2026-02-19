@@ -1773,5 +1773,210 @@ def _export_agent_result(result, output_path: str, output_format: str) -> None:
     Path(output_path).write_text(content, encoding="utf-8")
 
 
+@main.command("strategy")
+@click.option("--path", "-p", required=True, type=click.Path(exists=True), help="Path to source code")
+@click.option("--output", "-o", type=click.Path(), help="Output file for strategy report")
+@click.option("--format", "output_format", type=click.Choice(["text", "json", "yaml"]), default="text", help="Output format")
+@click.option("--engines", multiple=True, type=click.Choice(["semgrep", "codeql", "agent"]), help="Available engines")
+@click.option("--time-budget", type=int, help="Time budget in seconds")
+@click.option("--token-budget", type=int, help="LLM token budget")
+def generate_strategy(
+    path: str,
+    output: str | None,
+    output_format: str,
+    engines: tuple[str, ...],
+    time_budget: int | None,
+    token_budget: int | None,
+) -> None:
+    """Generate audit strategy with priority-based analysis plan.
+
+    This command analyzes the project's attack surface and generates
+    a priority-based audit strategy. It helps you understand which
+    parts of the codebase should be audited first and with which engines.
+
+    The strategy considers:
+    - Attack surface exposure (entry points, HTTP methods)
+    - Technology stack risks (frameworks, dependencies)
+    - Code complexity (cyclomatic complexity, LOC)
+    - Historical vulnerability patterns
+
+    Examples:
+        deepvuln strategy --path ./src
+        deepvuln strategy -p . --format yaml -o strategy.yaml
+        deepvuln strategy -p . --engines semgrep --engines agent
+        deepvuln strategy -p . --time-budget 1800  # 30 minutes
+    """
+    from src.layers.l1_intelligence.attack_surface import AttackSurfaceDetector
+    from src.layers.l3_analysis import StrategyEngine
+
+    show_banner()
+    source_path = Path(path)
+
+    console.print(f"[cyan]Generating audit strategy for {source_path}...[/]\n")
+
+    # Detect attack surface
+    console.print("[dim]Step 1: Detecting attack surface...[/]")
+    detector = AttackSurfaceDetector()
+    attack_surface = detector.detect(source_path)
+
+    console.print(f"[dim]  Found {attack_surface.total_entry_points} entry points[/]")
+    console.print(f"[dim]  HTTP: {attack_surface.http_endpoints}, RPC: {attack_surface.rpc_services}, gRPC: {attack_surface.grpc_services}[/]")
+
+    # Create strategy engine
+    available_engines = list(engines) if engines else ["semgrep", "codeql", "agent"]
+    strategy_engine = StrategyEngine(available_engines=available_engines)
+
+    # Generate strategy
+    console.print("[dim]Step 2: Calculating priorities...[/]")
+    strategy = strategy_engine.create_strategy(
+        source_path=source_path,
+        project_name=source_path.name,
+        attack_surface=attack_surface,
+    )
+
+    # Optimize if budgets specified
+    if time_budget or token_budget:
+        console.print("[dim]Step 3: Optimizing for resource constraints...[/]")
+        strategy = strategy_engine.optimize_strategy(
+            strategy=strategy,
+            time_budget_seconds=time_budget,
+            token_budget=token_budget,
+        )
+
+    # Display or export results
+    console.print()
+    console.rule("[bold cyan]Audit Strategy[/]")
+    console.print()
+
+    if output_format == "json":
+        content = strategy.model_dump_json(indent=2)
+        if output:
+            Path(output).write_text(content, encoding="utf-8")
+            console.print(f"[green]Strategy exported to: {output}[/]")
+        else:
+            console.print_json(content)
+    elif output_format == "yaml":
+        content = strategy.to_yaml_config()
+        if output:
+            Path(output).write_text(content, encoding="utf-8")
+            console.print(f"[green]Strategy exported to: {output}[/]")
+        else:
+            console.print(content)
+    else:
+        _display_strategy_text(strategy, attack_surface)
+        if output:
+            content = strategy.to_yaml_config()
+            Path(output).write_text(content, encoding="utf-8")
+            console.print(f"\n[green]Strategy exported to: {output}[/]")
+
+
+def _display_strategy_text(strategy, attack_surface) -> None:
+    """Display strategy in text format."""
+    from rich.table import Table
+
+    # Summary
+    console.print(f"[dim]Project:[/] {strategy.project_name}")
+    console.print(f"[dim]Source:[/] {strategy.source_path}")
+    console.print(f"[dim]Total Targets:[/] {strategy.total_targets}")
+    console.print()
+
+    # Priority distribution
+    dist = strategy.get_summary()["by_priority"]
+    if any(v > 0 for v in dist.values()):
+        priority_table = Table(title="Priority Distribution", show_header=True)
+        priority_table.add_column("Priority", style="cyan")
+        priority_table.add_column("Count", justify="right")
+        priority_table.add_column("Engines", style="dim")
+
+        priority_colors = {
+            "critical": "red",
+            "high": "orange3",
+            "medium": "yellow",
+            "low": "blue",
+            "skip": "dim",
+        }
+
+        engine_info = {
+            "critical": "agent + semgrep + codeql",
+            "high": "agent + semgrep",
+            "medium": "semgrep + codeql",
+            "low": "semgrep",
+            "skip": "-",
+        }
+
+        for level in ["critical", "high", "medium", "low", "skip"]:
+            count = dist.get(level, 0)
+            if count > 0:
+                color = priority_colors.get(level, "white")
+                priority_table.add_row(
+                    f"[{color}]{level.upper()}[/{color}]",
+                    str(count),
+                    engine_info.get(level, ""),
+                )
+
+        console.print(priority_table)
+        console.print()
+
+    # Entry point summary
+    if attack_surface and attack_surface.total_entry_points > 0:
+        entry_table = Table(title="Attack Surface Summary", show_header=True)
+        entry_table.add_column("Type", style="cyan")
+        entry_table.add_column("Count", justify="right")
+        entry_table.add_column("Unauthenticated", justify="right")
+
+        entry_types = [
+            ("HTTP", attack_surface.http_endpoints),
+            ("RPC", attack_surface.rpc_services),
+            ("gRPC", attack_surface.grpc_services),
+            ("MQ", attack_surface.mq_consumers),
+            ("Cron", attack_surface.cron_jobs),
+        ]
+
+        for type_name, count in entry_types:
+            if count > 0:
+                entry_table.add_row(type_name, str(count), "-")
+
+        # Add unauthenticated count
+        unauth_count = len(attack_surface.get_unauthenticated())
+        if unauth_count > 0:
+            entry_table.add_row("[red]Unauthenticated[/]", str(unauth_count), "")
+
+        console.print(entry_table)
+        console.print()
+
+    # Top targets
+    sorted_targets = strategy.get_sorted_targets()[:10]
+    if sorted_targets:
+        target_table = Table(title="Top 10 Priority Targets", show_header=True)
+        target_table.add_column("Priority", width=10)
+        target_table.add_column("Score", justify="right", width=6)
+        target_table.add_column("Target", width=40)
+        target_table.add_column("Type", width=12)
+
+        for target in sorted_targets:
+            if target.priority:
+                color = priority_colors.get(target.priority.level.value, "white")
+                score = f"{target.priority.final_score:.2f}"
+                target_table.add_row(
+                    f"[{color}]{target.priority.level.value.upper()}[/{color}]",
+                    score,
+                    target.to_display()[:40],
+                    target.target_type,
+                )
+
+        console.print(target_table)
+        console.print()
+
+    # Execution plan
+    console.print("[bold]Execution Plan:[/]")
+    console.print("[dim]1. Scan CRITICAL targets with all engines[/]")
+    console.print("[dim]2. Scan HIGH targets with agent + semgrep[/]")
+    console.print("[dim]3. Scan MEDIUM targets with semgrep + codeql[/]")
+    console.print("[dim]4. Scan LOW targets with semgrep only[/]")
+
+    if strategy.stop_on_critical:
+        console.print("\n[yellow]Stop on critical: enabled[/]")
+
+
 if __name__ == "__main__":
     main()

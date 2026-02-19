@@ -10,6 +10,8 @@ from typing import Any
 from src.layers.l3_analysis.engines.base import EngineRegistry
 from src.layers.l3_analysis.engines.semgrep import OFFICIAL_RULE_SETS, SemgrepEngine
 from src.layers.l3_analysis.models import Finding, ScanResult, SeverityLevel
+from src.layers.l3_analysis.strategy.engine import StrategyEngine
+from src.layers.l3_analysis.strategy.models import AuditStrategy, AuditTarget
 
 
 # Language to rule set mapping
@@ -67,6 +69,7 @@ class SmartScanner:
     Smart scanner that automatically selects rules based on project tech stack.
 
     Integrates with L1 tech stack detection to provide intelligent rule selection.
+    Also integrates with StrategyEngine for priority-based auditing.
     """
 
     def __init__(
@@ -74,6 +77,7 @@ class SmartScanner:
         engine_registry: EngineRegistry | None = None,
         custom_rules_dir: Path | None = None,
         semgrep_engine: SemgrepEngine | None = None,
+        strategy_engine: StrategyEngine | None = None,
     ):
         """
         Initialize the smart scanner.
@@ -82,10 +86,12 @@ class SmartScanner:
             engine_registry: Registry of available engines.
             custom_rules_dir: Directory containing custom rules.
             semgrep_engine: Direct SemgrepEngine instance (takes priority over registry).
+            strategy_engine: Strategy engine for priority-based auditing.
         """
         self.engine_registry = engine_registry
         self.custom_rules_dir = custom_rules_dir
         self._semgrep_engine = semgrep_engine
+        self._strategy_engine = strategy_engine
 
     def _get_semgrep_engine(self) -> SemgrepEngine | None:
         """Get Semgrep engine from registry or use provided instance."""
@@ -265,6 +271,173 @@ class SmartScanner:
             "languages": languages or [],
             "custom_rules": self._find_custom_rules(languages, tech_stack),
         }
+
+    def create_audit_strategy(
+        self,
+        source_path: Path,
+        project_name: str | None = None,
+        attack_surface_report: Any | None = None,
+        settings: dict[str, Any] | None = None,
+    ) -> AuditStrategy:
+        """
+        Create an audit strategy for the project.
+
+        Args:
+            source_path: Path to the source code.
+            project_name: Project name (defaults to directory name).
+            attack_surface_report: Attack surface analysis from L1.
+            settings: Strategy settings overrides.
+
+        Returns:
+            AuditStrategy with priorities and engine allocations.
+        """
+        if not self._strategy_engine:
+            self._strategy_engine = StrategyEngine()
+
+        return self._strategy_engine.create_strategy(
+            source_path=source_path,
+            project_name=project_name,
+            attack_surface=attack_surface_report,
+            settings=settings,
+        )
+
+    async def scan_with_strategy(
+        self,
+        source_path: Path,
+        strategy: AuditStrategy | None = None,
+        attack_surface_report: Any | None = None,
+        tech_stack: dict[str, Any] | None = None,
+    ) -> ScanResult:
+        """
+        Scan using a priority-based strategy.
+
+        This method:
+        1. Creates or uses a strategy
+        2. Executes scans in priority order
+        3. Can stop early on critical findings
+
+        Args:
+            source_path: Path to the source code.
+            strategy: Pre-computed audit strategy.
+            attack_surface_report: Attack surface analysis from L1.
+            tech_stack: Detected tech stack.
+
+        Returns:
+            Combined ScanResult from all executed scans.
+        """
+        # Create strategy if not provided
+        if not strategy:
+            strategy = self.create_audit_strategy(
+                source_path=source_path,
+                attack_surface_report=attack_surface_report,
+            )
+
+        # Get execution order
+        if not self._strategy_engine:
+            self._strategy_engine = StrategyEngine()
+
+        execution_order = self._strategy_engine.get_execution_order(strategy)
+
+        # Initialize combined result
+        combined_result = ScanResult(
+            source_path=str(source_path),
+            engine="smart_scanner",
+        )
+
+        # Execute each priority group
+        for group_name, group in execution_order:
+            # Skip if no targets
+            if not group.targets:
+                continue
+
+            # Get target files
+            target_files = list(set(t.file_path for t in group.targets))
+
+            # Run each engine in the group
+            for allocation in group.engine_allocations:
+                if not allocation.enabled:
+                    continue
+
+                engine_result = await self._run_engine_allocation(
+                    source_path=source_path,
+                    allocation=allocation,
+                    target_files=target_files,
+                    tech_stack=tech_stack,
+                )
+
+                if engine_result:
+                    combined_result.merge_results(engine_result)
+
+                    # Check for critical findings (stop on critical)
+                    if strategy.stop_on_critical:
+                        critical_count = engine_result.by_severity.get("critical", 0)
+                        if critical_count > 0:
+                            combined_result.metadata["stopped_early"] = True
+                            combined_result.metadata["stop_reason"] = "critical_finding"
+                            break
+
+            # Check if we should stop
+            if combined_result.metadata.get("stopped_early"):
+                break
+
+        # Deduplicate and sort
+        combined_result.deduplicate_findings()
+        combined_result.sort_by_severity()
+
+        return combined_result
+
+    async def _run_engine_allocation(
+        self,
+        source_path: Path,
+        allocation: Any,  # EngineAllocation
+        target_files: list[str],
+        tech_stack: dict[str, Any] | None,
+    ) -> ScanResult | None:
+        """
+        Run a specific engine allocation.
+
+        Args:
+            source_path: Path to source code.
+            allocation: Engine allocation configuration.
+            target_files: Files to scan.
+            tech_stack: Detected tech stack.
+
+        Returns:
+            ScanResult from the engine, or None if engine unavailable.
+        """
+        engine_name = allocation.engine
+
+        if engine_name == "semgrep":
+            semgrep_engine = self._get_semgrep_engine()
+            if not semgrep_engine:
+                return None
+
+            # Build rule configuration
+            rule_sets = allocation.rules if allocation.rules else ["security"]
+
+            return await semgrep_engine.scan(
+                source_path=source_path,
+                rule_sets=rule_sets,
+                severity_filter=None,
+            )
+
+        elif engine_name == "codeql":
+            # CodeQL integration (placeholder for now)
+            if self.engine_registry:
+                codeql_engine = self.engine_registry.get("codeql")
+                if codeql_engine:
+                    return await codeql_engine.scan(source_path=source_path)
+            return None
+
+        elif engine_name == "agent":
+            # Agent integration (placeholder for now)
+            if self.engine_registry:
+                agent_engine = self.engine_registry.get("agent")
+                if agent_engine:
+                    return await agent_engine.scan(source_path=source_path)
+            return None
+
+        return None
 
 
 def create_smart_scanner(
