@@ -13,6 +13,7 @@ Multi-round audit system for progressive vulnerability discovery.
 - DataFlow models: TaintSource, TaintSink, Sanitizer, PathNode, DataFlowPath
 - Correlation models: EvidenceChain, CorrelationResult, VerificationStatus
 - Termination models: TerminationDecider, TerminationDecision, TerminationReason
+- Evidence Builder: EvidenceChainBuilder, ExploitScenario, ExportFormat
 """
 
 from src.layers.l3_analysis.rounds.models import (
@@ -58,6 +59,14 @@ from src.layers.l3_analysis.rounds.termination import (
     TerminationDecider,
     TerminationReason,
 )
+from src.layers.l3_analysis.rounds.evidence_builder import (
+    DEFAULT_EVIDENCE_CHAIN_CONFIG,
+    EvidenceChainBuilder,
+    EvidenceChainConfig,
+    ExploitScenario,
+    ExploitStep,
+    ExportFormat,
+)
 
 __all__ = [
     # Models
@@ -101,4 +110,11 @@ __all__ = [
     "TerminationConfig",
     "TerminationDecider",
     "DEFAULT_TERMINATION_CONFIG",
+    # Evidence builder
+    "EvidenceChainBuilder",
+    "EvidenceChainConfig",
+    "DEFAULT_EVIDENCE_CHAIN_CONFIG",
+    "ExploitScenario",
+    "ExploitStep",
+    "ExportFormat",
 ]

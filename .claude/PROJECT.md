@@ -85,6 +85,8 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-02-20 | c7a36ad | feat(l3): implement P2-10 evidence chain builder |
+| 2026-02-20 | 7798ff1 | feat(l3): implement P2-09 round termination decider |
 | 2026-02-20 | b93e56b | feat(l3): implement P2-08 round three correlation verification |
 | 2026-02-20 | 69eed1c | feat(l3): implement P2-07 round two deep tracking |
 | 2026-02-20 | 9e01851 | feat(l3): implement P2-06 multi-round audit system and fix bugs |

@@ -14,13 +14,10 @@ from src.layers.l3_analysis.rounds.correlation import (
     CorrelationResult,
     CorrelationRule,
     DEFAULT_CORRELATION_RULES,
-    Evidence,
     EvidenceChain,
-    EvidenceSource,
-    EvidenceType,
     VerificationStatus,
 )
-from src.layers.l3_analysis.rounds.dataflow import DataFlowPath
+from src.layers.l3_analysis.rounds.evidence_builder import EvidenceChainBuilder
 from src.layers.l3_analysis.rounds.models import (
     AnalysisDepth,
     AuditSession,
@@ -51,19 +48,12 @@ class RoundThreeExecutor:
     # Confidence threshold for auto-fp
     AUTO_FP_THRESHOLD = 0.25
 
-    # Weight for different sources
-    SOURCE_WEIGHTS = {
-        EvidenceSource.SEMGREP: 0.6,
-        EvidenceSource.CODEQL: 0.8,
-        EvidenceSource.AGENT: 0.9,
-        EvidenceSource.CORRELATION: 1.0,
-    }
-
     def __init__(
         self,
         source_path: Path,
         agent_executor: Any | None = None,
         correlation_rules: list[CorrelationRule] | None = None,
+        evidence_builder: EvidenceChainBuilder | None = None,
     ):
         """
         Initialize the round three executor.
@@ -72,11 +62,13 @@ class RoundThreeExecutor:
             source_path: Path to source code.
             agent_executor: Async function to execute Agent verification.
             correlation_rules: Custom correlation rules (uses defaults if None).
+            evidence_builder: Custom evidence chain builder (creates one if None).
         """
         self.logger = get_logger(__name__)
         self.source_path = source_path
         self._agent_executor = agent_executor
         self._correlation_rules = correlation_rules or DEFAULT_CORRELATION_RULES
+        self._evidence_builder = evidence_builder or EvidenceChainBuilder(source_path)
 
     async def execute(
         self,
@@ -160,7 +152,7 @@ class RoundThreeExecutor:
         round_result: RoundResult,
         coverage: CoverageStats,
     ) -> EngineStats:
-        """Build evidence chains from candidate data."""
+        """Build evidence chains from candidate data using EvidenceChainBuilder."""
         self.logger.info("Phase 1: Building Evidence Chains")
 
         stats = EngineStats(
@@ -174,14 +166,8 @@ class RoundThreeExecutor:
 
             for candidate in candidates:
                 try:
-                    # Create evidence chain
-                    chain = self._create_evidence_chain(candidate)
-
-                    # Extract evidence from candidate
-                    self._extract_evidence_from_candidate(candidate, chain)
-
-                    # Extract dataflow paths from deep results
-                    self._extract_dataflow_paths(candidate, chain)
+                    # Use EvidenceChainBuilder to build the chain
+                    chain = self._evidence_builder.build_chain(candidate)
 
                     # Store chain in candidate metadata
                     if "correlation" not in candidate.metadata:
@@ -211,167 +197,6 @@ class RoundThreeExecutor:
             ).total_seconds()
 
         return stats
-
-    def _create_evidence_chain(
-        self,
-        candidate: VulnerabilityCandidate,
-    ) -> EvidenceChain:
-        """Create a new evidence chain for a candidate."""
-        return EvidenceChain(
-            id=f"chain-{uuid.uuid4().hex[:8]}",
-            candidate_id=candidate.id,
-        )
-
-    def _extract_evidence_from_candidate(
-        self,
-        candidate: VulnerabilityCandidate,
-        chain: EvidenceChain,
-    ) -> None:
-        """Extract evidence from candidate's collected data."""
-        finding = candidate.finding
-
-        # Add evidence from finding source
-        if finding.source == "semgrep":
-            evidence = Evidence(
-                id=f"ev-{uuid.uuid4().hex[:8]}",
-                source=EvidenceSource.SEMGREP,
-                evidence_type=EvidenceType.PATTERN_MATCH,
-                location=finding.location,
-                content=finding.description,
-                confidence=self._map_confidence(candidate.confidence),
-                weight=self.SOURCE_WEIGHTS.get(EvidenceSource.SEMGREP, 0.6),
-                metadata={
-                    "rule_id": finding.rule_id,
-                    "title": finding.title,
-                },
-            )
-            chain.add_evidence(evidence)
-
-        elif finding.source == "codeql":
-            evidence = Evidence(
-                id=f"ev-{uuid.uuid4().hex[:8]}",
-                source=EvidenceSource.CODEQL,
-                evidence_type=EvidenceType.DATAFLOW_PATH,
-                location=finding.location,
-                content=finding.description,
-                confidence=self._map_confidence(candidate.confidence),
-                weight=self.SOURCE_WEIGHTS.get(EvidenceSource.CODEQL, 0.8),
-                metadata={
-                    "query_id": finding.rule_id,
-                    "title": finding.title,
-                },
-            )
-            chain.add_evidence(evidence)
-
-        elif finding.source == "agent":
-            evidence = Evidence(
-                id=f"ev-{uuid.uuid4().hex[:8]}",
-                source=EvidenceSource.AGENT,
-                evidence_type=EvidenceType.AGENT_ANALYSIS,
-                location=finding.location,
-                content=finding.description,
-                confidence=self._map_confidence(candidate.confidence),
-                weight=self.SOURCE_WEIGHTS.get(EvidenceSource.AGENT, 0.9),
-                metadata={
-                    "title": finding.title,
-                },
-            )
-            chain.add_evidence(evidence)
-
-        # Add evidence from candidate's evidence list
-        for ev_data in candidate.evidence:
-            source_str = ev_data.get("source", "unknown")
-            content = ev_data.get("data", {})
-
-            # Map source string to enum
-            source = self._map_source_string(source_str)
-            if source is None:
-                continue
-
-            evidence = Evidence(
-                id=f"ev-{uuid.uuid4().hex[:8]}",
-                source=source,
-                evidence_type=self._infer_evidence_type(source, content),
-                content=str(content)[:500] if content else None,
-                confidence=content.get("confidence", 0.5) if isinstance(content, dict) else 0.5,
-                weight=self.SOURCE_WEIGHTS.get(source, 0.5),
-                metadata={"raw_data": content} if content else {},
-            )
-            chain.add_evidence(evidence)
-
-        # Check for deep analysis results
-        deep_results = candidate.metadata.get("deep_results", {})
-
-        # CodeQL deep results
-        if "codeql" in deep_results:
-            codeql_data = deep_results["codeql"]
-            if codeql_data.get("has_path"):
-                evidence = Evidence(
-                    id=f"ev-{uuid.uuid4().hex[:8]}",
-                    source=EvidenceSource.CODEQL,
-                    evidence_type=EvidenceType.DATAFLOW_PATH,
-                    confidence=0.8 if codeql_data.get("path_complete") else 0.6,
-                    weight=self.SOURCE_WEIGHTS.get(EvidenceSource.CODEQL, 0.8),
-                    metadata={"from_deep_analysis": True},
-                )
-                chain.add_evidence(evidence)
-
-        # Agent deep results
-        if "agent" in deep_results:
-            agent_data = deep_results["agent"]
-            if agent_data.get("confirmed"):
-                evidence = Evidence(
-                    id=f"ev-{uuid.uuid4().hex[:8]}",
-                    source=EvidenceSource.AGENT,
-                    evidence_type=EvidenceType.AGENT_ANALYSIS,
-                    confidence=0.9,
-                    weight=self.SOURCE_WEIGHTS.get(EvidenceSource.AGENT, 0.9),
-                    metadata={
-                        "from_deep_analysis": True,
-                        "confirmed": True,
-                    },
-                )
-                chain.add_evidence(evidence)
-            elif agent_data.get("false_positive"):
-                evidence = Evidence(
-                    id=f"ev-{uuid.uuid4().hex[:8]}",
-                    source=EvidenceSource.AGENT,
-                    evidence_type=EvidenceType.AGENT_ANALYSIS,
-                    confidence=0.9,
-                    weight=self.SOURCE_WEIGHTS.get(EvidenceSource.AGENT, 0.9),
-                    metadata={
-                        "from_deep_analysis": True,
-                        "is_false_positive": True,
-                    },
-                )
-                chain.add_evidence(evidence)
-
-        # Check consistency
-        chain.check_consistency()
-
-    def _extract_dataflow_paths(
-        self,
-        candidate: VulnerabilityCandidate,
-        chain: EvidenceChain,
-    ) -> None:
-        """Extract dataflow paths from candidate metadata."""
-        deep_results = candidate.metadata.get("deep_results", {})
-        codeql_data = deep_results.get("codeql", {})
-
-        # Dataflow paths are stored in deep results
-        if "dataflow_paths" in codeql_data:
-            for path_data in codeql_data["dataflow_paths"]:
-                if isinstance(path_data, dict):
-                    # Recreate minimal DataFlowPath for tracking
-                    # Full path data would be in the original
-                    chain.add_dataflow_path(DataFlowPath(
-                        id=path_data.get("id", f"path-{uuid.uuid4().hex[:8]}"),
-                        candidate_id=candidate.id,
-                        source=codeql_data.get("source"),
-                        sink=codeql_data.get("sink"),
-                        is_complete=path_data.get("is_complete", False),
-                        analyzer="codeql",
-                    ))
 
     async def _apply_correlation_rules(
         self,
@@ -637,46 +462,3 @@ class RoundThreeExecutor:
             f"{len(uncertain)} uncertain, {len(false_positive)} FP, "
             f"{len(not_exploitable)} not exploitable"
         )
-
-    def _map_confidence(self, level: ConfidenceLevel) -> float:
-        """Map confidence level enum to float."""
-        mapping = {
-            ConfidenceLevel.HIGH: 0.85,
-            ConfidenceLevel.MEDIUM: 0.6,
-            ConfidenceLevel.LOW: 0.3,
-        }
-        return mapping.get(level, 0.5)
-
-    def _map_source_string(self, source: str) -> EvidenceSource | None:
-        """Map source string to enum."""
-        mapping = {
-            "semgrep": EvidenceSource.SEMGREP,
-            "codeql": EvidenceSource.CODEQL,
-            "agent": EvidenceSource.AGENT,
-            "manual": EvidenceSource.MANUAL,
-            "correlation": EvidenceSource.CORRELATION,
-        }
-        return mapping.get(source.lower())
-
-    def _infer_evidence_type(
-        self,
-        source: EvidenceSource,
-        content: dict,
-    ) -> EvidenceType:
-        """Infer evidence type from source and content."""
-        if source == EvidenceSource.SEMGREP:
-            return EvidenceType.PATTERN_MATCH
-        elif source == EvidenceSource.CODEQL:
-            return EvidenceType.DATAFLOW_PATH
-        elif source == EvidenceSource.AGENT:
-            return EvidenceType.AGENT_ANALYSIS
-
-        if isinstance(content, dict):
-            if content.get("dataflow_path"):
-                return EvidenceType.DATAFLOW_PATH
-            if content.get("sanitizer"):
-                return EvidenceType.SANITIZER_DETECTED
-            if content.get("code_snippet"):
-                return EvidenceType.CODE_SNIPPET
-
-        return EvidenceType.PATTERN_MATCH

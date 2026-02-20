@@ -59,6 +59,14 @@ from src.layers.l3_analysis.rounds.termination import (
     TerminationDecider,
     TerminationReason,
 )
+from src.layers.l3_analysis.rounds.evidence_builder import (
+    DEFAULT_EVIDENCE_CHAIN_CONFIG,
+    EvidenceChainBuilder,
+    EvidenceChainConfig,
+    ExploitScenario,
+    ExploitStep,
+    ExportFormat,
+)
 from src.layers.l3_analysis.strategy.models import (
     AuditPriority,
     AuditPriorityLevel,
@@ -1419,17 +1427,21 @@ class TestRoundThreeExecutor:
         assert "rules" in result.engine_stats
 
     def test_map_confidence(self, executor):
-        """Test confidence mapping."""
-        assert executor._map_confidence(ConfidenceLevel.HIGH) == 0.85
-        assert executor._map_confidence(ConfidenceLevel.MEDIUM) == 0.6
-        assert executor._map_confidence(ConfidenceLevel.LOW) == 0.3
+        """Test confidence mapping via EvidenceChainBuilder."""
+        # Confidence mapping is now in EvidenceChainBuilder
+        builder = executor._evidence_builder
+        assert builder._map_confidence(ConfidenceLevel.HIGH) == 0.85
+        assert builder._map_confidence(ConfidenceLevel.MEDIUM) == 0.6
+        assert builder._map_confidence(ConfidenceLevel.LOW) == 0.3
 
     def test_map_source_string(self, executor):
-        """Test source string mapping."""
-        assert executor._map_source_string("semgrep") == EvidenceSource.SEMGREP
-        assert executor._map_source_string("codeql") == EvidenceSource.CODEQL
-        assert executor._map_source_string("agent") == EvidenceSource.AGENT
-        assert executor._map_source_string("unknown") is None
+        """Test source string mapping via EvidenceChainBuilder."""
+        # Source mapping is now in EvidenceChainBuilder
+        builder = executor._evidence_builder
+        assert builder._map_source_string("semgrep") == EvidenceSource.SEMGREP
+        assert builder._map_source_string("codeql") == EvidenceSource.CODEQL
+        assert builder._map_source_string("agent") == EvidenceSource.AGENT
+        assert builder._map_source_string("unknown") is None
 
 
 # =============================================================================
@@ -1874,3 +1886,298 @@ class TestRoundControllerTerminationIntegration:
         assert "termination_reason" in sample_session.metadata
         assert sample_session.metadata["termination_reason"] == "max_rounds_reached"
         assert "termination_explanation" in sample_session.metadata
+
+
+# =============================================================================
+# P2-10: Evidence Chain Builder Tests
+# =============================================================================
+
+
+class TestExportFormat:
+    """Tests for ExportFormat enum."""
+
+    def test_formats_exist(self):
+        """Test that all expected formats exist."""
+        assert ExportFormat.JSON.value == "json"
+        assert ExportFormat.MARKDOWN.value == "markdown"
+        assert ExportFormat.HTML.value == "html"
+
+
+class TestExploitStep:
+    """Tests for ExploitStep model."""
+
+    def test_default_init(self):
+        """Test default initialization."""
+        step = ExploitStep(step_number=1, action="Test action")
+        assert step.step_number == 1
+        assert step.action == "Test action"
+        assert step.location is None
+        assert step.variable is None
+
+    def test_with_location(self):
+        """Test with location."""
+        location = CodeLocation(file="test.py", line=10)
+        step = ExploitStep(step_number=1, action="Test", location=location)
+        assert step.location == location
+
+
+class TestExploitScenario:
+    """Tests for ExploitScenario model."""
+
+    def test_default_init(self):
+        """Test default initialization."""
+        scenario = ExploitScenario(id="scenario-001", name="Test Scenario")
+        assert scenario.id == "scenario-001"
+        assert scenario.name == "Test Scenario"
+        assert scenario.steps == []
+        assert scenario.feasibility == "possible"
+
+    def test_add_step(self):
+        """Test adding steps."""
+        scenario = ExploitScenario(id="scenario-001", name="Test")
+        step = scenario.add_step("First step")
+        assert len(scenario.steps) == 1
+        assert scenario.steps[0].step_number == 1
+        assert scenario.steps[0].action == "First step"
+
+    def test_to_summary(self):
+        """Test summary generation."""
+        scenario = ExploitScenario(id="scenario-001", name="SQL Injection")
+        scenario.add_step("Inject payload")
+        summary = scenario.to_summary()
+        assert "SQL Injection" in summary
+        assert "1 steps" in summary
+
+
+class TestEvidenceChainConfig:
+    """Tests for EvidenceChainConfig model."""
+
+    def test_default_init(self):
+        """Test default initialization."""
+        config = EvidenceChainConfig()
+        assert config.semgrep_weight == 0.6
+        assert config.codeql_weight == 0.8
+        assert config.agent_weight == 0.9
+        assert config.auto_confirm_threshold == 0.85
+
+    def test_custom_weights(self):
+        """Test custom weights."""
+        config = EvidenceChainConfig(semgrep_weight=0.7, agent_weight=1.0)
+        assert config.semgrep_weight == 0.7
+        assert config.agent_weight == 1.0
+
+    def test_default_config_exists(self):
+        """Test that default config exists."""
+        assert DEFAULT_EVIDENCE_CHAIN_CONFIG is not None
+        assert isinstance(DEFAULT_EVIDENCE_CHAIN_CONFIG, EvidenceChainConfig)
+
+
+class TestEvidenceChainBuilder:
+    """Tests for EvidenceChainBuilder class."""
+
+    @pytest.fixture
+    def builder(self):
+        """Create a builder instance."""
+        return EvidenceChainBuilder()
+
+    @pytest.fixture
+    def builder_with_path(self, tmp_path):
+        """Create a builder with source path."""
+        return EvidenceChainBuilder(source_path=tmp_path)
+
+    @pytest.fixture
+    def sample_finding_for_builder(self):
+        """Create a sample finding for builder tests."""
+        return Finding(
+            id="finding-builder-001",
+            severity=SeverityLevel.HIGH,
+            title="SQL Injection",
+            description="Potential SQL injection vulnerability",
+            location=CodeLocation(file="test.py", line=42),
+            source="semgrep",
+            rule_id="sql-injection",
+        )
+
+    @pytest.fixture
+    def sample_candidate_for_builder(self, sample_finding_for_builder):
+        """Create a sample candidate for builder tests."""
+        return VulnerabilityCandidate(
+            id="candidate-builder-001",
+            finding=sample_finding_for_builder,
+            confidence=ConfidenceLevel.HIGH,
+            discovered_in_round=1,
+        )
+
+    def test_default_init(self, builder):
+        """Test builder initialization."""
+        assert builder.config is not None
+        assert builder.source_path is None
+
+    def test_init_with_path(self, builder_with_path, tmp_path):
+        """Test builder initialization with path."""
+        assert builder_with_path.source_path == tmp_path
+
+    def test_build_chain(self, builder, sample_candidate_for_builder):
+        """Test building a chain from candidate."""
+        chain = builder.build_chain(sample_candidate_for_builder)
+
+        assert chain is not None
+        assert chain.candidate_id == sample_candidate_for_builder.id
+        assert len(chain.evidences) > 0
+        assert chain.consistent is True
+
+    def test_build_chain_includes_finding_evidence(self, builder, sample_candidate_for_builder):
+        """Test that chain includes evidence from finding."""
+        chain = builder.build_chain(sample_candidate_for_builder)
+
+        # Should have at least the finding evidence
+        assert any(e.source == EvidenceSource.SEMGREP for e in chain.evidences)
+
+    def test_build_chains_batch(self, builder, sample_finding_for_builder):
+        """Test building chains for multiple candidates."""
+        candidates = []
+        for i in range(3):
+            finding = Finding(
+                id=f"finding-{i}",
+                severity=SeverityLevel.HIGH,
+                title=f"Finding {i}",
+                description=f"Description {i}",
+                location=CodeLocation(file="test.py", line=(i + 1) * 10),
+                source="semgrep",
+            )
+            candidate = VulnerabilityCandidate(
+                id=f"candidate-{i}",
+                finding=finding,
+                confidence=ConfidenceLevel.MEDIUM,
+                discovered_in_round=1,
+            )
+            candidates.append(candidate)
+
+        chains = builder.build_chains_batch(candidates)
+        assert len(chains) == 3
+        assert all(c is not None for c in chains)
+
+    def test_add_evidence(self, builder, sample_candidate_for_builder):
+        """Test adding evidence to chain."""
+        chain = builder.build_chain(sample_candidate_for_builder)
+        initial_count = len(chain.evidences)
+
+        evidence = builder.add_evidence(
+            chain,
+            source=EvidenceSource.AGENT,
+            evidence_type=EvidenceType.AGENT_ANALYSIS,
+            content="Agent verified this vulnerability",
+            confidence=0.9,
+        )
+
+        assert len(chain.evidences) == initial_count + 1
+        assert evidence.source == EvidenceSource.AGENT
+        assert evidence.confidence == 0.9
+
+    def test_add_evidence_respects_max_limit(self, sample_candidate_for_builder):
+        """Test that adding evidence respects max limit."""
+        config = EvidenceChainConfig(max_evidence_per_chain=3)
+        builder = EvidenceChainBuilder(config=config)
+        chain = builder.build_chain(sample_candidate_for_builder)
+
+        # Try to add more evidence beyond limit
+        with pytest.raises(ValueError, match="maximum capacity"):
+            for i in range(10):
+                builder.add_evidence(
+                    chain,
+                    source=EvidenceSource.AGENT,
+                    evidence_type=EvidenceType.AGENT_ANALYSIS,
+                    content=f"Evidence {i}",
+                )
+
+    def test_add_cve_match(self, builder, sample_candidate_for_builder):
+        """Test adding CVE match evidence."""
+        chain = builder.build_chain(sample_candidate_for_builder)
+        initial_count = len(chain.evidences)
+
+        evidence = builder.add_cve_match(
+            chain,
+            cve_id="CVE-2024-1234",
+            confidence=0.85,
+            match_reasons=["Similar vulnerability pattern", "Same vulnerable function"],
+        )
+
+        assert len(chain.evidences) == initial_count + 1
+        assert evidence.evidence_type == EvidenceType.CVE_MATCH
+        assert "CVE-2024-1234" in evidence.content
+
+    def test_determine_status_confirmed(self, builder, sample_candidate_for_builder):
+        """Test status determination for confirmed vulnerability."""
+        # Create candidate with deep analysis confirming vulnerability
+        sample_candidate_for_builder.metadata["deep_results"] = {
+            "agent": {"confirmed": True},
+        }
+
+        chain = builder.build_chain(sample_candidate_for_builder)
+        status = builder.determine_status(chain)
+
+        # With multiple high-confidence evidence, should be confirmed or likely
+        assert status in [VerificationStatus.CONFIRMED, VerificationStatus.LIKELY]
+
+    def test_determine_status_false_positive(self, sample_candidate_for_builder):
+        """Test status determination for false positive."""
+        config = EvidenceChainConfig(auto_fp_threshold=0.5)
+        builder = EvidenceChainBuilder(config=config)
+
+        chain = builder.build_chain(sample_candidate_for_builder)
+
+        # Add FP evidence
+        builder.add_evidence(
+            chain,
+            source=EvidenceSource.AGENT,
+            evidence_type=EvidenceType.AGENT_ANALYSIS,
+            confidence=0.9,
+            metadata={"is_false_positive": True},
+        )
+
+        status = builder.determine_status(chain)
+        assert status == VerificationStatus.FALSE_POSITIVE
+
+    def test_export_json(self, builder, sample_candidate_for_builder):
+        """Test JSON export."""
+        chain = builder.build_chain(sample_candidate_for_builder)
+        json_output = builder.export_chain(chain, ExportFormat.JSON)
+
+        assert json_output is not None
+        assert chain.id in json_output
+        assert "evidences" in json_output
+
+    def test_export_markdown(self, builder, sample_candidate_for_builder):
+        """Test Markdown export."""
+        chain = builder.build_chain(sample_candidate_for_builder)
+        md_output = builder.export_chain(chain, ExportFormat.MARKDOWN)
+
+        assert md_output is not None
+        assert "# Evidence Chain Report" in md_output
+        assert chain.candidate_id in md_output
+
+    def test_export_html(self, builder, sample_candidate_for_builder):
+        """Test HTML export."""
+        chain = builder.build_chain(sample_candidate_for_builder)
+        html_output = builder.export_chain(chain, ExportFormat.HTML)
+
+        assert html_output is not None
+        assert "<!DOCTYPE html>" in html_output
+        assert chain.id in html_output
+
+    def test_export_with_exploit_scenario(self, builder, sample_candidate_for_builder):
+        """Test export includes exploit scenarios."""
+        chain = builder.build_chain(sample_candidate_for_builder)
+
+        # Add exploit scenario
+        scenario = ExploitScenario(
+            id="scenario-001",
+            name="SQL Injection Attack",
+            feasibility="easy",
+        )
+        scenario.add_step("Inject SQL via user input")
+        builder.add_exploit_scenario(chain, scenario)
+
+        md_output = builder.export_chain(chain, ExportFormat.MARKDOWN, include_metadata=True)
+        assert "Exploit Scenarios" in md_output
+        assert "SQL Injection Attack" in md_output

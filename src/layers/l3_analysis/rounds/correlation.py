@@ -169,6 +169,12 @@ class EvidenceChain(BaseModel):
         description="Current verification status",
     )
 
+    # Metadata
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional metadata (exploit scenarios, etc.)",
+    )
+
     # Timing
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
