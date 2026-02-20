@@ -8,7 +8,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | P2-07 多轮审计 - 第二轮深度追踪 |
+| **任务** | P2-08 多轮审计 - 第三轮关联验证 |
 | **状态** | completed |
 | **优先级** | high |
 | **创建日期** | 2026-02-20 |
@@ -18,43 +18,43 @@
 
 ## 背景说明
 
-第二轮审计专注于对第一轮识别的候选漏洞进行深度分析。它利用 Agent 的深度审计能力和 CodeQL 的数据流分析，追踪从 source 到 sink 的完整数据流路径。
+第三轮审计专注于对前两轮分析结果进行关联验证，通过多源交叉验证和模式匹配，最终确认漏洞的真实性和可利用性。
 
 **核心功能**：
-1. **数据流追踪**：从用户输入追踪到敏感 sink
-2. **污点分析**：识别不可信数据的传播路径
-3. **跨函数分析**：追踪跨函数/跨文件的调用链
-4. **证据增强**：为候选漏洞补充代码证据
+1. **多源关联**：整合 Semgrep、CodeQL、Agent 三引擎发现
+2. **交叉验证**：验证同一漏洞的多条证据链
+3. **模式匹配**：匹配已知漏洞模式库
+4. **最终判定**：给出漏洞的最终确认状态
 
 **设计理念**：
-- 深度优先：对高置信度候选进行完整分析
-- 证据驱动：收集足够的代码证据支持判断
-- 可追溯：记录完整的数据流路径
+- 证据聚合：综合多引擎发现，降低误报
+- 模式驱动：利用已知漏洞模式加速判断
+- 可解释：提供完整的判定依据
 
 ---
 
 ## 完成标准
 
-### Phase 1: 数据流模型
-- [x] 创建 `DataFlowPath` 模型
-- [x] 创建 `TaintSource` 和 `TaintSink` 模型
-- [x] 创建 `DeepAnalysisResult` 结果模型
+### Phase 1: 关联模型
+- [x] 创建 `CorrelationResult` 模型
+- [x] 创建 `EvidenceChain` 证据链模型
+- [x] 创建 `VerificationStatus` 验证状态枚举
 
-### Phase 2: 第二轮执行器
-- [x] 创建 `RoundTwoExecutor` 类
-- [x] 集成 CodeQL 数据流分析
-- [x] 集成 Agent 深度审计
-- [x] 实现数据流路径提取
+### Phase 2: 第三轮执行器
+- [x] 创建 `RoundThreeExecutor` 类
+- [x] 实现多源证据聚合
+- [x] 实现交叉验证逻辑
+- [x] 实现最终判定算法
 
-### Phase 3: 污点分析器
-- [ ] 创建 `TaintAnalyzer` 类 (可选优化)
-- [ ] 实现污点传播追踪 (可选优化)
-- [ ] 实现净化函数检测 (可选优化)
+### Phase 3: 漏洞确认器
+- [ ] 创建 `VulnerabilityVerifier` 类 (可选优化)
+- [ ] 实现 CVE 模式匹配 (可选优化)
+- [ ] 实现误报过滤规则 (可选优化)
 
 ### Phase 4: 集成与测试
 - [x] 集成到模块导出
-- [x] 单元测试覆盖 (65 tests)
-- [x] 与第一轮结果串联
+- [x] 单元测试覆盖 (88 tests)
+- [x] 与第一、二轮结果串联
 
 ---
 
@@ -62,21 +62,21 @@
 
 ### 已创建文件
 
-- `src/layers/l3_analysis/rounds/dataflow.py` - 数据流模型
-  - SourceType, SinkType, SanitizerType 枚举
-  - TaintSource, TaintSink, Sanitizer, PathNode 模型
-  - DataFlowPath, DeepAnalysisResult 模型
+- `src/layers/l3_analysis/rounds/correlation.py` - 关联模型
+  - VerificationStatus, EvidenceSource, EvidenceType 枚举
+  - Evidence, EvidenceChain, CorrelationRule, CorrelationResult 模型
+  - 5 个默认关联规则
 
-- `src/layers/l3_analysis/rounds/round_two.py` - 第二轮执行器
-  - RoundTwoExecutor 类
-  - CodeQL 数据流分析集成
-  - Agent 深度审计集成
-  - 置信度更新逻辑
+- `src/layers/l3_analysis/rounds/round_three.py` - 第三轮执行器
+  - RoundThreeExecutor 类
+  - 证据链构建
+  - 关联规则应用
+  - 最终判定算法
 
 ### 已修改文件
 
 - `src/layers/l3_analysis/rounds/__init__.py` - 导出新类
-- `tests/unit/test_l3/test_rounds.py` - 新增 28 个测试用例
+- `tests/unit/test_l3/test_rounds.py` - 新增 23 个测试用例
 
 ---
 
@@ -84,19 +84,19 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-02-20 | 设置新目标：P2-07 多轮审计 - 第二轮深度追踪 |
-| 2026-02-20 | 完成 Phase 1：创建 dataflow.py 数据流模型 |
-| 2026-02-20 | 完成 Phase 2：创建 round_two.py 第二轮执行器 |
-| 2026-02-20 | 完成 Phase 4：集成模块导出、65 个单元测试全部通过 |
+| 2026-02-20 | 设置新目标：P2-08 多轮审计 - 第三轮关联验证 |
+| 2026-02-20 | 完成 Phase 1：创建 correlation.py 关联模型 |
+| 2026-02-20 | 完成 Phase 2：创建 round_three.py 第三轮执行器 |
+| 2026-02-20 | 完成 Phase 4：集成模块导出、88 个单元测试全部通过 |
 
 ---
 
 ## 下一步
 
-P2-08: 第三轮关联验证 (Correlation Verification)
+P2-09: 轮次终止决策器
 
 <options>
-<option>提交 P2-07 代码</option>
-<option>继续实现 P2-08</option>
-<option>更新 ROADMAP.md</option>
+<option>提交 P2-08 代码</option>
+<option>继续实现 P2-09</option>
+<option>查看完成总结</option>
 </options>

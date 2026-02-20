@@ -6,10 +6,12 @@ Multi-round audit system for progressive vulnerability discovery.
 - RoundController: Manages multi-round audit execution
 - RoundOneExecutor: First round - Attack Surface Reconnaissance
 - RoundTwoExecutor: Second round - Deep Tracking
+- RoundThreeExecutor: Third round - Correlation Verification
 - RoundResult: Result from a single audit round
 - VulnerabilityCandidate: A potential vulnerability finding
 - AuditSession: Complete audit session across all rounds
 - DataFlow models: TaintSource, TaintSink, Sanitizer, PathNode, DataFlowPath
+- Correlation models: EvidenceChain, CorrelationResult, VerificationStatus
 """
 
 from src.layers.l3_analysis.rounds.models import (
@@ -25,6 +27,7 @@ from src.layers.l3_analysis.rounds.models import (
 from src.layers.l3_analysis.rounds.controller import RoundController
 from src.layers.l3_analysis.rounds.round_one import RoundOneExecutor
 from src.layers.l3_analysis.rounds.round_two import RoundTwoExecutor
+from src.layers.l3_analysis.rounds.round_three import RoundThreeExecutor
 from src.layers.l3_analysis.rounds.dataflow import (
     DataFlowPath,
     DeepAnalysisResult,
@@ -35,6 +38,15 @@ from src.layers.l3_analysis.rounds.dataflow import (
     SourceType,
     TaintSink,
     TaintSource,
+)
+from src.layers.l3_analysis.rounds.correlation import (
+    CorrelationResult,
+    CorrelationRule,
+    Evidence,
+    EvidenceChain,
+    EvidenceSource,
+    EvidenceType,
+    VerificationStatus,
 )
 
 __all__ = [
@@ -52,6 +64,7 @@ __all__ = [
     # Executors
     "RoundOneExecutor",
     "RoundTwoExecutor",
+    "RoundThreeExecutor",
     # Dataflow models
     "SourceType",
     "SinkType",
@@ -62,4 +75,12 @@ __all__ = [
     "PathNode",
     "DataFlowPath",
     "DeepAnalysisResult",
+    # Correlation models
+    "VerificationStatus",
+    "EvidenceSource",
+    "EvidenceType",
+    "Evidence",
+    "EvidenceChain",
+    "CorrelationRule",
+    "CorrelationResult",
 ]

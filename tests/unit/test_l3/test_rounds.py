@@ -40,6 +40,16 @@ from src.layers.l3_analysis.rounds.dataflow import (
     TaintSink,
     TaintSource,
 )
+from src.layers.l3_analysis.rounds.correlation import (
+    CorrelationResult,
+    CorrelationRule,
+    Evidence,
+    EvidenceChain,
+    EvidenceSource,
+    EvidenceType,
+    VerificationStatus,
+)
+from src.layers.l3_analysis.rounds.round_three import RoundThreeExecutor
 from src.layers.l3_analysis.strategy.models import (
     AuditPriority,
     AuditPriorityLevel,
@@ -1006,3 +1016,408 @@ class TestIntegration:
         assert result.round_number == 1
         assert result.status in (RoundStatus.COMPLETED, RoundStatus.FAILED)
         assert result.coverage is not None
+
+
+class TestVerificationStatus:
+    """Tests for VerificationStatus enum."""
+
+    def test_statuses_exist(self):
+        """Test that all expected statuses exist."""
+        assert VerificationStatus.CONFIRMED.value == "confirmed"
+        assert VerificationStatus.LIKELY.value == "likely"
+        assert VerificationStatus.UNCERTAIN.value == "uncertain"
+        assert VerificationStatus.FALSE_POSITIVE.value == "false_positive"
+        assert VerificationStatus.NOT_EXPLOITABLE.value == "not_exploitable"
+
+
+class TestEvidenceSource:
+    """Tests for EvidenceSource enum."""
+
+    def test_sources_exist(self):
+        """Test that all expected sources exist."""
+        assert EvidenceSource.SEMGREP.value == "semgrep"
+        assert EvidenceSource.CODEQL.value == "codeql"
+        assert EvidenceSource.AGENT.value == "agent"
+
+
+class TestEvidence:
+    """Tests for Evidence model."""
+
+    @pytest.fixture
+    def sample_location(self):
+        """Create a sample code location."""
+        return CodeLocation(file="test.py", line=10, function="get_input")
+
+    def test_default_init(self, sample_location):
+        """Test default initialization."""
+        evidence = Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+            location=sample_location,
+        )
+        assert evidence.id == "ev-001"
+        assert evidence.source == EvidenceSource.SEMGREP
+        assert evidence.confidence == 0.5
+
+    def test_to_summary(self, sample_location):
+        """Test summary generation."""
+        evidence = Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+            confidence=0.8,
+        )
+        summary = evidence.to_summary()
+        assert "semgrep" in summary
+        assert "80%" in summary
+
+
+class TestEvidenceChain:
+    """Tests for EvidenceChain model."""
+
+    def test_default_init(self):
+        """Test default initialization."""
+        chain = EvidenceChain(
+            id="chain-001",
+            candidate_id="candidate-001",
+        )
+        assert chain.id == "chain-001"
+        assert chain.candidate_id == "candidate-001"
+        assert len(chain.evidences) == 0
+        assert chain.total_confidence == 0.0
+
+    def test_add_evidence(self):
+        """Test adding evidence."""
+        chain = EvidenceChain(
+            id="chain-001",
+            candidate_id="candidate-001",
+        )
+        evidence = Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+            confidence=0.8,
+        )
+        chain.add_evidence(evidence)
+        assert len(chain.evidences) == 1
+        assert EvidenceSource.SEMGREP in chain.sources
+        assert chain.total_confidence == 0.8
+
+    def test_multiple_evidence_confidence(self):
+        """Test confidence with multiple evidence."""
+        chain = EvidenceChain(
+            id="chain-001",
+            candidate_id="candidate-001",
+        )
+        chain.add_evidence(Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+            confidence=0.6,
+            weight=1.0,
+        ))
+        chain.add_evidence(Evidence(
+            id="ev-002",
+            source=EvidenceSource.CODEQL,
+            evidence_type=EvidenceType.DATAFLOW_PATH,
+            confidence=0.8,
+            weight=2.0,
+        ))
+        assert len(chain.evidences) == 2
+        assert chain.source_count == 2
+        # Weighted: (0.6 * 1 + 0.8 * 2) / 3 = 0.733
+        assert abs(chain.weighted_confidence - 0.733) < 0.01
+
+    def test_get_evidence_by_source(self):
+        """Test filtering evidence by source."""
+        chain = EvidenceChain(
+            id="chain-001",
+            candidate_id="candidate-001",
+        )
+        chain.add_evidence(Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+        ))
+        chain.add_evidence(Evidence(
+            id="ev-002",
+            source=EvidenceSource.CODEQL,
+            evidence_type=EvidenceType.DATAFLOW_PATH,
+        ))
+        semgrep_evidence = chain.get_evidence_by_source(EvidenceSource.SEMGREP)
+        assert len(semgrep_evidence) == 1
+
+    def test_check_consistency(self):
+        """Test consistency checking."""
+        chain = EvidenceChain(
+            id="chain-001",
+            candidate_id="candidate-001",
+        )
+        chain.add_evidence(Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+            confidence=0.9,
+        ))
+        chain.add_evidence(Evidence(
+            id="ev-002",
+            source=EvidenceSource.AGENT,
+            evidence_type=EvidenceType.AGENT_ANALYSIS,
+            confidence=0.9,
+            metadata={"is_false_positive": True},
+        ))
+        chain.check_consistency()
+        assert chain.consistent is False
+        assert len(chain.conflicts) > 0
+
+    def test_get_summary(self):
+        """Test summary generation."""
+        chain = EvidenceChain(
+            id="chain-001",
+            candidate_id="candidate-001",
+            verification_status=VerificationStatus.CONFIRMED,
+        )
+        chain.add_evidence(Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+            confidence=0.8,
+        ))
+        summary = chain.get_summary()
+        assert "confirmed" in summary
+        assert "semgrep" in summary
+
+
+class TestCorrelationRule:
+    """Tests for CorrelationRule model."""
+
+    def test_default_init(self):
+        """Test default initialization."""
+        rule = CorrelationRule(
+            id="rule-001",
+            name="Test Rule",
+        )
+        assert rule.id == "rule-001"
+        assert rule.name == "Test Rule"
+        assert rule.min_sources == 1
+
+    def test_matches_min_sources(self):
+        """Test rule matching with minimum sources."""
+        rule = CorrelationRule(
+            id="rule-001",
+            name="Multi-Source",
+            min_sources=2,
+        )
+        chain = EvidenceChain(
+            id="chain-001",
+            candidate_id="candidate-001",
+        )
+        chain.add_evidence(Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+        ))
+        assert rule.matches(chain) is False
+
+        chain.add_evidence(Evidence(
+            id="ev-002",
+            source=EvidenceSource.CODEQL,
+            evidence_type=EvidenceType.DATAFLOW_PATH,
+        ))
+        assert rule.matches(chain) is True
+
+    def test_matches_required_sources(self):
+        """Test rule matching with required sources."""
+        rule = CorrelationRule(
+            id="rule-001",
+            name="CodeQL Required",
+            required_sources=[EvidenceSource.CODEQL],
+        )
+        chain = EvidenceChain(
+            id="chain-001",
+            candidate_id="candidate-001",
+        )
+        chain.add_evidence(Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+        ))
+        assert rule.matches(chain) is False
+
+        chain.add_evidence(Evidence(
+            id="ev-002",
+            source=EvidenceSource.CODEQL,
+            evidence_type=EvidenceType.DATAFLOW_PATH,
+        ))
+        assert rule.matches(chain) is True
+
+
+class TestCorrelationResult:
+    """Tests for CorrelationResult model."""
+
+    @pytest.fixture
+    def sample_chain(self):
+        """Create a sample evidence chain."""
+        chain = EvidenceChain(
+            id="chain-001",
+            candidate_id="candidate-001",
+        )
+        chain.add_evidence(Evidence(
+            id="ev-001",
+            source=EvidenceSource.SEMGREP,
+            evidence_type=EvidenceType.PATTERN_MATCH,
+            confidence=0.8,
+        ))
+        return chain
+
+    def test_default_init(self, sample_chain):
+        """Test default initialization."""
+        result = CorrelationResult(
+            id="corr-001",
+            candidate_id="candidate-001",
+            evidence_chain=sample_chain,
+        )
+        assert result.id == "corr-001"
+        assert result.correlated is False
+        assert result.verification_status == VerificationStatus.UNCERTAIN
+
+    def test_add_matched_rule(self, sample_chain):
+        """Test adding matched rule."""
+        result = CorrelationResult(
+            id="corr-001",
+            candidate_id="candidate-001",
+            evidence_chain=sample_chain,
+        )
+        rule = CorrelationRule(
+            id="rule-001",
+            name="Test Rule",
+            confidence_boost=0.2,
+            if_matched=VerificationStatus.LIKELY,
+        )
+        result.add_matched_rule(rule)
+        assert "rule-001" in result.matched_rules
+        assert result.final_confidence == 0.2
+        assert result.verification_status == VerificationStatus.LIKELY
+
+    def test_set_verdict(self, sample_chain):
+        """Test setting verdict."""
+        result = CorrelationResult(
+            id="corr-001",
+            candidate_id="candidate-001",
+            evidence_chain=sample_chain,
+        )
+        result.set_verdict(
+            VerificationStatus.CONFIRMED,
+            "Confirmed vulnerability",
+            ["Multi-source confirmation"],
+        )
+        assert result.verification_status == VerificationStatus.CONFIRMED
+        assert result.verdict == "Confirmed vulnerability"
+        assert "Multi-source confirmation" in result.verdict_reasons
+
+    def test_mark_for_review(self, sample_chain):
+        """Test marking for review."""
+        result = CorrelationResult(
+            id="corr-001",
+            candidate_id="candidate-001",
+            evidence_chain=sample_chain,
+        )
+        result.mark_for_review("Low confidence")
+        assert result.needs_manual_review is True
+        assert "Low confidence" in result.review_reasons
+
+
+class TestRoundThreeExecutor:
+    """Tests for RoundThreeExecutor."""
+
+    @pytest.fixture
+    def executor(self, tmp_path):
+        """Create an executor instance."""
+        return RoundThreeExecutor(source_path=tmp_path)
+
+    @pytest.fixture
+    def sample_strategy(self, tmp_path):
+        """Create a sample strategy."""
+        target = AuditTarget(
+            id="target-001",
+            name="test.py",
+            target_type="file",
+            file_path="test.py",
+            priority=AuditPriority(level=AuditPriorityLevel.HIGH),
+        )
+        return AuditStrategy(
+            project_name="test-project",
+            source_path=str(tmp_path),
+            targets=[target],
+            total_targets=1,
+        )
+
+    @pytest.fixture
+    def sample_previous_round(self):
+        """Create a sample previous round result with candidates."""
+        finding = Finding(
+            id="finding-001",
+            severity=SeverityLevel.HIGH,
+            title="SQL Injection",
+            description="Test SQL injection",
+            location=CodeLocation(file="test.py", line=10, function="get_user"),
+            source="semgrep",
+            tags=["sql", "injection"],
+        )
+        candidate = VulnerabilityCandidate(
+            id="candidate-001",
+            finding=finding,
+            confidence=ConfidenceLevel.MEDIUM,
+            discovered_in_round=1,
+        )
+        candidate.add_evidence("semgrep", {"rule": "sql-injection"})
+        round_result = RoundResult(
+            round_number=2,
+            status=RoundStatus.COMPLETED,
+        )
+        round_result.add_candidate(candidate)
+        return round_result
+
+    def test_default_init(self, executor):
+        """Test default initialization."""
+        assert executor.source_path is not None
+        assert executor._agent_executor is None
+
+    @pytest.mark.asyncio
+    async def test_execute_without_previous_round(self, executor, sample_strategy):
+        """Test execution without previous round."""
+        result = await executor.execute(sample_strategy, previous_round=None)
+        assert result.round_number == 3
+        assert result.status == RoundStatus.COMPLETED
+        assert result.total_candidates == 0
+
+    @pytest.mark.asyncio
+    async def test_execute_without_candidates(self, executor, sample_strategy):
+        """Test execution without candidates in previous round."""
+        previous = RoundResult(round_number=2, status=RoundStatus.COMPLETED)
+        result = await executor.execute(sample_strategy, previous_round=previous)
+        assert result.round_number == 3
+        assert result.status == RoundStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_execute_with_candidates(self, executor, sample_strategy, sample_previous_round):
+        """Test execution with candidates."""
+        result = await executor.execute(sample_strategy, previous_round=sample_previous_round)
+        assert result.round_number == 3
+        assert result.status == RoundStatus.COMPLETED
+        assert "correlation" in result.engine_stats
+        assert "rules" in result.engine_stats
+
+    def test_map_confidence(self, executor):
+        """Test confidence mapping."""
+        assert executor._map_confidence(ConfidenceLevel.HIGH) == 0.85
+        assert executor._map_confidence(ConfidenceLevel.MEDIUM) == 0.6
+        assert executor._map_confidence(ConfidenceLevel.LOW) == 0.3
+
+    def test_map_source_string(self, executor):
+        """Test source string mapping."""
+        assert executor._map_source_string("semgrep") == EvidenceSource.SEMGREP
+        assert executor._map_source_string("codeql") == EvidenceSource.CODEQL
+        assert executor._map_source_string("agent") == EvidenceSource.AGENT
+        assert executor._map_source_string("unknown") is None
