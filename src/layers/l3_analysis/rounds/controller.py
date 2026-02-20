@@ -19,6 +19,12 @@ from src.layers.l3_analysis.rounds.models import (
     RoundStatus,
     VulnerabilityCandidate,
 )
+from src.layers.l3_analysis.rounds.termination import (
+    TerminationConfig,
+    TerminationDecider,
+    TerminationDecision,
+    TerminationReason,
+)
 from src.layers.l3_analysis.strategy.models import AuditStrategy
 
 
@@ -43,6 +49,7 @@ class RoundController:
         max_rounds: int = DEFAULT_MAX_ROUNDS,
         stop_on_critical: bool = DEFAULT_STOP_ON_CRITICAL,
         min_candidates_for_next_round: int = DEFAULT_MIN_CANDIDATES_FOR_NEXT_ROUND,
+        termination_config: TerminationConfig | None = None,
         on_round_complete: Callable[[RoundResult], None] | None = None,
         on_session_complete: Callable[[AuditSession], None] | None = None,
     ):
@@ -53,6 +60,7 @@ class RoundController:
             max_rounds: Maximum number of rounds to execute.
             stop_on_critical: Stop if a critical vulnerability is confirmed.
             min_candidates_for_next_round: Minimum candidates needed to continue.
+            termination_config: Configuration for termination decisions.
             on_round_complete: Callback when a round completes.
             on_session_complete: Callback when the session completes.
         """
@@ -62,6 +70,10 @@ class RoundController:
         self.min_candidates_for_next_round = min_candidates_for_next_round
         self.on_round_complete = on_round_complete
         self.on_session_complete = on_session_complete
+
+        # Termination decider
+        self._termination_decider = TerminationDecider(termination_config)
+        self._last_termination_decision: TerminationDecision | None = None
 
         # Session state
         self._session: AuditSession | None = None
@@ -78,6 +90,11 @@ class RoundController:
     def session(self) -> AuditSession | None:
         """Current audit session."""
         return self._session
+
+    @property
+    def last_termination_decision(self) -> TerminationDecision | None:
+        """Last termination decision made."""
+        return self._last_termination_decision
 
     def start_session(
         self,
@@ -220,33 +237,27 @@ class RoundController:
         if not self._session:
             return False
 
-        # Check max rounds
-        if self._session.current_round >= self.max_rounds:
-            self.logger.info(f"Max rounds ({self.max_rounds}) reached")
-            return False
-
         # Check if session already completed/failed
         if self._session.status in (RoundStatus.COMPLETED, RoundStatus.FAILED):
             return False
 
-        # Check for critical confirmed vulnerability
-        if self.stop_on_critical and self._session.confirmed_vulnerabilities:
-            for vuln in self._session.confirmed_vulnerabilities:
-                if vuln.finding.severity.value == "critical":
-                    self.logger.info("Stopping: critical vulnerability confirmed")
-                    return False
-
-        # Check for next round candidates
+        # Use termination decider for intelligent decision
         current_round = self._session.get_current_round()
-        if current_round:
-            if len(current_round.next_round_candidates) < self.min_candidates_for_next_round:
-                self.logger.info(
-                    f"Stopping: insufficient candidates for next round "
-                    f"({len(current_round.next_round_candidates)} < {self.min_candidates_for_next_round})"
-                )
-                return False
+        decision = self._termination_decider.should_continue(self._session, current_round)
+        self._last_termination_decision = decision
 
-        return True
+        # Log the decision details
+        self.logger.info(
+            f"Termination decision: {decision.to_summary()} - {decision.explanation}"
+        )
+
+        # Store termination reason in session metadata
+        if not decision.should_continue and decision.reason:
+            self._session.metadata["termination_reason"] = decision.reason.value
+            self._session.metadata["termination_explanation"] = decision.explanation
+            self._session.metadata["termination_metrics"] = decision.metrics.model_dump()
+
+        return decision.should_continue
 
     def _check_termination(self) -> None:
         """Check and handle termination conditions."""
@@ -324,10 +335,48 @@ class RoundController:
                 "message": "No active audit session",
             }
 
-        return self._session.get_statistics()
+        stats = self._session.get_statistics()
+
+        # Add termination decision info
+        if self._last_termination_decision:
+            stats["termination_decision"] = {
+                "should_continue": self._last_termination_decision.should_continue,
+                "reason": self._last_termination_decision.reason.value
+                if self._last_termination_decision.reason else None,
+                "explanation": self._last_termination_decision.explanation,
+            }
+
+        return stats
+
+    def get_termination_decision(self) -> TerminationDecision | None:
+        """
+        Get the current termination decision.
+
+        Returns:
+            The last termination decision, or None if no decision has been made.
+        """
+        return self._last_termination_decision
+
+    def request_early_stop(self, reason: str = "manual_stop") -> None:
+        """
+        Request an early stop of the audit.
+
+        Args:
+            reason: Reason for the early stop.
+        """
+        if self._session:
+            self._session.metadata["manual_stop_requested"] = True
+            self._session.metadata["manual_stop_reason"] = reason
+            self._last_termination_decision = TerminationDecision(
+                should_continue=False,
+                reason=TerminationReason.MANUAL_STOP,
+                explanation=f"Manual stop requested: {reason}",
+            )
+            self.logger.info(f"Early stop requested: {reason}")
 
     def reset(self) -> None:
         """Reset the controller state."""
         self._session = None
         self._strategy = None
+        self._last_termination_decision = None
         self.logger.info("Round controller reset")

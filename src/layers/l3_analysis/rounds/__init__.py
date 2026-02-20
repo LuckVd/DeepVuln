@@ -12,6 +12,7 @@ Multi-round audit system for progressive vulnerability discovery.
 - AuditSession: Complete audit session across all rounds
 - DataFlow models: TaintSource, TaintSink, Sanitizer, PathNode, DataFlowPath
 - Correlation models: EvidenceChain, CorrelationResult, VerificationStatus
+- Termination models: TerminationDecider, TerminationDecision, TerminationReason
 """
 
 from src.layers.l3_analysis.rounds.models import (
@@ -48,6 +49,15 @@ from src.layers.l3_analysis.rounds.correlation import (
     EvidenceType,
     VerificationStatus,
 )
+from src.layers.l3_analysis.rounds.termination import (
+    DecisionMetrics,
+    DEFAULT_TERMINATION_CONFIG,
+    FindingsTrend,
+    TerminationConfig,
+    TerminationDecision,
+    TerminationDecider,
+    TerminationReason,
+)
 
 __all__ = [
     # Models
@@ -83,4 +93,12 @@ __all__ = [
     "EvidenceChain",
     "CorrelationRule",
     "CorrelationResult",
+    # Termination models
+    "TerminationReason",
+    "FindingsTrend",
+    "DecisionMetrics",
+    "TerminationDecision",
+    "TerminationConfig",
+    "TerminationDecider",
+    "DEFAULT_TERMINATION_CONFIG",
 ]

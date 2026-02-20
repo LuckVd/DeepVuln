@@ -50,6 +50,15 @@ from src.layers.l3_analysis.rounds.correlation import (
     VerificationStatus,
 )
 from src.layers.l3_analysis.rounds.round_three import RoundThreeExecutor
+from src.layers.l3_analysis.rounds.termination import (
+    DecisionMetrics,
+    DEFAULT_TERMINATION_CONFIG,
+    FindingsTrend,
+    TerminationConfig,
+    TerminationDecision,
+    TerminationDecider,
+    TerminationReason,
+)
 from src.layers.l3_analysis.strategy.models import (
     AuditPriority,
     AuditPriorityLevel,
@@ -1421,3 +1430,447 @@ class TestRoundThreeExecutor:
         assert executor._map_source_string("codeql") == EvidenceSource.CODEQL
         assert executor._map_source_string("agent") == EvidenceSource.AGENT
         assert executor._map_source_string("unknown") is None
+
+
+# =============================================================================
+# P2-09: Termination Decider Tests
+# =============================================================================
+
+
+class TestTerminationReason:
+    """Tests for TerminationReason enum."""
+
+    def test_reasons_exist(self):
+        """Test that all expected reasons exist."""
+        assert TerminationReason.MAX_ROUNDS_REACHED.value == "max_rounds_reached"
+        assert TerminationReason.NO_CANDIDATES.value == "no_candidates"
+        assert TerminationReason.CONFIDENCE_THRESHOLD.value == "confidence_threshold"
+        assert TerminationReason.DIMINISHING_RETURNS.value == "diminishing_returns"
+        assert TerminationReason.RESOURCE_EXHAUSTED.value == "resource_exhausted"
+        assert TerminationReason.MANUAL_STOP.value == "manual_stop"
+        assert TerminationReason.CRITICAL_FOUND.value == "critical_found"
+
+
+class TestFindingsTrend:
+    """Tests for FindingsTrend enum."""
+
+    def test_trends_exist(self):
+        """Test that all expected trends exist."""
+        assert FindingsTrend.INCREASING.value == "increasing"
+        assert FindingsTrend.STABLE.value == "stable"
+        assert FindingsTrend.DECREASING.value == "decreasing"
+        assert FindingsTrend.INSUFFICIENT_DATA.value == "insufficient_data"
+
+
+class TestDecisionMetrics:
+    """Tests for DecisionMetrics model."""
+
+    def test_default_values(self):
+        """Test default metric values."""
+        metrics = DecisionMetrics()
+        assert metrics.total_candidates == 0
+        assert metrics.high_confidence_count == 0
+        assert metrics.elapsed_time_seconds == 0.0
+        assert metrics.findings_trend == FindingsTrend.INSUFFICIENT_DATA
+
+    def test_computed_properties(self):
+        """Test computed properties."""
+        metrics = DecisionMetrics(
+            total_candidates=10,
+            high_confidence_count=4,
+            elapsed_time_seconds=120.0,
+        )
+        assert metrics.high_confidence_ratio == 0.4
+        assert metrics.findings_per_minute == 5.0
+
+    def test_high_confidence_ratio_zero_total(self):
+        """Test high confidence ratio when total is zero."""
+        metrics = DecisionMetrics(total_candidates=0)
+        assert metrics.high_confidence_ratio == 0.0
+
+    def test_net_benefit_score(self):
+        """Test net benefit score calculation."""
+        metrics = DecisionMetrics(
+            continue_benefit_score=0.7,
+            continue_cost_score=0.3,
+        )
+        assert abs(metrics.net_benefit_score - 0.4) < 1e-9
+
+
+class TestTerminationDecision:
+    """Tests for TerminationDecision model."""
+
+    def test_should_continue_true(self):
+        """Test decision to continue."""
+        decision = TerminationDecision(
+            should_continue=True,
+            explanation="Continue auditing",
+        )
+        assert decision.should_continue is True
+        assert decision.reason is None
+        assert decision.confidence == 1.0
+
+    def test_should_continue_false(self):
+        """Test decision to stop."""
+        decision = TerminationDecision(
+            should_continue=False,
+            reason=TerminationReason.MAX_ROUNDS_REACHED,
+            explanation="Max rounds reached",
+        )
+        assert decision.should_continue is False
+        assert decision.reason == TerminationReason.MAX_ROUNDS_REACHED
+
+    def test_to_summary_continue(self):
+        """Test summary for continue decision."""
+        metrics = DecisionMetrics(continue_benefit_score=0.75)
+        decision = TerminationDecision(
+            should_continue=True,
+            metrics=metrics,
+        )
+        summary = decision.to_summary()
+        assert "Continue" in summary
+        assert "0.75" in summary
+
+    def test_to_summary_stop(self):
+        """Test summary for stop decision."""
+        decision = TerminationDecision(
+            should_continue=False,
+            reason=TerminationReason.DIMINISHING_RETURNS,
+        )
+        summary = decision.to_summary()
+        assert "Stop" in summary
+        assert "diminishing_returns" in summary
+
+
+class TestTerminationConfig:
+    """Tests for TerminationConfig model."""
+
+    def test_default_config(self):
+        """Test default configuration values."""
+        config = TerminationConfig()
+        assert config.high_confidence_threshold == 0.8
+        assert config.max_time_seconds == 3600.0
+        assert config.max_tokens == 1_000_000
+
+    def test_custom_config(self):
+        """Test custom configuration values."""
+        config = TerminationConfig(
+            max_time_seconds=1800.0,
+            max_cost_usd=25.0,
+            min_new_findings_ratio=0.15,
+        )
+        assert config.max_time_seconds == 1800.0
+        assert config.max_cost_usd == 25.0
+        assert config.min_new_findings_ratio == 0.15
+
+    def test_default_instance(self):
+        """Test default configuration instance."""
+        assert DEFAULT_TERMINATION_CONFIG is not None
+        assert isinstance(DEFAULT_TERMINATION_CONFIG, TerminationConfig)
+
+
+class TestTerminationDecider:
+    """Tests for TerminationDecider class."""
+
+    @pytest.fixture
+    def decider(self):
+        """Create a termination decider."""
+        return TerminationDecider()
+
+    @pytest.fixture
+    def decider_strict(self):
+        """Create a strict termination decider."""
+        config = TerminationConfig(
+            high_confidence_threshold=0.6,
+            min_high_confidence_count=1,
+            min_absolute_new_findings=2,
+        )
+        return TerminationDecider(config)
+
+    @pytest.fixture
+    def sample_session(self):
+        """Create a sample audit session."""
+        return AuditSession(
+            id="test-session-001",
+            project_name="test-project",
+            source_path="/tmp/test",
+            max_rounds=3,
+        )
+
+    @pytest.fixture
+    def sample_finding_local(self):
+        """Create a sample finding for termination tests."""
+        return Finding(
+            id="finding-test-001",
+            severity=SeverityLevel.HIGH,
+            title="Test Finding",
+            description="A test finding for termination tests",
+            location=CodeLocation(file="/tmp/test/file.py", line=10),
+            source="semgrep",
+        )
+
+    @pytest.fixture
+    def session_with_candidates(self, sample_session, sample_finding_local):
+        """Create a session with some candidates (mixed confidence)."""
+        # Add round 1
+        round1 = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        # Mix of confidence levels to not trigger confidence threshold
+        confidence_levels = [ConfidenceLevel.HIGH, ConfidenceLevel.MEDIUM, ConfidenceLevel.LOW]
+        for i in range(3):
+            candidate = VulnerabilityCandidate(
+                id=f"candidate-{i}",
+                finding=sample_finding_local,
+                confidence=confidence_levels[i],
+                discovered_in_round=1,
+            )
+            round1.add_candidate(candidate)
+        round1.next_round_candidates = ["candidate-0"]
+        sample_session.add_round(round1)
+        return sample_session
+
+    def test_init(self, decider):
+        """Test decider initialization."""
+        assert decider.config is not None
+        """Create a session with some candidates."""
+        # Add round 1
+        round1 = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        for i in range(3):
+            candidate = VulnerabilityCandidate(
+                id=f"candidate-{i}",
+                finding=sample_finding,
+                confidence=ConfidenceLevel.HIGH,
+                discovered_in_round=1,
+            )
+            round1.add_candidate(candidate)
+        round1.next_round_candidates = ["candidate-0"]
+        sample_session.add_round(round1)
+        return sample_session
+
+    def test_init(self, decider):
+        """Test decider initialization."""
+        assert decider.config is not None
+
+    def test_should_continue_max_rounds_reached(self, decider, sample_session):
+        """Test stopping when max rounds reached."""
+        sample_session.current_round = 3
+        sample_session.max_rounds = 3
+
+        decision = decider.should_continue(sample_session)
+        assert decision.should_continue is False
+        assert decision.reason == TerminationReason.MAX_ROUNDS_REACHED
+
+    def test_should_continue_no_candidates(self, decider, sample_session):
+        """Test stopping when no candidates for next round."""
+        round1 = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        round1.next_round_candidates = []
+        sample_session.add_round(round1)
+
+        decision = decider.should_continue(sample_session)
+        assert decision.should_continue is False
+        assert decision.reason == TerminationReason.NO_CANDIDATES
+
+    def test_should_continue_with_pending_candidates(self, decider, session_with_candidates):
+        """Test continuing with pending candidates."""
+        decision = decider.should_continue(session_with_candidates)
+        assert decision.should_continue is True
+
+    def test_should_continue_confidence_threshold(self, decider_strict, sample_session, sample_finding_local):
+        """Test stopping when confidence threshold is met."""
+        # Create many high confidence candidates
+        round1 = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        for i in range(5):
+            candidate = VulnerabilityCandidate(
+                id=f"candidate-{i}",
+                finding=sample_finding_local,
+                confidence=ConfidenceLevel.HIGH,
+                discovered_in_round=1,
+            )
+            round1.add_candidate(candidate)
+        round1.next_round_candidates = ["candidate-0"]
+        sample_session.add_round(round1)
+
+        decision = decider_strict.should_continue(sample_session)
+        assert decision.should_continue is False
+        assert decision.reason == TerminationReason.CONFIDENCE_THRESHOLD
+
+    def test_should_continue_diminishing_returns(self, decider_strict, sample_session, sample_finding_local):
+        """Test stopping due to diminishing returns."""
+        # Round 1: many findings
+        round1 = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        for i in range(10):
+            candidate = VulnerabilityCandidate(
+                id=f"r1-candidate-{i}",
+                finding=sample_finding_local,
+                confidence=ConfidenceLevel.LOW,
+                discovered_in_round=1,
+            )
+            round1.add_candidate(candidate)
+        round1.next_round_candidates = ["r1-candidate-0"]
+        sample_session.add_round(round1)
+
+        # Round 2: very few findings (diminishing)
+        round2 = RoundResult(round_number=2, status=RoundStatus.COMPLETED)
+        candidate = VulnerabilityCandidate(
+            id="r2-candidate-0",
+            finding=sample_finding_local,
+            confidence=ConfidenceLevel.LOW,
+            discovered_in_round=2,
+        )
+        round2.add_candidate(candidate)
+        round2.next_round_candidates = ["r2-candidate-0"]
+        sample_session.add_round(round2)
+
+        decision = decider_strict.should_continue(sample_session)
+        # Should stop due to diminishing returns (only 1 new finding)
+        assert decision.should_continue is False
+        assert decision.reason == TerminationReason.DIMINISHING_RETURNS
+
+    def test_detect_trend_increasing(self, decider):
+        """Test detecting increasing trend."""
+        trend = decider._detect_trend([5, 8, 12])
+        assert trend == FindingsTrend.INCREASING
+
+    def test_detect_trend_decreasing(self, decider):
+        """Test detecting decreasing trend."""
+        trend = decider._detect_trend([12, 8, 5])
+        assert trend == FindingsTrend.DECREASING
+
+    def test_detect_trend_stable(self, decider):
+        """Test detecting stable trend."""
+        trend = decider._detect_trend([5, 5, 5])
+        assert trend == FindingsTrend.STABLE
+
+    def test_detect_trend_insufficient_data(self, decider):
+        """Test detecting trend with insufficient data."""
+        trend = decider._detect_trend([5])
+        assert trend == FindingsTrend.INSUFFICIENT_DATA
+
+    def test_calculate_benefit_score(self, decider):
+        """Test benefit score calculation."""
+        metrics = DecisionMetrics(
+            new_findings_last_round=5,
+            avg_findings_per_round=4,
+            candidates_for_next_round=3,
+            low_confidence_count=6,
+            total_candidates=10,
+            findings_trend=FindingsTrend.INCREASING,
+        )
+        score = decider._calculate_benefit_score(metrics)
+        assert 0.0 <= score <= 1.0
+        # Should be relatively high due to increasing trend and pending candidates
+        assert score > 0.3
+
+    def test_calculate_cost_score(self, decider):
+        """Test cost score calculation."""
+        metrics = DecisionMetrics(
+            elapsed_time_seconds=1800,  # 50% of 3600 default
+            tokens_used=500_000,  # 50% of 1M default
+            estimated_cost=25.0,  # 50% of 50 default
+        )
+        score = decider._calculate_cost_score(metrics)
+        assert 0.0 <= score <= 1.0
+        # Should be around 0.5 since all are at 50%
+        assert 0.4 <= score <= 0.6
+
+    def test_net_benefit_negative_stops(self, sample_session):
+        """Test that negative net benefit stops the audit."""
+        # Create config that makes cost > benefit
+        config = TerminationConfig(
+            max_time_seconds=1,  # Very short limit
+            max_tokens=100,  # Very low token limit
+        )
+        decider = TerminationDecider(config)
+
+        # Simulate high resource usage
+        round1 = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        round1.next_round_candidates = ["c1"]
+        sample_session.add_round(round1)
+        sample_session.started_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
+
+        decision = decider.should_continue(sample_session)
+        # High cost should lead to stopping
+        assert decision.metrics.continue_cost_score > 0
+
+
+class TestRoundControllerTerminationIntegration:
+    """Tests for RoundController integration with TerminationDecider."""
+
+    @pytest.fixture
+    def controller(self):
+        """Create a round controller."""
+        return RoundController(max_rounds=3)
+
+    @pytest.fixture
+    def sample_session(self):
+        """Create a sample audit session."""
+        return AuditSession(
+            id="test-session-001",
+            project_name="test-project",
+            source_path="/tmp/test",
+            max_rounds=3,
+        )
+
+    def test_controller_has_termination_decider(self, controller):
+        """Test that controller has a termination decider."""
+        assert controller._termination_decider is not None
+
+    def test_last_termination_decision_property(self, controller):
+        """Test last_termination_decision property."""
+        assert controller.last_termination_decision is None
+
+    def test_get_termination_decision(self, controller, sample_session):
+        """Test getting termination decision."""
+        controller._session = sample_session
+        round1 = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        round1.next_round_candidates = []
+        sample_session.add_round(round1)
+
+        should_continue = controller._should_continue()
+        assert should_continue is False
+        assert controller.last_termination_decision is not None
+        assert controller.last_termination_decision.reason == TerminationReason.NO_CANDIDATES
+
+    def test_request_early_stop(self, controller, sample_session):
+        """Test requesting early stop."""
+        controller._session = sample_session
+        controller.request_early_stop("User requested")
+
+        assert sample_session.metadata.get("manual_stop_requested") is True
+        assert controller.last_termination_decision is not None
+        assert controller.last_termination_decision.reason == TerminationReason.MANUAL_STOP
+
+    def test_get_statistics_includes_termination(self, controller, sample_session):
+        """Test that statistics include termination decision."""
+        controller._session = sample_session
+        round1 = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        round1.next_round_candidates = []
+        sample_session.add_round(round1)
+
+        controller._should_continue()
+        stats = controller.get_statistics()
+
+        assert "termination_decision" in stats
+
+    def test_reset_clears_termination_decision(self, controller, sample_session):
+        """Test that reset clears termination decision."""
+        controller._session = sample_session
+        round1 = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        round1.next_round_candidates = []
+        sample_session.add_round(round1)
+
+        controller._should_continue()
+        assert controller.last_termination_decision is not None
+
+        controller.reset()
+        assert controller.last_termination_decision is None
+
+    def test_termination_reason_stored_in_session(self, controller, sample_session):
+        """Test that termination reason is stored in session metadata."""
+        controller._session = sample_session
+        sample_session.current_round = 3
+
+        controller._should_continue()
+
+        assert "termination_reason" in sample_session.metadata
+        assert sample_session.metadata["termination_reason"] == "max_rounds_reached"
+        assert "termination_explanation" in sample_session.metadata
