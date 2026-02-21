@@ -8,101 +8,85 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | P2-10 证据链构建器 |
+| **任务** | 漏洞判断准确度改进 (P0+P1+P3) |
 | **状态** | completed |
 | **优先级** | high |
-| **创建日期** | 2026-02-20 |
-| **完成日期** | 2026-02-20 |
+| **创建日期** | 2026-02-21 |
+| **完成日期** | 2026-02-21 |
 
 ---
 
 ## 背景说明
 
-证据链构建器负责将分散的漏洞证据串联成完整的攻击路径，为漏洞验证和报告生成提供结构化输入。
+在对 Apache Dubbo 进行安全扫描时，发现 LLM Agent 存在以下问题：
 
-**现状分析**：
-通过代码审查发现，P2-10 的核心功能已在 P2-08 (第三轮关联验证) 中实现：
-- `EvidenceChain` 模型 (correlation.py)
-- `Evidence` 模型和多源证据聚合
-- 置信度计算和一致性检查
-- 数据流路径集成
+1. **上下文不足** - 只发送单个文件，无法看到调用链
+2. **缺少数据流分析** - 没有追踪参数来源，误判攻击者可控性
+3. **缺少可利用性验证** - 高估漏洞严重程度
 
-**P2-10 实现内容**：
-1. ✅ **独立的 `EvidenceChainBuilder` 类** - 将证据链构建逻辑从 `RoundThreeExecutor` 中提取
-2. ✅ **更丰富的证据类型** - 支持 `ExploitScenario`、`CVE` 匹配等
-3. ✅ **证据链导出/可视化** - 支持 JSON/Markdown/HTML 导出
-4. ✅ **L5 接口** - 为 PoC 验证层提供输入
-
-**设计理念**：
-- 可复用：证据链构建器可独立使用
-- 可追溯：每条证据都有来源和置信度
-- 可导出：支持多种输出格式
+**改进方案**：
+- **P0**: 增强 Prompt 模板 - 立即生效
+- **P1**: 增强 Context Builder - 提供更多上下文
+- **P3**: 添加 Round 4 可利用性验证 - 过滤误报
 
 ---
 
 ## 完成标准
 
-### Phase 1: 核心构建器
-- [x] 创建 `EvidenceChainBuilder` 类
-- [x] 从 `RoundThreeExecutor` 提取证据提取逻辑
-- [x] 支持多源证据聚合
+### P0: 增强 Prompt 模板
+- [x] 修改 `security_audit.py` 的 System Prompt
+- [x] 添加攻击面分析指南
+- [x] 添加数据流分析指南
+- [x] 添加可利用性评估指南
+- [x] 添加严重程度校准规则
 
-### Phase 2: 证据增强
-- [x] 添加 `ExploitScenario` 证据类型支持
-- [x] 添加 CVE 模式匹配证据
-- [x] 支持攻击路径可视化
+### P1: 增强 Context Builder
+- [x] 添加调用链分析功能 (`analyze_call_chain`)
+- [x] 添加依赖代码提取功能 (`extract_dependencies`)
+- [x] 添加数据流标记功能 (`analyze_data_flow`)
+- [x] 更新 Prompt 构建逻辑 (`build_enhanced_context`)
 
-### Phase 3: 导出与接口
-- [x] 实现证据链导出 (JSON/Markdown/HTML)
-- [x] 添加 L5 验证层接口
+### P3: 添加 Round 4 可利用性验证
+- [x] 创建 `RoundFourExecutor` 类
+- [x] 实现攻击路径分析
+- [x] 实现数据来源验证
+- [x] 实现严重程度校准
 - [x] 集成到多轮审计流程
-
-### Phase 4: 测试与文档
-- [x] 单元测试覆盖 (23 新测试)
-- [x] 更新 __init__.py 导出
 
 ---
 
 ## 实现详情
 
-### 已创建文件
+### P0: 修改文件
+- `src/layers/l3_analysis/prompts/security_audit.py`
+  - 添加 "Exploitability Assessment" 章节
+  - 添加攻击面、数据源、利用条件分析指南
+  - 添加严重程度校准规则
+  - 添加新字段: `attack_surface`, `user_controlled`, `exploitation_conditions`
 
-1. **`src/layers/l3_analysis/rounds/evidence_builder.py`** (~750 lines)
-   - `ExportFormat` 枚举 - 3 种导出格式
-   - `ExploitStep` 模型 - 攻击步骤
-   - `ExploitScenario` 模型 - 完整攻击场景
-   - `EvidenceChainConfig` 模型 - 配置参数
-   - `EvidenceChainBuilder` 类 - 核心构建器
+### P1: 修改文件
+- `src/layers/l3_analysis/task/context_builder.py`
+  - 新增 `CallChainInfo` 数据类
+  - 新增 `DataFlowMarker` 数据类
+  - 新增 `analyze_call_chain()` 方法
+  - 新增 `analyze_data_flow()` 方法
+  - 新增 `extract_dependencies()` 方法
+  - 新增 `build_enhanced_context()` 方法
+- `src/layers/l3_analysis/engines/opencode_agent.py`
+  - 更新为使用增强版 Context Builder
 
-### 已修改文件
-
-1. **`src/layers/l3_analysis/rounds/correlation.py`**
-   - 为 `EvidenceChain` 添加 `metadata` 字段
-
-2. **`src/layers/l3_analysis/rounds/round_three.py`**
-   - 重构使用 `EvidenceChainBuilder`
-   - 删除旧的证据提取方法
-   - 简化代码结构
-
-3. **`src/layers/l3_analysis/rounds/__init__.py`**
-   - 导出 `EvidenceChainBuilder` 等新类
-
-4. **`tests/unit/test_l3/test_rounds.py`**
-   - 新增 23 个测试用例
-   - 总计 144 个测试全部通过
-
----
-
-## 测试覆盖
-
-| 测试类 | 测试数量 |
-|--------|----------|
-| TestExportFormat | 1 |
-| TestExploitStep | 2 |
-| TestExploitScenario | 3 |
-| TestEvidenceChainConfig | 3 |
-| TestEvidenceChainBuilder | 14 |
-| **总计** | **23** |
+### P3: 新增/修改文件
+- `src/layers/l3_analysis/rounds/round_four.py` (新建 ~500 行)
+  - `ExploitabilityStatus` 枚举
+  - `SeverityAdjustment` 模型
+  - `ExploitabilityResult` 模型
+  - `RoundFourExecutor` 类
+    - `execute()` - 主执行方法
+    - `_verify_exploitability()` - 验证单个漏洞
+    - `_assess_exploitability()` - 评估可利用性
+    - `_calculate_severity_adjustment()` - 计算严重程度调整
+    - `_apply_verification_result()` - 应用验证结果
+- `src/layers/l3_analysis/rounds/__init__.py` (更新导出)
 
 ---
 
@@ -110,17 +94,28 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-02-20 | 设置新目标：P2-10 证据链构建器 |
-| 2026-02-20 | 分析现状：发现核心功能已在 P2-08 实现 |
-| 2026-02-20 | 完成 Phase 1-4：所有功能实现并通过测试 |
+| 2026-02-21 | 设置新目标：漏洞判断准确度改进 |
+| 2026-02-21 | 完成 P0: 增强 Prompt 模板 |
+| 2026-02-21 | 完成 P1: 增强 Context Builder |
+| 2026-02-21 | 完成 P3: 添加 Round 4 可利用性验证 |
+| 2026-02-21 | 所有组件测试通过 |
+
+---
+
+## 预期效果
+
+使用改进后的扫描器重新扫描 Dubbo 项目，预期：
+
+| 漏洞 | 原判定 | 新判定 | 原因 |
+|------|--------|--------|------|
+| 路径遍历 | MEDIUM | INFO/LOW | 无外部入口点，参数来自配置 |
+| 时序攻击 | MEDIUM | LOW | RPC 内部调用，网络延迟远大于时间差 |
+| 弱签名算法 | MEDIUM | 误报 | 实际使用 HMAC-SHA256 |
 
 ---
 
 ## 下一步
 
-**Phase 2 已完成 100% (10/10 任务)**
-
-可以选择：
-1. 开始 Phase 3 (L4 环境构建 + L5 PoC 验证)
-2. 更新 ROADMAP.md 标记 v0.3 里程碑
-3. 运行集成测试验证完整流程
+1. 运行完整测试套件验证
+2. 重新扫描 Dubbo 项目验证改进效果
+3. 考虑实现 L5 完整验证层 (PoC 生成 + 沙箱执行)

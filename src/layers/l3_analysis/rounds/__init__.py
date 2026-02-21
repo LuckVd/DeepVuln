@@ -7,6 +7,7 @@ Multi-round audit system for progressive vulnerability discovery.
 - RoundOneExecutor: First round - Attack Surface Reconnaissance
 - RoundTwoExecutor: Second round - Deep Tracking
 - RoundThreeExecutor: Third round - Correlation Verification
+- RoundFourExecutor: Fourth round - Exploitability Verification
 - RoundResult: Result from a single audit round
 - VulnerabilityCandidate: A potential vulnerability finding
 - AuditSession: Complete audit session across all rounds
@@ -30,6 +31,12 @@ from src.layers.l3_analysis.rounds.controller import RoundController
 from src.layers.l3_analysis.rounds.round_one import RoundOneExecutor
 from src.layers.l3_analysis.rounds.round_two import RoundTwoExecutor
 from src.layers.l3_analysis.rounds.round_three import RoundThreeExecutor
+from src.layers.l3_analysis.rounds.round_four import (
+    RoundFourExecutor,
+    ExploitabilityStatus,
+    ExploitabilityResult,
+    SeverityAdjustment,
+)
 from src.layers.l3_analysis.rounds.dataflow import (
     DataFlowPath,
     DeepAnalysisResult,
@@ -84,6 +91,11 @@ __all__ = [
     "RoundOneExecutor",
     "RoundTwoExecutor",
     "RoundThreeExecutor",
+    "RoundFourExecutor",
+    # Exploitability models
+    "ExploitabilityStatus",
+    "ExploitabilityResult",
+    "SeverityAdjustment",
     # Dataflow models
     "SourceType",
     "SinkType",

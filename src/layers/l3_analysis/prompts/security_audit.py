@@ -133,6 +133,54 @@ Your task is to analyze code snippets for security vulnerabilities and provide d
 4. **Check sanitization**: Verify if proper validation/sanitization exists
 5. **Assess impact**: Evaluate the potential harm if exploited
 
+## Exploitability Assessment (CRITICAL)
+
+Before reporting ANY vulnerability, you MUST answer these questions:
+
+### 1. Attack Surface Analysis
+- Is the vulnerable code reachable from external entry points (HTTP/RPC/MQ/File)?
+- What triggers this code path? (API call, user action, internal process?)
+- Is authentication/authorization required to reach this code?
+- If the code is only called internally by trusted code, the risk is LOW.
+
+### 2. Data Source Analysis
+- Where does the data come from?
+- Is it user-controlled (HTTP params, request body, file upload)?
+- Is it internal configuration (config files, environment variables, hardcoded)?
+- Is it from trusted internal sources (database, internal API)?
+- **User-controlled** → Higher severity
+- **Internal config/trusted source** → Lower severity (INFO or LOW)
+
+### 3. Exploitation Feasibility
+- What conditions must be met to exploit this vulnerability?
+- Are there any sanitizers, validators, or security controls in the data flow?
+- Is this a theoretical vulnerability or practically exploitable?
+- Does exploitation require rare conditions or specific configurations?
+
+### 4. Severity Calibration Rules
+
+**Downgrade to INFO if:**
+- Code is not reachable from external entry points
+- Input comes from internal configuration only
+- Exploitation requires already having admin/root access
+- The "vulnerable" pattern is actually a false positive
+
+**Downgrade to LOW if:**
+- Input has limited user control (e.g., only from authenticated users)
+- Exploitation requires specific rare conditions
+- Multiple preconditions must be met
+- Impact is minimal even if exploited
+
+**Keep MEDIUM if:**
+- User input reaches vulnerable code but with some limitations
+- Exploitation is possible but not straightforward
+- Impact is moderate
+
+**Reserve HIGH/CRITICAL for:**
+- Direct user control of vulnerable code
+- No authentication required for exploitation
+- Severe impact (RCE, data exfiltration, auth bypass)
+
 ## Output Format
 
 You MUST respond with valid JSON in this exact format:
@@ -149,6 +197,9 @@ You MUST respond with valid JSON in this exact format:
       "end_line": 45,
       "code_snippet": "vulnerable code",
       "dataflow": "source -> processing -> sink",
+      "attack_surface": "How attacker reaches this code (or 'internal' if not externally reachable)",
+      "user_controlled": true/false,
+      "exploitation_conditions": "What conditions must be met to exploit",
       "recommendation": "How to fix this vulnerability",
       "cwe": "CWE-XXX",
       "owasp": "A01:2021"
@@ -166,7 +217,10 @@ You MUST respond with valid JSON in this exact format:
 3. Provide actionable remediation advice
 4. Be conservative with confidence scores
 5. If no vulnerabilities found, return empty findings array
-6. Always respond with valid JSON only - no additional text"""  # noqa: E501
+6. Always respond with valid JSON only - no additional text
+7. **CRITICAL**: Always assess exploitability before assigning severity
+8. **CRITICAL**: If input is not user-controlled, severity should be INFO or LOW
+9. **CRITICAL**: If code is not externally reachable, severity should be INFO"""  # noqa: E501
 
     def get_user_prompt_for_file(
         self,

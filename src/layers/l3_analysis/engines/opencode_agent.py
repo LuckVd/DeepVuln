@@ -439,11 +439,23 @@ class OpenCodeAgent(BaseEngine):
                 if len(code.strip()) < 20:
                     return []
 
-                # Build prompts
+                # Build prompts with enhanced context
                 relative_path = str(file_path.relative_to(source_path))
+
+                # Build enhanced context using ContextBuilder
+                from src.layers.l3_analysis.task.context_builder import ContextBuilder
+                context_builder = ContextBuilder()
+                enhanced_code = context_builder.build_enhanced_context(
+                    source_path=source_path,
+                    file_path=relative_path,
+                    include_call_chain=True,
+                    include_dependencies=True,
+                    include_data_flow=True,
+                )
+
                 system_prompt, user_prompt = build_audit_prompt(
                     language=language,
-                    code=code,
+                    code=enhanced_code,
                     file_path=relative_path,
                     framework=context.get("framework"),
                     vulnerability_focus=vulnerability_focus,
@@ -579,6 +591,10 @@ class OpenCodeAgent(BaseEngine):
                 metadata={
                     "dataflow": item.get("dataflow"),
                     "security_score": item.get("security_score"),
+                    # New exploitability fields
+                    "attack_surface": item.get("attack_surface"),
+                    "user_controlled": item.get("user_controlled"),
+                    "exploitation_conditions": item.get("exploitation_conditions"),
                 },
             )
 
