@@ -458,6 +458,440 @@ def run_intel_stats_interactive() -> None:
     show_stats(stats)
 
 
+async def run_full_security_scan(
+    source_path: Path,
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    """Run full security scan with all enabled engines.
+
+    Args:
+        source_path: Path to the source code.
+        options: Scan options including engines, llm_verify, model, etc.
+
+    Returns:
+        Dictionary containing scan results from all engines.
+    """
+    import uuid
+    from datetime import UTC, datetime
+
+    from src.layers.l1_intelligence.attack_surface import AttackSurfaceDetector
+    from src.layers.l1_intelligence.tech_stack_detector.detector import TechStackDetector
+    from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
+    from src.layers.l3_analysis.engines.codeql import CodeQLEngine
+    from src.layers.l3_analysis.engines.opencode_agent import OpenCodeAgent
+    from src.layers.l3_analysis.rounds.round_four import (
+        RoundFourExecutor,
+        ExploitabilityStatus,
+    )
+    from src.layers.l3_analysis.rounds.models import (
+        VulnerabilityCandidate,
+        ConfidenceLevel,
+    )
+    from src.layers.l3_analysis.llm.openai_client import OpenAIClient
+
+    full_scan = options.get("full_scan", False)
+    engines = options.get("engines") or (["semgrep", "codeql", "agent"] if full_scan else [])
+    llm_verify = options.get("llm_verify", False)
+    model = options.get("model", "deepseek-chat")
+    include_low = options.get("include_low_severity", False)
+    no_deps = options.get("no_deps", False)
+
+    result = {
+        "source_path": str(source_path),
+        "start_time": datetime.now(UTC).isoformat(),
+        "engines_requested": engines,
+        "phases": {},
+        "all_findings": [],
+        "verified_findings": [],
+        "statistics": {},
+        "success": True,
+        "errors": [],
+    }
+
+    # =========================================================================
+    # Phase 0: Preparation - Tech Stack & Attack Surface Detection
+    # =========================================================================
+
+    console.print("\n[bold cyan]Phase 0: Preparation[/]")
+
+    # Tech Stack Detection
+    tech_detector = TechStackDetector()
+    tech_result = tech_detector.detect(source_path)
+    primary_lang = tech_result.languages[0].name if tech_result.languages else "Unknown"
+    console.print(f"  Primary Language: {primary_lang}")
+    result["primary_language"] = primary_lang
+
+    # Attack Surface Detection
+    surface_detector = AttackSurfaceDetector()
+    surface_report = surface_detector.detect(source_path)
+    total_endpoints = (
+        surface_report.http_endpoints +
+        surface_report.rpc_services +
+        surface_report.mq_consumers +
+        surface_report.cron_jobs +
+        surface_report.file_inputs
+    )
+    console.print(f"  Entry Points: {total_endpoints}")
+    result["attack_surface"] = {
+        "http_endpoints": surface_report.http_endpoints,
+        "rpc_services": surface_report.rpc_services,
+        "total_entry_points": total_endpoints,
+    }
+
+    # =========================================================================
+    # Initialize Engines
+    # =========================================================================
+
+    console.print("\n[bold cyan]Initializing Engines[/]")
+
+    # LLM Client (for agent and verification)
+    llm_client = None
+    if "agent" in engines or llm_verify:
+        import os
+        api_key = os.environ.get("OPENAI_API_KEY")
+        base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        if api_key:
+            llm_client = OpenAIClient(
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                max_tokens=4096,
+                temperature=0.1,
+            )
+            console.print(f"  LLM Client: ✓ ({model})")
+        else:
+            console.print("  LLM Client: ✗ (OPENAI_API_KEY not set)")
+            result["errors"].append("LLM client not available: OPENAI_API_KEY not set")
+
+    # Semgrep Engine
+    semgrep_engine = None
+    if "semgrep" in engines:
+        semgrep_engine = SemgrepEngine()
+        if semgrep_engine.is_available():
+            console.print("  Semgrep: ✓")
+        else:
+            console.print("  Semgrep: ✗ (not installed)")
+            result["errors"].append("Semgrep not available")
+
+    # CodeQL Engine
+    codeql_engine = None
+    if "codeql" in engines:
+        codeql_engine = CodeQLEngine()
+        if codeql_engine.is_available():
+            console.print("  CodeQL: ✓")
+        else:
+            console.print("  CodeQL: ✗ (not installed)")
+            result["errors"].append("CodeQL not available: install from https://github.com/github/codeql-cli-binaries/releases")
+
+    # Agent Engine
+    agent_engine = None
+    if "agent" in engines and llm_client:
+        agent_engine = OpenCodeAgent(
+            llm_client=llm_client,
+            language=primary_lang.lower(),
+        )
+        console.print("  Agent: ✓")
+
+    # =========================================================================
+    # Phase 1: Semgrep Quick Scan
+    # =========================================================================
+
+    if semgrep_engine and semgrep_engine.is_available():
+        console.print("\n[bold cyan]Phase 1: Semgrep Scan[/]")
+
+        try:
+            with create_progress() as progress:
+                task = progress.add_task("[cyan]Running Semgrep...", total=None)
+                semgrep_result = await semgrep_engine.scan(
+                    source_path=source_path,
+                    severity_filter=None,
+                    use_auto_config=True,
+                )
+                progress.update(task, completed=True, description="[green]Done!")
+
+            if semgrep_result.success:
+                for finding in semgrep_result.findings:
+                    result["all_findings"].append({
+                        "source": "semgrep",
+                        "finding": finding,
+                    })
+                console.print(f"  ✓ Semgrep: {len(semgrep_result.findings)} findings")
+                result["phases"]["semgrep"] = {
+                    "success": True,
+                    "findings_count": len(semgrep_result.findings),
+                }
+            else:
+                console.print(f"  ✗ Semgrep failed: {semgrep_result.error_message}")
+                result["phases"]["semgrep"] = {"success": False, "error": semgrep_result.error_message}
+        except Exception as e:
+            console.print(f"  ✗ Semgrep error: {e}")
+            result["errors"].append(f"Semgrep error: {e}")
+
+    # =========================================================================
+    # Phase 2: CodeQL Deep Analysis
+    # =========================================================================
+
+    if codeql_engine and codeql_engine.is_available():
+        console.print("\n[bold cyan]Phase 2: CodeQL Analysis[/]")
+        console.print("  [dim]Creating database and running queries...[/]")
+
+        try:
+            with create_progress() as progress:
+                task = progress.add_task("[cyan]Running CodeQL...", total=None)
+                codeql_result = await codeql_engine.scan(
+                    source_path=source_path,
+                    language=primary_lang.lower(),
+                    severity_filter=None,
+                )
+                progress.update(task, completed=True, description="[green]Done!")
+
+            if codeql_result.success:
+                for finding in codeql_result.findings:
+                    result["all_findings"].append({
+                        "source": "codeql",
+                        "finding": finding,
+                    })
+                console.print(f"  ✓ CodeQL: {len(codeql_result.findings)} findings")
+                result["phases"]["codeql"] = {
+                    "success": True,
+                    "findings_count": len(codeql_result.findings),
+                }
+            else:
+                console.print(f"  ✗ CodeQL failed: {codeql_result.error_message}")
+                result["phases"]["codeql"] = {"success": False, "error": codeql_result.error_message}
+        except Exception as e:
+            console.print(f"  ✗ CodeQL error: {e}")
+            result["errors"].append(f"CodeQL error: {e}")
+
+    # =========================================================================
+    # Phase 3: AI Agent Analysis
+    # =========================================================================
+
+    if agent_engine:
+        console.print("\n[bold cyan]Phase 3: AI Agent Analysis[/]")
+
+        # Select target files (limit for performance)
+        all_files = list(source_path.rglob(f"*.{primary_lang.lower()}"))
+        target_files = [str(f) for f in all_files[:50] if f.name != "__init__.py"]
+
+        if target_files:
+            console.print(f"  Analyzing {len(target_files)} files...")
+            try:
+                with create_progress() as progress:
+                    task = progress.add_task("[cyan]Running AI analysis...", total=None)
+                    agent_result = await agent_engine.scan(
+                        source_path=source_path,
+                        files=target_files,
+                        vulnerability_focus=[
+                            "sql_injection",
+                            "xss",
+                            "command_injection",
+                            "path_traversal",
+                            "ssrf",
+                            "hardcoded_secrets",
+                            "crypto_weakness",
+                            "auth_bypass",
+                        ],
+                    )
+                    progress.update(task, completed=True, description="[green]Done!")
+
+                if agent_result.findings:
+                    for finding in agent_result.findings:
+                        result["all_findings"].append({
+                            "source": "agent",
+                            "finding": finding,
+                        })
+                    console.print(f"  ✓ Agent: {len(agent_result.findings)} findings")
+                    result["phases"]["agent"] = {
+                        "success": True,
+                        "findings_count": len(agent_result.findings),
+                    }
+                else:
+                    console.print("  ✓ Agent: No vulnerabilities found")
+                    result["phases"]["agent"] = {"success": True, "findings_count": 0}
+            except Exception as e:
+                console.print(f"  ✗ Agent error: {e}")
+                result["errors"].append(f"Agent error: {e}")
+        else:
+            console.print("  ⚠ No target files found for analysis")
+
+    # =========================================================================
+    # Phase 4: Exploitability Verification (with optional LLM)
+    # =========================================================================
+
+    if result["all_findings"] and (llm_verify or llm_client):
+        console.print("\n[bold cyan]Phase 4: Exploitability Verification[/]")
+        console.print(f"  LLM Verification: {'✓' if llm_verify else '✗'}")
+
+        try:
+            executor = RoundFourExecutor(
+                source_path=source_path,
+                llm_client=llm_client if llm_verify else None,
+                enable_llm_assessment=llm_verify,
+            )
+
+            verified_results = []
+            total = len(result["all_findings"])
+
+            for i, item in enumerate(result["all_findings"], 1):
+                finding = item["finding"]
+                console.print(f"  [{i}/{total}] {finding.title[:50]}...")
+
+                try:
+                    candidate = VulnerabilityCandidate(
+                        id=str(uuid.uuid4())[:8],
+                        finding=finding,
+                        confidence=ConfidenceLevel.MEDIUM,
+                        discovered_in_round=1,
+                    )
+
+                    verify_result = await executor._verify_exploitability(candidate)
+                    verified_results.append({
+                        "source": item["source"],
+                        "finding": finding,
+                        "exploitability": verify_result,
+                    })
+                except Exception as e:
+                    verified_results.append({
+                        "source": item["source"],
+                        "finding": finding,
+                        "exploitability": None,
+                        "error": str(e),
+                    })
+
+            result["verified_findings"] = verified_results
+
+            # Statistics by exploitability status
+            status_counts = {}
+            for v in verified_results:
+                exp = v.get("exploitability")
+                if exp:
+                    status = exp.status.value
+                else:
+                    status = "error"
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+            result["statistics"]["by_exploitability"] = status_counts
+            console.print(f"\n  Results: {status_counts}")
+
+        except Exception as e:
+            console.print(f"  ✗ Verification error: {e}")
+            result["errors"].append(f"Verification error: {e}")
+
+    # =========================================================================
+    # Final Statistics
+    # =========================================================================
+
+    result["end_time"] = datetime.now(UTC).isoformat()
+    result["statistics"]["total_findings"] = len(result["all_findings"])
+    result["statistics"]["verified_count"] = len(result["verified_findings"])
+
+    # Clean up LLM client
+    if llm_client:
+        await llm_client.close()
+
+    return result
+
+
+def _export_full_scan_result(result: dict[str, Any], export_path: str, options: dict[str, Any]) -> None:
+    """Export full scan result to file.
+
+    Args:
+        result: Full scan result dictionary.
+        export_path: Path to export file.
+        options: Scan options.
+    """
+    from datetime import datetime
+
+    lines = []
+    lines.append("=" * 70)
+    lines.append("DeepVuln Full Security Scan Report")
+    lines.append("=" * 70)
+    lines.append(f"Source: {result['source_path']}")
+    lines.append(f"Start Time: {result['start_time']}")
+    lines.append(f"End Time: {result['end_time']}")
+    lines.append(f"Primary Language: {result.get('primary_language', 'Unknown')}")
+    lines.append("")
+
+    # Attack Surface
+    if "attack_surface" in result:
+        lines.append("-" * 70)
+        lines.append("Attack Surface")
+        lines.append("-" * 70)
+        as_info = result["attack_surface"]
+        lines.append(f"  HTTP Endpoints: {as_info.get('http_endpoints', 0)}")
+        lines.append(f"  RPC Services: {as_info.get('rpc_services', 0)}")
+        lines.append(f"  Total Entry Points: {as_info.get('total_entry_points', 0)}")
+        lines.append("")
+
+    # Phases
+    lines.append("-" * 70)
+    lines.append("Scan Phases")
+    lines.append("-" * 70)
+    for phase, info in result.get("phases", {}).items():
+        if info.get("success"):
+            lines.append(f"  {phase}: {info.get('findings_count', 0)} findings")
+        else:
+            lines.append(f"  {phase}: FAILED - {info.get('error', 'Unknown')}")
+    lines.append("")
+
+    # Statistics
+    lines.append("-" * 70)
+    lines.append("Statistics")
+    lines.append("-" * 70)
+    stats = result.get("statistics", {})
+    lines.append(f"  Total Findings: {stats.get('total_findings', 0)}")
+    lines.append(f"  Verified: {stats.get('verified_count', 0)}")
+
+    if "by_exploitability" in stats:
+        lines.append("  By Exploitability:")
+        for status, count in stats["by_exploitability"].items():
+            lines.append(f"    - {status}: {count}")
+    lines.append("")
+
+    # Errors
+    if result.get("errors"):
+        lines.append("-" * 70)
+        lines.append("Errors")
+        lines.append("-" * 70)
+        for err in result["errors"]:
+            lines.append(f"  - {err}")
+        lines.append("")
+
+    # Detailed Findings (if requested)
+    if options.get("detailed") and result.get("verified_findings"):
+        lines.append("=" * 70)
+        lines.append("Detailed Findings")
+        lines.append("=" * 70)
+
+        for i, v in enumerate(result["verified_findings"][:50], 1):
+            finding = v["finding"]
+            exp = v.get("exploitability")
+
+            lines.append(f"\n{i}. {finding.title}")
+            lines.append(f"   Source: {v['source']}")
+            lines.append(f"   Location: {finding.location.to_display()}")
+            lines.append(f"   Severity: {finding.severity.value.upper()}")
+
+            if exp:
+                lines.append(f"   Exploitability: {exp.status.value.upper()}")
+                lines.append(f"   Confidence: {exp.confidence:.0%}")
+                if exp.reasoning:
+                    lines.append(f"   Reasoning: {exp.reasoning[:200]}...")
+
+    lines.append("")
+    lines.append("=" * 70)
+    lines.append("End of Report")
+    lines.append("=" * 70)
+
+    Path(export_path).write_text("\n".join(lines), encoding="utf-8")
+
+    console.print()
+    console.print(f"[green]Report exported to: {export_path}[/]")
+    console.print(f"  Total Findings: {stats.get('total_findings', 0)}")
+    console.print(f"  Verified: {stats.get('verified_count', 0)}")
+
+
 def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | None = None) -> None:
     """Run interactive security scan on source code.
 
@@ -482,6 +916,18 @@ def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | N
     if options is None:
         options = prompt_scan_options() or {}
 
+    # Check if full scan or specific engines are requested
+    full_scan = options.get("full_scan", False)
+    engines = options.get("engines")
+    llm_verify = options.get("llm_verify", False)
+
+    # Run full scan if requested
+    if full_scan or engines:
+        result = asyncio.run(run_full_security_scan(source_path, options))
+        _display_full_scan_result_interactive(result, options)
+        return
+
+    # Original dependency scan flow
     # Create scan config
     config = ScanConfig(
         include_low_severity=options.get("include_low_severity", False),
@@ -556,6 +1002,192 @@ def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | N
     else:
         show_success("Scan Complete", "No security issues detected!")
         show_goodbye()
+
+
+def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[str, Any]) -> None:
+    """Display full scan result in interactive mode.
+
+    Args:
+        result: Full scan result dictionary.
+        options: Scan options.
+    """
+    from rich.table import Table
+
+    console.print()
+    console.rule("[bold cyan]Full Security Scan Results[/]")
+    console.print()
+
+    # Summary
+    console.print(f"[dim]Source:[/] {result['source_path']}")
+    console.print(f"[dim]Primary Language:[/] {result.get('primary_language', 'Unknown')}")
+
+    # Attack Surface
+    if "attack_surface" in result:
+        as_info = result["attack_surface"]
+        console.print(f"[dim]Entry Points:[/] {as_info.get('total_entry_points', 0)}")
+
+    console.print()
+
+    # Statistics
+    stats = result.get("statistics", {})
+    total = stats.get("total_findings", 0)
+    verified = stats.get("verified_count", 0)
+
+    console.print(f"[bold]Total Findings:[/] {total}")
+    console.print(f"[bold]Verified:[/] {verified}")
+
+    # Exploitability breakdown
+    if "by_exploitability" in stats:
+        console.print()
+        status_emoji = {
+            "exploitable": "🔴",
+            "conditional": "🟠",
+            "needs_review": "⚪",
+            "unlikely": "🟡",
+            "not_exploitable": "🟢",
+            "error": "❌",
+        }
+        console.print("[bold]By Exploitability:[/]")
+        for status, count in stats["by_exploitability"].items():
+            emoji = status_emoji.get(status, "⚪")
+            console.print(f"  {emoji} {status.upper()}: {count}")
+
+    # Findings table
+    if result.get("verified_findings"):
+        console.print()
+
+        findings_table = Table(title="Verified Findings", show_header=True)
+        findings_table.add_column("Status", width=12)
+        findings_table.add_column("Severity", width=10)
+        findings_table.add_column("Source", width=10)
+        findings_table.add_column("Location", width=35)
+        findings_table.add_column("Title", width=40)
+
+        status_colors = {
+            "exploitable": "red",
+            "conditional": "orange3",
+            "needs_review": "white",
+            "unlikely": "yellow",
+            "not_exploitable": "green",
+        }
+        severity_colors = {
+            "critical": "red",
+            "high": "orange3",
+            "medium": "yellow",
+            "low": "blue",
+            "info": "dim",
+        }
+
+        for v in result["verified_findings"][:30]:  # Limit display
+            finding = v["finding"]
+            exp = v.get("exploitability")
+
+            if exp:
+                status = exp.status.value
+                status_color = status_colors.get(status, "white")
+                status_str = f"[{status_color}]{status.upper()}[/{status_color}]"
+            else:
+                status_str = "[dim]ERROR[/dim]"
+
+            sev_color = severity_colors.get(finding.severity.value, "white")
+            sev_str = f"[{sev_color}]{finding.severity.value.upper()}[/{sev_color}]"
+
+            location = finding.location.to_display()
+            if len(location) > 35:
+                location = location[:32] + "..."
+
+            title = finding.title
+            if len(title) > 40:
+                title = title[:37] + "..."
+
+            findings_table.add_row(
+                status_str,
+                sev_str,
+                v["source"],
+                location,
+                title,
+            )
+
+        console.print(findings_table)
+
+        if len(result["verified_findings"]) > 30:
+            console.print(f"\n[dim]... and {len(result['verified_findings']) - 30} more findings[/]")
+
+    # Errors
+    if result.get("errors"):
+        console.print()
+        console.print("[yellow]Warnings:[/]")
+        for err in result["errors"][:5]:
+            console.print(f"  - {err}")
+
+    # Ask what to do next
+    console.print()
+
+    from questionary import select
+
+    action = select(
+        "What would you like to do?",
+        choices=[
+            "View detailed findings",
+            "Export report",
+            "Exit",
+        ],
+    ).ask()
+
+    if action == "View detailed findings":
+        _display_detailed_findings(result)
+    elif action == "Export report":
+        export_path = prompt_export_path()
+        if export_path:
+            _export_full_scan_result(result, export_path, options)
+            show_success("Export Complete", f"Report saved to {export_path}")
+
+    show_goodbye()
+
+
+def _display_detailed_findings(result: dict[str, Any]) -> None:
+    """Display detailed findings in interactive mode.
+
+    Args:
+        result: Full scan result dictionary.
+    """
+    console.print()
+    console.rule("[bold cyan]Detailed Findings[/]")
+
+    for i, v in enumerate(result.get("verified_findings", [])[:20], 1):
+        finding = v["finding"]
+        exp = v.get("exploitability")
+
+        console.print(f"\n[bold]{i}. {finding.title}[/]")
+        console.print(f"   [dim]Source:[/] {v['source']}")
+        console.print(f"   [dim]Location:[/] {finding.location.to_display()}")
+        console.print(f"   [dim]Severity:[/] {finding.severity.value.upper()}")
+
+        if exp:
+            status_emoji = {
+                "exploitable": "🔴",
+                "conditional": "🟠",
+                "needs_review": "⚪",
+                "unlikely": "🟡",
+                "not_exploitable": "🟢",
+            }
+            emoji = status_emoji.get(exp.status.value, "⚪")
+            console.print(f"   [dim]Exploitability:[/] {emoji} {exp.status.value.upper()}")
+            console.print(f"   [dim]Confidence:[/] {exp.confidence:.0%}")
+
+            if exp.reasoning:
+                reasoning = exp.reasoning[:300]
+                console.print(f"   [dim]Reasoning:[/] {reasoning}...")
+
+            if exp.severity_adjustment:
+                orig = exp.severity_adjustment.original_severity.value.upper()
+                adj = exp.severity_adjustment.adjusted_severity.value.upper()
+                if orig != adj:
+                    console.print(f"   [dim]Adjusted:[/] {orig} → {adj}")
+
+        if finding.description:
+            desc = finding.description[:200]
+            console.print(f"   [dim]Description:[/] {desc}...")
 
 
 @click.group(invoke_without_command=True)
@@ -668,17 +1300,48 @@ def clean() -> None:
 @click.option("--include-low", is_flag=True, help="Include low severity vulnerabilities")
 @click.option("--detailed", "-d", is_flag=True, help="Show detailed report")
 @click.option("--export", "-e", "export_path", help="Export report to file")
-def scan(path: str, include_low: bool, detailed: bool, export_path: str | None) -> None:
+@click.option("--full", "-f", "full_scan", is_flag=True, help="Full scan: include code analysis (semgrep + codeql + agent)")
+@click.option("--engines", multiple=True, type=click.Choice(["semgrep", "codeql", "agent"]), help="Specify engines for code analysis")
+@click.option("--llm-verify", is_flag=True, help="Enable LLM-assisted exploitability verification (Round 4)")
+@click.option("--model", default="deepseek-chat", help="LLM model for agent and verification (default: deepseek-chat)")
+@click.option("--no-deps", is_flag=True, help="Skip dependency scanning")
+def scan(
+    path: str,
+    include_low: bool,
+    detailed: bool,
+    export_path: str | None,
+    full_scan: bool,
+    engines: tuple[str, ...],
+    llm_verify: bool,
+    model: str,
+    no_deps: bool,
+) -> None:
     """Run security scan on source code.
 
-    This command scans the source code for known vulnerabilities by:
-    - Detecting dependency files (package.json, requirements.txt, etc.)
-    - Identifying the technology stack (frameworks, databases, etc.)
-    - Correlating dependencies with known CVEs
+    By default, this command scans for dependency vulnerabilities (CVE).
 
-    Example:
-        deepvuln scan --path /path/to/project
-        deepvuln scan -p . --detailed --export report.txt
+    With --full or --engines, it also performs code analysis:
+    - Semgrep: Fast pattern matching for known vulnerability patterns
+    - CodeQL: Deep dataflow analysis (requires CodeQL CLI)
+    - Agent: AI-powered semantic code analysis
+
+    With --llm-verify, findings are verified with LLM for exploitability.
+
+    Examples:
+        # Quick dependency scan (default)
+        deepvuln scan -p /path/to/project
+
+        # Full scan with all engines
+        deepvuln scan -p . --full
+
+        # Specific engines only
+        deepvuln scan -p . --engines semgrep --engines agent
+
+        # Full scan with LLM verification
+        deepvuln scan -p . --full --llm-verify
+
+        # Export report
+        deepvuln scan -p . --full --export report.txt
     """
     show_banner()
 
@@ -686,6 +1349,11 @@ def scan(path: str, include_low: bool, detailed: bool, export_path: str | None) 
     options = {
         "include_low_severity": include_low,
         "detailed": detailed,
+        "full_scan": full_scan,
+        "engines": list(engines) if engines else None,
+        "llm_verify": llm_verify,
+        "model": model,
+        "no_deps": no_deps,
     }
 
     if export_path:
@@ -704,39 +1372,57 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
         options: Scan options.
     """
     from src.cli.scan_display import export_report_text
-    from src.layers.l1_intelligence.workflow import AutoSecurityScanner, ScanConfig
 
-    config = ScanConfig(
-        include_low_severity=options.get("include_low_severity", False),
-    )
+    full_scan = options.get("full_scan", False)
+    engines = options.get("engines")
+    llm_verify = options.get("llm_verify", False)
+    no_deps = options.get("no_deps", False)
 
-    async def _scan():
-        from src.layers.l1_intelligence.threat_intel import IntelService
+    # Check if code analysis is requested
+    needs_code_analysis = full_scan or engines
 
-        async with IntelService() as service:
-            scanner = AutoSecurityScanner(intel_service=service, config=config)
-            result = await scanner.scan(source_path)
-            return result
-
-    console.print(f"[cyan]Scanning {source_path}...[/]")
-
-    with create_progress() as progress:
-        task = progress.add_task("[cyan]Analyzing...", total=None)
-        scan_result = asyncio.run(_scan())
-        progress.update(task, completed=True, description="[green]Done!")
-
-    if scan_result.success and scan_result.report:
-        # Export report
-        report_text = export_report_text(scan_result.report)
-        Path(export_path).write_text(report_text, encoding="utf-8")
-
-        console.print()
-        console.print(f"[green]Report exported to: {export_path}[/]")
-        console.print(f"  Dependencies scanned: {scan_result.report.dependencies_scanned}")
-        console.print(f"  Vulnerabilities found: {scan_result.report.total_vulnerabilities}")
-        console.print(f"  KEV (known exploited): {scan_result.report.kev_count}")
+    if needs_code_analysis:
+        # Run full scan with code analysis
+        result = asyncio.run(run_full_security_scan(
+            source_path=source_path,
+            options=options,
+        ))
+        _export_full_scan_result(result, export_path, options)
     else:
-        show_error("Scan Failed", "\n".join(scan_result.errors or ["Unknown error"]))
+        # Original dependency scan
+        from src.layers.l1_intelligence.workflow import AutoSecurityScanner, ScanConfig
+
+        config = ScanConfig(
+            include_low_severity=options.get("include_low_severity", False),
+        )
+
+        async def _scan():
+            from src.layers.l1_intelligence.threat_intel import IntelService
+
+            async with IntelService() as service:
+                scanner = AutoSecurityScanner(intel_service=service, config=config)
+                result = await scanner.scan(source_path)
+                return result
+
+        console.print(f"[cyan]Scanning {source_path}...[/]")
+
+        with create_progress() as progress:
+            task = progress.add_task("[cyan]Analyzing dependencies...", total=None)
+            scan_result = asyncio.run(_scan())
+            progress.update(task, completed=True, description="[green]Done!")
+
+        if scan_result.success and scan_result.report:
+            # Export report
+            report_text = export_report_text(scan_result.report)
+            Path(export_path).write_text(report_text, encoding="utf-8")
+
+            console.print()
+            console.print(f"[green]Report exported to: {export_path}[/]")
+            console.print(f"  Dependencies scanned: {scan_result.report.dependencies_scanned}")
+            console.print(f"  Vulnerabilities found: {scan_result.report.total_vulnerabilities}")
+            console.print(f"  KEV (known exploited): {scan_result.report.kev_count}")
+        else:
+            show_error("Scan Failed", "\n".join(scan_result.errors or ["Unknown error"]))
 
 
 @main.command("config-analyze")

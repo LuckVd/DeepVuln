@@ -234,6 +234,10 @@ class ContextBuilder:
 
     def _extract_function(self, lines: list[str], function_name: str) -> str:
         """Extract a function by name."""
+        # Skip if function_name is None or empty
+        if not function_name:
+            return ""
+
         result_lines = []
         in_function = False
         indent_level = 0
@@ -571,6 +575,11 @@ class ContextBuilder:
         # Find function definition line
         lines = content.split('\n')
         func_line_idx = None
+
+        # Skip if function_name is None
+        if not function_name:
+            return False, None
+
         for i, line in enumerate(lines):
             if function_name + '(' in line and ('public' in line or 'private' in line or 'def ' in line):
                 func_line_idx = i
@@ -620,6 +629,10 @@ class ContextBuilder:
         Returns list of {name, file, line} dicts.
         """
         callers = []
+
+        # Skip if target_function is None
+        if not target_function:
+            return callers
 
         # Search all Java/Python files
         extensions = [".java", ".py", ".ts", ".js", ".go"]
@@ -851,6 +864,9 @@ class ContextBuilder:
 
         markers = []
 
+        # Use "unknown" if function_name is None
+        func_name_safe = function_name or "unknown"
+
         # Extract function code
         func_code = self._extract_function(content.split('\n'), function_name)
         if not func_code:
@@ -893,7 +909,7 @@ class ContextBuilder:
                 markers.append(DataFlowMarker(
                     variable_name="user_input",
                     source_type="user_input",
-                    source_location=f"{file_path}:{function_name}",
+                    source_location=f"{file_path}:{func_name_safe}",
                     description=f"Potential user-controlled input: {desc}",
                 ))
                 break  # One marker per type is enough
@@ -904,7 +920,7 @@ class ContextBuilder:
                 markers.append(DataFlowMarker(
                     variable_name="config_value",
                     source_type="config",
-                    source_location=f"{file_path}:{function_name}",
+                    source_location=f"{file_path}:{func_name_safe}",
                     description=f"Configuration value: {desc}",
                 ))
                 break
@@ -915,7 +931,7 @@ class ContextBuilder:
                 markers.append(DataFlowMarker(
                     variable_name="trusted_data",
                     source_type="trusted",
-                    source_location=f"{file_path}:{function_name}",
+                    source_location=f"{file_path}:{func_name_safe}",
                     description=f"Trusted source: {desc}",
                 ))
                 break

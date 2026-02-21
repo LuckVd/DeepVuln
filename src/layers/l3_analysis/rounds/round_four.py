@@ -3,18 +3,25 @@ Round Four Executor - Exploitability Verification
 
 Fourth round of multi-round audit: verify vulnerability exploitability
 and calibrate severity based on real-world attack feasibility.
+
+For vulnerabilities that cannot be determined by static rules (NEEDS_REVIEW),
+LLM-assisted assessment is available for more accurate judgment.
 """
 
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.models import Finding, SeverityLevel
+from src.layers.l3_analysis.prompts.exploitability import (
+    build_exploitability_prompt,
+    parse_exploitability_response,
+)
 from src.layers.l3_analysis.rounds.models import (
     AnalysisDepth,
     AuditSession,
@@ -31,6 +38,34 @@ from src.layers.l3_analysis.task.context_builder import (
     ContextBuilder,
     DataFlowMarker,
 )
+
+
+class LLMClientProtocol(Protocol):
+    """Protocol for LLM client interface."""
+
+    async def complete_with_context(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        context: list[dict[str, str]] | None = None,
+        **kwargs,
+    ) -> "LLMResponse":
+        """Generate completion from LLM."""
+        ...
+
+
+class LLMResponse:
+    """Simplified LLM response type for protocol."""
+
+    content: str
+    usage: "TokenUsage"
+
+
+class TokenUsage:
+    """Token usage info."""
+
+    prompt_tokens: int
+    completion_tokens: int
 
 
 class ExploitabilityStatus(str, Enum):
@@ -133,6 +168,8 @@ class RoundFourExecutor:
         self,
         source_path: Path,
         context_builder: ContextBuilder | None = None,
+        llm_client: LLMClientProtocol | None = None,
+        enable_llm_assessment: bool = True,
     ):
         """
         Initialize the round four executor.
@@ -140,10 +177,22 @@ class RoundFourExecutor:
         Args:
             source_path: Path to source code.
             context_builder: Context builder instance (creates one if None).
+            llm_client: LLM client for AI-assisted exploitability assessment.
+            enable_llm_assessment: Whether to enable LLM-assisted assessment
+                for NEEDS_REVIEW vulnerabilities.
         """
         self.logger = get_logger(__name__)
         self.source_path = source_path
         self._context_builder = context_builder or ContextBuilder()
+        self._llm_client = llm_client
+        self._enable_llm_assessment = enable_llm_assessment and llm_client is not None
+
+        if self._enable_llm_assessment:
+            self.logger.info("LLM-assisted exploitability assessment enabled")
+        elif llm_client is None:
+            self.logger.debug("No LLM client provided, LLM assessment disabled")
+        else:
+            self.logger.debug("LLM assessment explicitly disabled")
 
     async def execute(
         self,
@@ -258,26 +307,59 @@ class RoundFourExecutor:
         finding = candidate.finding
         location = finding.location
 
+        # Get function name - prefer location.function, fallback to extracting from snippet
+        function_name = location.function or self._extract_function_name(location.snippet or "")
+
         # Get call chain analysis
         call_chain = self._context_builder.analyze_call_chain(
             source_path=self.source_path,
             file_path=location.file,
-            function_name=self._extract_function_name(location.snippet or ""),
+            function_name=function_name,
         )
 
         # Get data flow analysis
         data_flow = self._context_builder.analyze_data_flow(
             source_path=self.source_path,
             file_path=location.file,
-            function_name=self._extract_function_name(location.snippet or ""),
+            function_name=function_name,
         )
 
-        # Determine exploitability
+        # Determine exploitability using static rules
         status, confidence, reasoning = self._assess_exploitability(
             call_chain=call_chain,
             data_flow=data_flow,
             finding=finding,
         )
+
+        # If NEEDS_REVIEW and LLM is available, use LLM-assisted assessment
+        if status == ExploitabilityStatus.NEEDS_REVIEW and self._enable_llm_assessment:
+            self.logger.info(
+                f"Using LLM-assisted assessment for {finding.title} (NEEDS_REVIEW)"
+            )
+
+            llm_result = await self._llm_assisted_assessment(
+                candidate=candidate,
+                call_chain=call_chain,
+                data_flow=data_flow,
+            )
+
+            if llm_result:
+                status = llm_result.get("status", status)
+                confidence = llm_result.get("confidence", confidence)
+                reasoning = llm_result.get("reasoning", reasoning)
+
+                # Ensure status is valid enum value
+                try:
+                    status = ExploitabilityStatus(status)
+                except ValueError:
+                    self.logger.warning(
+                        f"Invalid LLM status '{status}', keeping NEEDS_REVIEW"
+                    )
+                    status = ExploitabilityStatus.NEEDS_REVIEW
+
+                self.logger.info(
+                    f"LLM assessment result: {status.value} (confidence: {confidence})"
+                )
 
         # Determine severity adjustment
         severity_adjustment = self._calculate_severity_adjustment(
@@ -302,6 +384,144 @@ class RoundFourExecutor:
             reasoning=reasoning,
         )
 
+    async def _llm_assisted_assessment(
+        self,
+        candidate: VulnerabilityCandidate,
+        call_chain: CallChainInfo | None,
+        data_flow: list[DataFlowMarker],
+    ) -> dict[str, Any] | None:
+        """
+        Use LLM to assess exploitability when static rules are inconclusive.
+
+        Args:
+            candidate: The vulnerability candidate to assess.
+            call_chain: Call chain analysis results.
+            data_flow: Data flow markers.
+
+        Returns:
+            Dict with 'status', 'confidence', 'reasoning' or None on failure.
+        """
+        if not self._llm_client:
+            return None
+
+        finding = candidate.finding
+        location = finding.location
+
+        # Build finding dict for prompt
+        finding_dict = {
+            "type": finding.rule_id or "unknown",
+            "title": finding.title,
+            "severity": finding.severity.value,
+            "confidence": finding.confidence,
+            "location": location.to_display() if location else "Unknown",
+            "description": finding.description,
+            "cwe": finding.cwe,
+            "owasp": finding.owasp,
+        }
+
+        # Build call chain dict for prompt
+        call_chain_dict = None
+        if call_chain:
+            call_chain_dict = {
+                "is_entry_point": call_chain.is_entry_point,
+                "entry_point_type": call_chain.entry_point_type,
+                "callers": [
+                    {"name": c.get("name"), "file": c.get("file")}
+                    for c in (call_chain.callers or [])
+                ],
+            }
+
+        # Build data flow list for prompt
+        data_flow_list = None
+        if data_flow:
+            data_flow_list = [
+                {
+                    "variable": m.variable_name,
+                    "source_type": m.source_type,
+                    "line": m.source_location,
+                }
+                for m in data_flow
+            ]
+
+        # Get source code for context
+        source_code = None
+        try:
+            file_path = self.source_path / location.file
+            if file_path.exists():
+                source_code = file_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception as e:
+            self.logger.warning(f"Could not read source file: {e}")
+
+        # Build prompts
+        try:
+            system_prompt, user_prompt = build_exploitability_prompt(
+                finding=finding_dict,
+                call_chain=call_chain_dict,
+                data_flow=data_flow_list,
+                source_code=source_code,
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to build exploitability prompt: {e}")
+            return None
+
+        # Call LLM
+        try:
+            response = await self._llm_client.complete_with_context(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                context=None,
+                temperature=0.1,  # Low temperature for consistent results
+                max_tokens=1000,
+            )
+
+            # Extract content from response
+            response_text = response.content if hasattr(response, 'content') else str(response)
+
+            # Parse response
+            result = parse_exploitability_response(response_text)
+
+            if result:
+                # Validate and normalize the result
+                status = result.get("status", "needs_review")
+                confidence = result.get("confidence", 0.5)
+
+                # Ensure confidence is within bounds
+                try:
+                    confidence = float(confidence)
+                    confidence = max(0.0, min(1.0, confidence))
+                except (TypeError, ValueError):
+                    confidence = 0.5
+
+                # Map LLM status to our enum
+                status_mapping = {
+                    "exploitable": ExploitabilityStatus.EXPLOITABLE,
+                    "conditional": ExploitabilityStatus.CONDITIONAL,
+                    "unlikely": ExploitabilityStatus.UNLIKELY,
+                    "not_exploitable": ExploitabilityStatus.NOT_EXPLOITABLE,
+                    "needs_review": ExploitabilityStatus.NEEDS_REVIEW,
+                }
+
+                if status.lower() in status_mapping:
+                    status = status_mapping[status.lower()]
+                else:
+                    status = ExploitabilityStatus.NEEDS_REVIEW
+
+                return {
+                    "status": status,
+                    "confidence": confidence,
+                    "reasoning": result.get("reasoning", "LLM assessment"),
+                    "entry_point_analysis": result.get("entry_point_analysis"),
+                    "data_source_analysis": result.get("data_source_analysis"),
+                    "attack_scenario": result.get("attack_scenario"),
+                    "prerequisites": result.get("prerequisites", []),
+                }
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"LLM-assisted assessment failed: {e}")
+            return None
+
     def _assess_exploitability(
         self,
         call_chain: CallChainInfo | None,
@@ -319,8 +539,9 @@ class RoundFourExecutor:
         # Check 1: Is this code reachable from external entry points?
         if call_chain:
             if call_chain.is_entry_point:
+                entry_type = call_chain.entry_point_type or "unknown"
                 reasoning_parts.append(
-                    f"Code IS an external entry point ({call_chain.entry_point_type})."
+                    f"Code IS an external entry point ({entry_type})."
                 )
             elif call_chain.callers:
                 reasoning_parts.append(
@@ -342,13 +563,19 @@ class RoundFourExecutor:
         if user_controlled:
             reasoning_parts.append("Input appears to be USER-CONTROLLED.")
         else:
-            sources = [m.source_type for m in data_flow]
+            sources = [m.source_type for m in data_flow if m.source_type]
             if "config" in sources:
                 reasoning_parts.append("Input comes from CONFIGURATION (not user-controlled).")
             elif "trusted" in sources:
                 reasoning_parts.append("Input comes from TRUSTED source.")
             elif not data_flow:
                 reasoning_parts.append("Could not determine data sources.")
+            else:
+                reasoning_parts.append("No user-controlled input path found.")
+
+        # Filter out None values from reasoning_parts
+        reasoning_parts = [str(p) for p in reasoning_parts if p is not None]
+        reasoning_base = " | ".join(reasoning_parts)
 
         # Check 3: Determine final status
         if not call_chain or (not call_chain.is_entry_point and not call_chain.callers):
@@ -356,7 +583,7 @@ class RoundFourExecutor:
             return (
                 ExploitabilityStatus.NOT_EXPLOITABLE,
                 0.2,
-                " | ".join(reasoning_parts) + " | Severity should be INFO."
+                reasoning_base + " | Severity should be INFO."
             )
 
         if not user_controlled:
@@ -365,27 +592,27 @@ class RoundFourExecutor:
                 return (
                     ExploitabilityStatus.UNLIKELY,
                     0.4,
-                    " | ".join(reasoning_parts) + " | Entry point exists but input is not user-controlled."
+                    reasoning_base + " | Entry point exists but input is not user-controlled."
                 )
             else:
                 return (
                     ExploitabilityStatus.NOT_EXPLOITABLE,
                     0.25,
-                    " | ".join(reasoning_parts) + " | No user-controlled input path found."
+                    reasoning_base + " | No user-controlled input path found."
                 )
 
         if call_chain.is_entry_point and user_controlled:
             return (
                 ExploitabilityStatus.EXPLOITABLE,
                 0.85,
-                " | ".join(reasoning_parts) + " | REAL VULNERABILITY - externally reachable with user input."
+                reasoning_base + " | REAL VULNERABILITY - externally reachable with user input."
             )
 
         # Default: needs review
         return (
             ExploitabilityStatus.NEEDS_REVIEW,
             0.5,
-            " | ".join(reasoning_parts) + " | Could not determine exploitability - needs manual review."
+            reasoning_base + " | Could not determine exploitability - needs manual review."
         )
 
     def _calculate_severity_adjustment(

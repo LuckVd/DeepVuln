@@ -347,22 +347,82 @@ def prompt_scan_options() -> dict[str, Any]:
     Returns:
         Dictionary with scan options.
     """
+    # Ask scan type first
+    scan_type = questionary.select(
+        "Select scan type:",
+        choices=[
+            questionary.Choice("🔍 Dependency Scan (CVE check)", value="deps"),
+            questionary.Choice("⚡ Quick Code Scan (Semgrep only)", value="quick"),
+            questionary.Choice("🔧 Custom Scan (select engines)", value="custom"),
+            questionary.Choice("🚀 Full Scan (all engines + LLM verify)", value="full"),
+        ],
+        style=CUSTOM_STYLE,
+    ).ask()
+
+    if scan_type is None:
+        return {}
+
+    options = {
+        "include_low_severity": False,
+        "detailed": False,
+        "full_scan": False,
+        "engines": None,
+        "llm_verify": False,
+    }
+
+    if scan_type == "deps":
+        # Original dependency scan
+        pass
+
+    elif scan_type == "quick":
+        # Semgrep only
+        options["engines"] = ["semgrep"]
+
+    elif scan_type == "custom":
+        # Custom engine selection
+        engines = questionary.checkbox(
+            "Select analysis engines:",
+            choices=[
+                questionary.Choice("Semgrep (fast pattern matching)", value="semgrep", checked=True),
+                questionary.Choice("CodeQL (deep dataflow analysis)", value="codeql"),
+                questionary.Choice("Agent (AI-powered analysis)", value="agent"),
+            ],
+            style=CUSTOM_STYLE,
+        ).ask()
+
+        if engines:
+            options["engines"] = engines
+
+        # Ask about LLM verification
+        if "agent" in (engines or []):
+            llm_verify = questionary.confirm(
+                "Enable LLM-assisted exploitability verification?",
+                default=True,
+                style=CUSTOM_STYLE,
+            ).ask()
+            options["llm_verify"] = llm_verify or False
+
+    elif scan_type == "full":
+        # Full scan with all engines
+        options["full_scan"] = True
+        options["llm_verify"] = True
+
+    # Common options
     include_low = questionary.confirm(
         "Include low severity vulnerabilities?",
         default=False,
         style=CUSTOM_STYLE,
     ).ask()
+    options["include_low_severity"] = include_low or False
 
     detailed = questionary.confirm(
         "Show detailed report?",
         default=False,
         style=CUSTOM_STYLE,
     ).ask()
+    options["detailed"] = detailed or False
 
-    return {
-        "include_low_severity": include_low or False,
-        "detailed": detailed or False,
-    }
+    return options
 
 
 def ask_scan_action_after_result(has_issues: bool) -> str:

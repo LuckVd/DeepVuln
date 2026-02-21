@@ -270,14 +270,6 @@ class SemgrepEngine(BaseEngine):
             "--quiet",
         ]
 
-        # Determine if we need metrics for auto config
-        # Note: --config auto requires metrics to be enabled
-        if use_auto_config:
-            # auto config requires metrics
-            cmd.append("--metrics=on")
-        else:
-            cmd.append("--metrics=off")
-
         # Add config options
         configs = []
         using_auto = use_auto_config
@@ -301,12 +293,11 @@ class SemgrepEngine(BaseEngine):
                         # Assume it's already a valid config reference
                         configs.append(rule_set)
 
-        # Enable metrics if using auto config
+        # Enable metrics if using auto config (required for --config auto)
         if using_auto:
-            # Remove --metrics=off if already added
-            if "--metrics=off" in cmd:
-                cmd.remove("--metrics=off")
             cmd.append("--metrics=on")
+        else:
+            cmd.append("--metrics=off")
 
         # Only add --config if we have configs specified
         # If no configs, semgrep will use minimal default rules

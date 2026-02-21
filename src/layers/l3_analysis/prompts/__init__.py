@@ -12,6 +12,12 @@ from src.layers.l3_analysis.prompts.security_audit import (
     VULNERABILITY_TYPES,
     SEVERITY_GUIDELINES,
 )
+from src.layers.l3_analysis.prompts.exploitability import (
+    ExploitabilityPrompt,
+    build_exploitability_prompt,
+    parse_exploitability_response,
+    EXPLOITABILITY_STATUSES,
+)
 
 __all__ = [
     "SecurityAuditPrompt",
@@ -20,4 +26,9 @@ __all__ = [
     "build_function_analysis_prompt",
     "VULNERABILITY_TYPES",
     "SEVERITY_GUIDELINES",
+    # Exploitability prompts
+    "ExploitabilityPrompt",
+    "build_exploitability_prompt",
+    "parse_exploitability_response",
+    "EXPLOITABILITY_STATUSES",
 ]

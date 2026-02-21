@@ -108,7 +108,11 @@ class TestSemgrepScanCommand:
 
     @pytest.mark.asyncio
     async def test_build_command_with_rule_sets(self, tmp_path):
-        """Test building command with rule sets."""
+        """Test building command with rule sets.
+
+        Note: OFFICIAL_RULE_SETS now maps to 'auto' config which includes
+        security rules. Semgrep registry URLs have changed.
+        """
         engine = SemgrepEngine()
         cmd = await engine._build_scan_command(
             source_path=tmp_path,
@@ -123,8 +127,10 @@ class TestSemgrepScanCommand:
         assert "--config" in cmd
         config_idx = cmd.index("--config")
         config_value = cmd[config_idx + 1]
-        assert "p/security" in config_value
-        assert "p/java" in config_value
+        # OFFICIAL_RULE_SETS now uses 'auto' which includes security rules
+        assert "auto" in config_value
+        # Should also have metrics enabled for auto config
+        assert "--metrics=on" in cmd
 
     @pytest.mark.asyncio
     async def test_build_command_with_custom_rules(self, tmp_path):
