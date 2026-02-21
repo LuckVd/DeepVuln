@@ -187,6 +187,92 @@ class EchoDetector(HTTPDetector):
         return path
 
 
+class GoStdlibDetector(HTTPDetector):
+    """Detector for Go net/http standard library."""
+
+    framework_name = "go-stdlib"
+    file_patterns = ["*.go"]
+
+    # Pattern: http.HandleFunc("/path", handler)
+    HANDLE_FUNC_PATTERN = re.compile(
+        r"""http\.HandleFunc\s*\(\s*['"`]([^'"`]+)['"`]\s*,\s*(\w+)""",
+        re.VERBOSE,
+    )
+
+    # Pattern: http.Handle("/path", handler) - can be &Handler{} or handler
+    HANDLE_PATTERN = re.compile(
+        r"""http\.Handle\s*\(\s*['"`]([^'"`]+)['"`]\s*,\s*&?(\w+)""",
+        re.VERBOSE,
+    )
+
+    # Pattern: mux.HandleFunc("/path", handler)
+    MUX_HANDLE_FUNC_PATTERN = re.compile(
+        r"""(\w+)\.HandleFunc\s*\(\s*['"`]([^'"`]+)['"`]\s*,\s*(\w+)""",
+        re.VERBOSE,
+    )
+
+    # Pattern: http.ListenAndServe(":8080", nil)
+    LISTEN_PATTERN = re.compile(r"""http\.ListenAndServe\s*\(""")
+
+    def detect(self, content: str, file_path: Path) -> list[EntryPoint]:
+        """Detect Go net/http routes."""
+        entry_points = []
+
+        # Find http.HandleFunc
+        for match in self.HANDLE_FUNC_PATTERN.finditer(content):
+            path = match.group(1)
+            handler = match.group(2)
+            line_num = content[: match.start()].count("\n") + 1
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=HTTPMethod.ALL,
+                path=path,
+                handler=handler,
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+            )
+            entry_points.append(entry)
+
+        # Find http.Handle
+        for match in self.HANDLE_PATTERN.finditer(content):
+            path = match.group(1)
+            handler = match.group(2)
+            line_num = content[: match.start()].count("\n") + 1
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=HTTPMethod.ALL,
+                path=path,
+                handler=handler,
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+            )
+            entry_points.append(entry)
+
+        # Find mux.HandleFunc
+        for match in self.MUX_HANDLE_FUNC_PATTERN.finditer(content):
+            _mux_var = match.group(1)
+            path = match.group(2)
+            handler = match.group(3)
+            line_num = content[: match.start()].count("\n") + 1
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=HTTPMethod.ALL,
+                path=path,
+                handler=handler,
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+            )
+            entry_points.append(entry)
+
+        return entry_points
+
+
 class SpringDetector(HTTPDetector):
     """Detector for Spring Boot framework (Java)."""
 
@@ -342,6 +428,71 @@ class SpringDetector(HTTPDetector):
                 return name
 
         return "unknown"
+
+
+class JavaStdlibDetector(HTTPDetector):
+    """Detector for Java com.sun.net.httpserver standard library."""
+
+    framework_name = "java-stdlib"
+    file_patterns = ["*.java"]
+
+    # Pattern: httpServer.createContext("/path", handler)
+    CREATE_CONTEXT_PATTERN = re.compile(
+        r"""\.createContext\s*\(\s*["']([^"']+)["']\s*,\s*(\w+)""",
+        re.VERBOSE,
+    )
+
+    # Pattern: implements HttpHandler
+    HTTP_HANDLER_PATTERN = re.compile(
+        r"""implements\s+HttpHandler""",
+        re.VERBOSE,
+    )
+
+    # Pattern: class Name implements HttpHandler
+    HANDLER_CLASS_PATTERN = re.compile(
+        r"""class\s+(\w+)\s+implements\s+HttpHandler""",
+        re.VERBOSE,
+    )
+
+    def detect(self, content: str, file_path: Path) -> list[EntryPoint]:
+        """Detect Java HttpServer routes."""
+        entry_points = []
+
+        # Find createContext calls
+        for match in self.CREATE_CONTEXT_PATTERN.finditer(content):
+            path = match.group(1)
+            handler = match.group(2)
+            line_num = content[: match.start()].count("\n") + 1
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=HTTPMethod.ALL,
+                path=path,
+                handler=handler,
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+            )
+            entry_points.append(entry)
+
+        # Find HttpHandler implementations
+        for match in self.HANDLER_CLASS_PATTERN.finditer(content):
+            class_name = match.group(1)
+            line_num = content[: match.start()].count("\n") + 1
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=HTTPMethod.ALL,
+                path="/",  # Unknown path
+                handler=class_name,
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+                metadata={"handler_type": "class"},
+            )
+            entry_points.append(entry)
+
+        return entry_points
 
 
 class FlaskDetector(HTTPDetector):
@@ -513,13 +664,320 @@ class FastAPIDetector(HTTPDetector):
         return "unknown"
 
 
+class PythonStdlibHTTPDetector(HTTPDetector):
+    """Detector for Python http.server standard library.
+
+    Detects BaseHTTPRequestHandler and http.server.HTTPServer patterns.
+    """
+
+    framework_name = "python-stdlib"
+    file_patterns = ["*.py"]
+
+    # Pattern: class Handler(BaseHTTPRequestHandler)
+    HANDLER_CLASS_PATTERN = re.compile(
+        r"""class\s+(\w+)\s*\(\s*(?:http\.server\.)?BaseHTTPRequestHandler\s*\)""",
+        re.VERBOSE,
+    )
+
+    # Pattern: def do_GET(self), def do_POST(self), etc.
+    DO_METHOD_PATTERN = re.compile(
+        r"""def\s+(do_GET|do_POST|do_PUT|do_DELETE|do_HEAD|do_OPTIONS|do_PATCH)\s*\(\s*self\s*\)""",
+        re.VERBOSE,
+    )
+
+    # Pattern: http.server.HTTPServer or HTTPServer
+    HTTP_SERVER_PATTERN = re.compile(
+        r"""(?:http\.server\.)?HTTPServer\s*\(\s*\(""",
+        re.VERBOSE,
+    )
+
+    # Pattern: socketserver.TCPServer
+    TCPSERVER_PATTERN = re.compile(
+        r"""socketserver\.TCPServer\s*\(\s*\(""",
+        re.VERBOSE,
+    )
+
+    # Pattern: self.path or self.send_response
+    REQUEST_HANDLING_PATTERN = re.compile(
+        r"""self\.(?:path|send_response|send_header|end_headers)""",
+        re.VERBOSE,
+    )
+
+    def detect(self, content: str, file_path: Path) -> list[EntryPoint]:
+        """Detect Python http.server handlers."""
+        entry_points = []
+
+        # Find handler classes
+        handler_classes: dict[str, int] = {}
+        for match in self.HANDLER_CLASS_PATTERN.finditer(content):
+            class_name = match.group(1)
+            line_num = content[: match.start()].count("\n") + 1
+            handler_classes[class_name] = line_num
+
+        # Find do_* methods within handler classes
+        for match in self.DO_METHOD_PATTERN.finditer(content):
+            method_name = match.group(1)
+            line_num = content[: match.start()].count("\n") + 1
+
+            # Convert do_GET -> GET
+            http_method_str = method_name.replace("do_", "")
+            try:
+                http_method = HTTPMethod[http_method_str]
+            except KeyError:
+                http_method = HTTPMethod.ALL
+
+            # Find the class this method belongs to
+            handler_class = self._find_enclosing_class(content, match.start())
+            path = "/"  # BaseHTTPRequestHandler uses self.path for routing
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=http_method,
+                path=path,
+                handler=f"{handler_class}.{method_name}" if handler_class else method_name,
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+                metadata={"handler_type": "do_method"},
+            )
+            entry_points.append(entry)
+
+        return entry_points
+
+    def _find_enclosing_class(self, content: str, pos: int) -> str | None:
+        """Find the class that encloses the given position."""
+        # Look backwards for class definition
+        before_content = content[:pos]
+        lines = before_content.split("\n")
+
+        for i in range(len(lines) - 1, -1, -1):
+            match = re.search(r"class\s+(\w+)\s*[:\(]", lines[i])
+            if match:
+                return match.group(1)
+
+        return None
+
+
+class CustomHTTPServerDetector(HTTPDetector):
+    """Detector for custom HTTP server implementations.
+
+    Detects common patterns in custom HTTP servers like copyparty:
+    - Classes with run() method handling HTTP
+    - Classes with handle_request() or handle() methods
+    - Socket-based HTTP processing
+    """
+
+    framework_name = "custom"
+    file_patterns = ["*.py"]
+
+    # Pattern: class HttpCli, class HttpSrv, etc.
+    HTTP_CLASS_PATTERN = re.compile(
+        r"""class\s+(\w*(?:[Hh]ttp|[Ss]rv|[Ss]erver|[Cc]li)\w*)\s*[\(:]""",
+        re.VERBOSE,
+    )
+
+    # Pattern: def run(self) handling HTTP
+    RUN_METHOD_PATTERN = re.compile(
+        r"""def\s+run\s*\(\s*self\s*(?:,\s*\w+)*\s*\)\s*(?:->\s*\w+)?\s*:""",
+        re.VERBOSE,
+    )
+
+    # Pattern: self.mode, self.req, self.path in HTTP context
+    HTTP_STATE_PATTERN = re.compile(
+        r"""self\.(?:mode|req|path|method)\s*=\s*["']?(GET|POST|PUT|DELETE|HEAD|PATCH|OPTIONS)""",
+        re.VERBOSE,
+    )
+
+    # Pattern: header parsing (read_header, parse headers)
+    HEADER_PARSE_PATTERN = re.compile(
+        r"""(?:read_header|parse.*header|header.*parse)""",
+        re.VERBOSE | re.IGNORECASE,
+    )
+
+    # Pattern: socket recv/send with HTTP
+    SOCKET_HTTP_PATTERN = re.compile(
+        r"""(?:socket\.socket|\.recv\(|\.send\(|\.sendall\()""",
+        re.VERBOSE,
+    )
+
+    # Pattern: HTTP response codes
+    HTTP_RESPONSE_PATTERN = re.compile(
+        r"""["']?HTTP/1\.[01]["']?\s*["']?(\d{3})""",
+        re.VERBOSE,
+    )
+
+    def detect(self, content: str, file_path: Path) -> list[EntryPoint]:
+        """Detect custom HTTP server implementations."""
+        entry_points = []
+
+        # Check if this file looks like a custom HTTP implementation
+        if not self._is_http_server_file(content):
+            return entry_points
+
+        # Find HTTP-related classes
+        for match in self.HTTP_CLASS_PATTERN.finditer(content):
+            class_name = match.group(1)
+            line_num = content[: match.start()].count("\n") + 1
+
+            # Check if this class has HTTP handling methods
+            class_content = self._extract_class_content(content, match.start())
+            if class_content and self._has_http_handling(class_content):
+                entry = EntryPoint(
+                    type=EntryPointType.HTTP,
+                    method=HTTPMethod.ALL,
+                    path="/",  # Generic path
+                    handler=class_name,
+                    file=str(file_path),
+                    line=line_num,
+                    framework=self.framework_name,
+                    metadata={"handler_type": "custom_http_class"},
+                )
+                entry_points.append(entry)
+
+        # Find run() methods that handle HTTP
+        for match in self.RUN_METHOD_PATTERN.finditer(content):
+            line_num = content[: match.start()].count("\n") + 1
+
+            # Check if this method handles HTTP
+            method_content = self._extract_method_content(content, match.start())
+            if method_content and self._is_http_handler_method(method_content):
+                enclosing_class = self._find_enclosing_class(content, match.start())
+                handler_name = f"{enclosing_class}.run" if enclosing_class else "run"
+
+                entry = EntryPoint(
+                    type=EntryPointType.HTTP,
+                    method=HTTPMethod.ALL,
+                    path="/",
+                    handler=handler_name,
+                    file=str(file_path),
+                    line=line_num,
+                    framework=self.framework_name,
+                    metadata={"handler_type": "run_method"},
+                )
+                entry_points.append(entry)
+
+        return entry_points
+
+    def _is_http_server_file(self, content: str) -> bool:
+        """Check if file looks like an HTTP server implementation."""
+        http_indicators = [
+            r"http\.server",
+            r"socket",
+            r"HTTP/1\.[01]",
+            r"handle.*request",
+            r"process.*request",
+            r"def run\s*\(",
+            r"class.*Http\w*",
+            r"class.*[Ss]rv\w*",
+            r"self\.headers",
+            r"headerlines",
+            r"keepalive",
+        ]
+
+        count = 0
+        for pattern in http_indicators:
+            if re.search(pattern, content, re.IGNORECASE):
+                count += 1
+
+        # Lower threshold for files with HTTP-related class names
+        if re.search(r"class\s+\w*(?:Http|[Ss]rv|[Ss]erver|[Cc]li)\w*", content):
+            return count >= 1
+
+        return count >= 2
+
+    def _has_http_handling(self, class_content: str) -> bool:
+        """Check if class has HTTP handling logic."""
+        indicators = [
+            r"self\.mode\s*=",
+            r"self\.req\s*=",
+            r"self\.path\s*=",
+            r"HTTP/1\.",
+            r"header",
+            r"GET|POST|PUT|DELETE",
+            r"self\.headers",
+            r"socket",
+            r"keepalive",
+            r"def run\s*\(",
+            r"def handle",
+        ]
+
+        count = 0
+        for pattern in indicators:
+            if re.search(pattern, class_content, re.IGNORECASE):
+                count += 1
+
+        return count >= 1
+
+    def _is_http_handler_method(self, method_content: str) -> bool:
+        """Check if method handles HTTP requests."""
+        indicators = [
+            r"self\.mode",
+            r"self\.req",
+            r"self\.path",
+            r"headers",
+            r"HTTP/1\.",
+            r"GET|POST|PUT|DELETE",
+            r"read_header",
+        ]
+
+        count = 0
+        for pattern in indicators:
+            if re.search(pattern, method_content, re.IGNORECASE):
+                count += 1
+
+        return count >= 2
+
+    def _extract_class_content(self, content: str, class_start: int) -> str | None:
+        """Extract content of a class definition."""
+        # Find next class or end of file
+        next_class = content.find("\nclass ", class_start + 1)
+        if next_class == -1:
+            return content[class_start:]
+        return content[class_start:next_class]
+
+    def _extract_method_content(self, content: str, method_start: int) -> str | None:
+        """Extract content of a method (until next def at same or lower indentation)."""
+        lines = content[method_start:].split("\n")
+        if not lines:
+            return None
+
+        result = [lines[0]]
+        for i in range(1, len(lines)):
+            line = lines[i]
+            # Check if this is a new def at same or lower indentation
+            if re.match(r"\S", line) or (line.startswith("    ") and re.match(r"    def ", line)):
+                break
+            result.append(line)
+
+        return "\n".join(result)
+
+    def _find_enclosing_class(self, content: str, pos: int) -> str | None:
+        """Find the class that encloses the given position."""
+        before_content = content[:pos]
+        lines = before_content.split("\n")
+
+        for i in range(len(lines) - 1, -1, -1):
+            match = re.search(r"class\s+(\w+)\s*[:\(]", lines[i])
+            if match:
+                return match.group(1)
+
+        return None
+
+
 # Registry of all HTTP detectors
 HTTP_DETECTORS: list[type[HTTPDetector]] = [
+    # Framework-specific detectors
     GinDetector,
     EchoDetector,
     SpringDetector,
     FlaskDetector,
     FastAPIDetector,
+    # Standard library detectors
+    GoStdlibDetector,
+    JavaStdlibDetector,
+    PythonStdlibHTTPDetector,
+    # Custom HTTP server detector
+    CustomHTTPServerDetector,
 ]
 
 

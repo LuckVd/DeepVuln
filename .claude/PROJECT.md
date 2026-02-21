@@ -85,6 +85,8 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-02-21 | b2fe941 | feat(l1): improve attack surface detection for non-mainstream frameworks |
+| 2026-02-21 | 698b1ec | feat(l3): improve vulnerability judgment accuracy (P0+P1+P3) |
 | 2026-02-20 | c7a36ad | feat(l3): implement P2-10 evidence chain builder |
 | 2026-02-20 | 7798ff1 | feat(l3): implement P2-09 round termination decider |
 | 2026-02-20 | b93e56b | feat(l3): implement P2-08 round three correlation verification |
