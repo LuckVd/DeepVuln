@@ -7,10 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.layers.l1_intelligence.attack_surface.llm_detector import (
     LLMHTTPDetector,
-    LLM_DETECTION_PROMPT,
+    LLMFullDetector,
+    ProjectTreeGenerator,
     HybridHTTPDetector,
     create_hybrid_detector,
     LLMEntryPoint,
+    ProjectStructureAnalysis,
+    FileAnalysisResult,
+    PROJECT_STRUCTURE_PROMPT,
+    ENTRY_POINT_DETECTION_PROMPT,
 )
 from src.layers.l1_intelligence.attack_surface.models import (
     EntryPoint,
@@ -51,20 +56,20 @@ class TestLLMHTTPDetector:
     @pytest.mark.asyncio
     async def test_detect_with_mock_client(self, detector, mock_llm_client):
         """Test detection with mock LLM response."""
-        # Mock LLM response
+        # Mock LLM response - need to mock complete method for new implementation
         response_json = {
             "entry_points": [
-                {"method": "GET", "path": "/api/users", "function": "get_users", "line": 42}
+                {"method": "GET", "path": "/api/users", "handler": "get_users", "line": 42}
             ],
-            "framework_type": "custom",
+            "framework_detected": "custom",
             "confidence": 0.9,
         }
 
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps(response_json)
+        mock_response.content = json.dumps(response_json)
 
-        mock_llm_client.chat.completions.create.return_value = mock_response
+        # Mock the complete method (used by new implementation)
+        mock_llm_client.complete = AsyncMock(return_value=mock_response)
 
         code = '''
 class ApiHandler:
@@ -84,19 +89,18 @@ class ApiHandler:
         """Test detection of multiple entry points."""
         response_json = {
             "entry_points": [
-                {"method": "GET", "path": "/", "function": "handle_get", "line": 10},
-                {"method": "POST", "path": "/upload", "function": "handle_post", "line": 20},
-                {"method": "PUT", "path": "/update", "function": "handle_put", "line": 30},
+                {"method": "GET", "path": "/", "handler": "handle_get", "line": 10},
+                {"method": "POST", "path": "/upload", "handler": "handle_post", "line": 20},
+                {"method": "PUT", "path": "/update", "handler": "handle_put", "line": 30},
             ],
-            "framework_type": "custom",
+            "framework_detected": "custom",
             "confidence": 0.85,
         }
 
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps(response_json)
+        mock_response.content = json.dumps(response_json)
 
-        mock_llm_client.chat.completions.create.return_value = mock_response
+        mock_llm_client.complete = AsyncMock(return_value=mock_response)
 
         code = "class Handler: pass"
         entry_points = await detector.detect(code, Path("/test/handler.py"))
@@ -112,15 +116,14 @@ class ApiHandler:
         """Test detection when no entry points are found."""
         response_json = {
             "entry_points": [],
-            "framework_type": "unknown",
+            "framework_detected": "unknown",
             "confidence": 0.0,
         }
 
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps(response_json)
+        mock_response.content = json.dumps(response_json)
 
-        mock_llm_client.chat.completions.create.return_value = mock_response
+        mock_llm_client.complete = AsyncMock(return_value=mock_response)
 
         code = '''
 class Calculator:
@@ -136,17 +139,16 @@ class Calculator:
         """Test that caching works correctly."""
         response_json = {
             "entry_points": [
-                {"method": "GET", "path": "/", "function": "handler", "line": 1}
+                {"method": "GET", "path": "/", "handler": "handler", "line": 1}
             ],
-            "framework_type": "custom",
+            "framework_detected": "custom",
             "confidence": 0.8,
         }
 
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps(response_json)
+        mock_response.content = json.dumps(response_json)
 
-        mock_llm_client.chat.completions.create.return_value = mock_response
+        mock_llm_client.complete = AsyncMock(return_value=mock_response)
 
         code = "class Handler: pass"
 
@@ -159,7 +161,7 @@ class Calculator:
         assert len(entry_points2) == 1
 
         # LLM should only be called once
-        assert mock_llm_client.chat.completions.create.call_count == 1
+        assert mock_llm_client.complete.call_count == 1
 
     @pytest.mark.asyncio
     async def test_detect_without_llm_client(self):
@@ -170,49 +172,6 @@ class Calculator:
         entry_points = await detector.detect(code, Path("/test/handler.py"))
 
         assert len(entry_points) == 0
-
-    def test_parse_response(self, detector):
-        """Test parsing LLM response."""
-        response = '''
-Here are the detected entry points:
-```json
-{
-    "entry_points": [
-        {"method": "GET", "path": "/api/data", "function": "get_data", "line": 15}
-    ],
-    "framework_type": "custom",
-    "confidence": 0.9
-}
-```
-'''
-        entry_points = detector._parse_response(response, Path("/test/api.py"))
-
-        assert len(entry_points) == 1
-        assert entry_points[0].method == HTTPMethod.GET
-        assert entry_points[0].path == "/api/data"
-
-    def test_parse_response_invalid_json(self, detector):
-        """Test parsing invalid JSON response."""
-        response = "This is not valid JSON at all"
-        entry_points = detector._parse_response(response, Path("/test/api.py"))
-
-        assert len(entry_points) == 0
-
-    def test_parse_response_unknown_method(self, detector):
-        """Test parsing response with unknown HTTP method."""
-        response = json.dumps({
-            "entry_points": [
-                {"method": "CUSTOM", "path": "/", "function": "handler", "line": 1}
-            ],
-            "framework_type": "unknown",
-            "confidence": 0.5,
-        })
-
-        entry_points = detector._parse_response(response, Path("/test/api.py"))
-
-        assert len(entry_points) == 1
-        # Unknown method should default to ALL
-        assert entry_points[0].method == HTTPMethod.ALL
 
     def test_clear_cache(self, detector):
         """Test cache clearing."""
@@ -289,17 +248,16 @@ class HttpHandler:
         # LLM finds entry points
         response_json = {
             "entry_points": [
-                {"method": "POST", "path": "/submit", "function": "submit_handler", "line": 10}
+                {"method": "POST", "path": "/submit", "handler": "submit_handler", "line": 10}
             ],
-            "framework_type": "custom",
+            "framework_detected": "custom",
             "confidence": 0.8,
         }
 
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps(response_json)
+        mock_response.content = json.dumps(response_json)
 
-        mock_llm_client.chat.completions.create.return_value = mock_response
+        mock_llm_client.complete = AsyncMock(return_value=mock_response)
 
         # Code with enough HTTP indicators to trigger LLM fallback
         code = '''
@@ -446,24 +404,415 @@ class TestLLMDetectionPrompt:
 
     def test_prompt_formatting(self):
         """Test that prompt is formatted correctly."""
-        formatted = LLM_DETECTION_PROMPT.format(
+        formatted = ENTRY_POINT_DETECTION_PROMPT.format(
             file_path="/test/handler.py",
+            language="Python",
             code="class Handler: pass",
         )
 
         assert "/test/handler.py" in formatted
         assert "class Handler: pass" in formatted
-        assert "HTTP entry points" in formatted
-        assert "JSON format" in formatted
+        assert "entry points" in formatted.lower()
+        assert "JSON" in formatted
 
     def test_prompt_includes_instructions(self):
         """Test that prompt includes detection instructions."""
-        formatted = LLM_DETECTION_PROMPT.format(
+        formatted = ENTRY_POINT_DETECTION_PROMPT.format(
             file_path="/test/handler.py",
+            language="Python",
             code="pass",
         )
 
-        assert "HTTP method" in formatted
-        assert "Path" in formatted
-        assert "Function" in formatted
-        assert "socket-based" in formatted.lower()
+        assert "HTTP" in formatted
+        assert "RPC" in formatted
+        assert "handler" in formatted.lower()
+
+
+class TestProjectTreeGenerator:
+    """Tests for ProjectTreeGenerator."""
+
+    @pytest.fixture
+    def generator(self):
+        """Create a generator instance."""
+        return ProjectTreeGenerator(max_depth=3, max_files=100)
+
+    def test_generate_tree(self, generator, tmp_path):
+        """Test generating project tree."""
+        # Create a simple project structure
+        (tmp_path / "main.py").write_text("print('hello')")
+        (tmp_path / "handler.py").write_text("def handler(): pass")
+        (tmp_path / "api").mkdir()
+        (tmp_path / "api" / "routes.py").write_text("def routes(): pass")
+
+        tree = generator.generate(tmp_path)
+
+        assert tmp_path.name in tree
+        assert "main.py" in tree
+        assert "handler.py" in tree
+        assert "api/" in tree
+        assert "routes.py" in tree
+
+    def test_generate_tree_skips_hidden_dirs(self, generator, tmp_path):
+        """Test that hidden directories are skipped."""
+        (tmp_path / "main.py").write_text("print('hello')")
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".git" / "config").write_text("[core]")
+
+        tree = generator.generate(tmp_path)
+
+        assert "main.py" in tree
+        assert ".git" not in tree
+
+    def test_generate_tree_skips_node_modules(self, generator, tmp_path):
+        """Test that node_modules is skipped."""
+        (tmp_path / "main.py").write_text("print('hello')")
+        (tmp_path / "node_modules").mkdir()
+        (tmp_path / "node_modules" / "package.js").write_text("module.exports = {}")
+
+        tree = generator.generate(tmp_path)
+
+        assert "main.py" in tree
+        assert "node_modules" not in tree
+
+    def test_detect_languages(self, generator, tmp_path):
+        """Test language detection."""
+        (tmp_path / "main.py").write_text("print('hello')")
+        (tmp_path / "app.go").write_text("package main")
+        (tmp_path / "index.ts").write_text("console.log('hi')")
+
+        languages = generator.detect_languages(tmp_path)
+
+        assert "Python" in languages
+        assert "Go" in languages
+        assert "TypeScript" in languages
+
+    def test_get_source_files(self, generator, tmp_path):
+        """Test getting source files."""
+        (tmp_path / "main.py").write_text("print('hello')")
+        (tmp_path / "handler.go").write_text("package main")
+        (tmp_path / "test_main.py").write_text("def test(): pass")
+        (tmp_path / "node_modules").mkdir()
+        (tmp_path / "node_modules" / "pkg.js").write_text("// pkg")
+
+        source_files = generator.get_source_files(tmp_path)
+
+        file_names = [f.name for f in source_files]
+        assert "main.py" in file_names
+        assert "handler.go" in file_names
+        assert "test_main.py" not in file_names  # Test files skipped
+        assert "pkg.js" not in file_names  # node_modules skipped
+
+
+class TestLLMFullDetector:
+    """Tests for LLMFullDetector."""
+
+    @pytest.fixture
+    def mock_llm_client(self):
+        """Create a mock LLM client."""
+        client = MagicMock()
+        client.complete = AsyncMock()
+        return client
+
+    @pytest.fixture
+    def detector(self, mock_llm_client):
+        """Create a detector with mock client."""
+        return LLMFullDetector(
+            llm_client=mock_llm_client,
+            model="test-model",
+            max_files_to_analyze=10,
+        )
+
+    def test_init(self, mock_llm_client):
+        """Test detector initialization."""
+        detector = LLMFullDetector(llm_client=mock_llm_client, model="test-model")
+
+        assert detector.llm_client == mock_llm_client
+        assert detector.model == "test-model"
+        assert detector._tree_generator is not None
+
+    @pytest.mark.asyncio
+    async def test_detect_full_phase1_structure_analysis(self, detector, mock_llm_client, tmp_path):
+        """Test Phase 1: Project structure analysis."""
+        # Create a simple project
+        (tmp_path / "main.py").write_text("print('hello')")
+        (tmp_path / "api.py").write_text("def handler(): pass")
+
+        # Mock LLM response for structure analysis
+        structure_response = json.dumps({
+            "target_files": ["main.py", "api.py"],
+            "target_dirs": [],
+            "detected_languages": ["Python"],
+            "detected_frameworks": [],
+            "reasoning": "Found handler files"
+        })
+
+        # Mock LLM response for entry point detection
+        entry_response = json.dumps({
+            "entry_points": [
+                {"type": "http", "method": "GET", "path": "/", "handler": "handler", "line": 1}
+            ],
+            "framework_detected": "custom",
+            "confidence": 0.8
+        })
+
+        mock_llm_client.complete.side_effect = [
+            MagicMock(content=structure_response),
+            MagicMock(content=entry_response),
+            MagicMock(content=entry_response),
+        ]
+
+        entry_points = await detector.detect_full(tmp_path)
+
+        assert len(entry_points) >= 1
+        assert mock_llm_client.complete.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_analyze_project_structure(self, detector, mock_llm_client, tmp_path):
+        """Test project structure analysis."""
+        (tmp_path / "main.py").write_text("print('hello')")
+
+        response_json = json.dumps({
+            "target_files": ["main.py"],
+            "target_dirs": [],
+            "detected_languages": ["Python"],
+            "detected_frameworks": [],
+            "reasoning": "Main file"
+        })
+
+        mock_llm_client.complete.return_value = MagicMock(content=response_json)
+
+        analysis = await detector._analyze_project_structure(tmp_path)
+
+        assert len(analysis.target_files) == 1
+        assert "main.py" in analysis.target_files
+        assert analysis.detected_languages == ["Python"]
+
+    @pytest.mark.asyncio
+    async def test_analyze_file(self, detector, mock_llm_client, tmp_path):
+        """Test single file analysis."""
+        file_path = tmp_path / "handler.py"
+        file_path.write_text('def handle_request(): pass')
+
+        response_json = json.dumps({
+            "entry_points": [
+                {"type": "http", "method": "POST", "path": "/submit", "handler": "handle_request", "line": 1}
+            ],
+            "framework_detected": "custom",
+            "confidence": 0.9
+        })
+
+        mock_llm_client.complete.return_value = MagicMock(content=response_json)
+
+        result = await detector._analyze_file(file_path, tmp_path)
+
+        assert len(result.entry_points) == 1
+        assert result.entry_points[0].handler == "handle_request"
+        assert result.entry_points[0].method == HTTPMethod.POST
+
+    def test_resolve_target_files(self, detector, tmp_path):
+        """Test resolving target files from LLM response."""
+        (tmp_path / "main.py").write_text("print('hello')")
+        (tmp_path / "api").mkdir()
+        (tmp_path / "api" / "handler.py").write_text("def handler(): pass")
+
+        target_files = ["main.py"]
+        target_dirs = ["api/"]
+
+        resolved = detector._resolve_target_files(tmp_path, target_files, target_dirs)
+
+        assert len(resolved) == 2
+        file_names = {f.name for f in resolved}
+        assert "main.py" in file_names
+        assert "handler.py" in file_names
+
+    def test_create_entry_point_http(self, detector, tmp_path):
+        """Test creating HTTP entry point from LLM response."""
+        file_path = tmp_path / "handler.py"
+
+        data = {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/users",
+            "handler": "get_users",
+            "line": 42,
+            "auth_required": True,
+            "params": ["id", "name"],
+            "description": "Get users endpoint"
+        }
+
+        entry = detector._create_entry_point(data, file_path)
+
+        assert entry is not None
+        assert entry.type == EntryPointType.HTTP
+        assert entry.method == HTTPMethod.GET
+        assert entry.path == "/api/users"
+        assert entry.handler == "get_users"
+        assert entry.auth_required is True
+        assert entry.params == ["id", "name"]
+
+    def test_create_entry_point_cron(self, detector, tmp_path):
+        """Test creating Cron entry point from LLM response."""
+        file_path = tmp_path / "scheduler.py"
+
+        data = {
+            "type": "cron",
+            "path": "0 * * * *",
+            "handler": "hourly_task",
+            "line": 10,
+            "description": "Hourly cleanup task"
+        }
+
+        entry = detector._create_entry_point(data, file_path)
+
+        assert entry is not None
+        assert entry.type == EntryPointType.CRON
+        assert entry.handler == "hourly_task"
+
+    def test_create_entry_point_mq(self, detector, tmp_path):
+        """Test creating MQ entry point from LLM response."""
+        file_path = tmp_path / "consumer.py"
+
+        data = {
+            "type": "mq",
+            "path": "user-events",
+            "handler": "process_user_event",
+            "line": 20,
+            "description": "Process user events from queue"
+        }
+
+        entry = detector._create_entry_point(data, file_path)
+
+        assert entry is not None
+        assert entry.type == EntryPointType.MQ
+        assert entry.handler == "process_user_event"
+
+    def test_create_entry_point_with_invalid_params(self, detector, tmp_path):
+        """Test creating entry point with invalid params format."""
+        file_path = tmp_path / "handler.py"
+
+        # Test with params as string (should be converted to list)
+        data = {
+            "type": "http",
+            "method": "POST",
+            "path": "/submit",
+            "handler": "submit",
+            "params": "id"  # Single string
+        }
+
+        entry = detector._create_entry_point(data, file_path)
+
+        assert entry is not None
+        # Params should be converted to list
+        assert isinstance(entry.params, list)
+        assert entry.params == ["id"]
+
+    def test_create_entry_point_with_null_params(self, detector, tmp_path):
+        """Test creating entry point with null params."""
+        file_path = tmp_path / "handler.py"
+
+        data = {
+            "type": "http",
+            "method": "POST",
+            "path": "/submit",
+            "handler": "submit",
+            "params": None
+        }
+
+        entry = detector._create_entry_point(data, file_path)
+
+        assert entry is not None
+        assert isinstance(entry.params, list)
+        assert entry.params == []
+
+    def test_detect_language(self, detector):
+        """Test language detection from file extension."""
+        assert detector._detect_language(Path("/test/main.py")) == "Python"
+        assert detector._detect_language(Path("/test/main.go")) == "Go"
+        assert detector._detect_language(Path("/test/main.java")) == "Java"
+        assert detector._detect_language(Path("/test/main.ts")) == "TypeScript"
+        assert detector._detect_language(Path("/test/main.unknown")) == "Unknown"
+
+
+class TestProjectStructureAnalysis:
+    """Tests for ProjectStructureAnalysis dataclass."""
+
+    def test_create_empty(self):
+        """Test creating empty analysis."""
+        analysis = ProjectStructureAnalysis()
+
+        assert analysis.target_files == []
+        assert analysis.target_dirs == []
+        assert analysis.reasoning == ""
+        assert analysis.detected_languages == []
+        assert analysis.detected_frameworks == []
+
+    def test_create_with_data(self):
+        """Test creating analysis with data."""
+        analysis = ProjectStructureAnalysis(
+            target_files=["main.py", "handler.py"],
+            target_dirs=["api/"],
+            reasoning="Found HTTP handlers",
+            detected_languages=["Python"],
+            detected_frameworks=["Flask"],
+        )
+
+        assert len(analysis.target_files) == 2
+        assert len(analysis.target_dirs) == 1
+        assert analysis.reasoning == "Found HTTP handlers"
+
+
+class TestFileAnalysisResult:
+    """Tests for FileAnalysisResult dataclass."""
+
+    def test_create_empty(self):
+        """Test creating empty result."""
+        result = FileAnalysisResult(file_path="/test/handler.py")
+
+        assert result.file_path == "/test/handler.py"
+        assert result.entry_points == []
+        assert result.framework_detected == "unknown"
+        assert result.confidence == 0.0
+        assert result.error is None
+
+    def test_create_with_error(self):
+        """Test creating result with error."""
+        result = FileAnalysisResult(
+            file_path="/test/handler.py",
+            error="Failed to read file"
+        )
+
+        assert result.error == "Failed to read file"
+
+
+class TestPrompts:
+    """Tests for prompt templates."""
+
+    def test_project_structure_prompt(self):
+        """Test project structure prompt formatting."""
+        formatted = PROJECT_STRUCTURE_PROMPT.format(
+            project_name="TestProject",
+            project_tree="main.py\nhandler.py",
+            languages="Python, Go",
+        )
+
+        assert "TestProject" in formatted
+        assert "main.py" in formatted
+        assert "handler.py" in formatted
+        assert "Python, Go" in formatted
+        assert "target_files" in formatted
+
+    def test_entry_point_detection_prompt(self):
+        """Test entry point detection prompt formatting."""
+        formatted = ENTRY_POINT_DETECTION_PROMPT.format(
+            file_path="/test/handler.py",
+            language="Python",
+            code="def handler(): pass",
+        )
+
+        assert "/test/handler.py" in formatted
+        assert "Python" in formatted
+        assert "def handler(): pass" in formatted
+        assert "entry_points" in formatted
+        assert "HTTP" in formatted
+        assert "RPC" in formatted
+        assert "Cron" in formatted

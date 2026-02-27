@@ -17,6 +17,11 @@ from typing import Any, Protocol
 from pydantic import BaseModel, Field
 
 from src.core.logger.logger import get_logger
+from src.layers.l1_intelligence.attack_surface.models import (
+    AttackSurfaceReport,
+    EntryPoint,
+    EntryPointType,
+)
 from src.layers.l3_analysis.models import Finding, SeverityLevel
 from src.layers.l3_analysis.prompts.exploitability import (
     build_exploitability_prompt,
@@ -170,6 +175,7 @@ class RoundFourExecutor:
         context_builder: ContextBuilder | None = None,
         llm_client: LLMClientProtocol | None = None,
         enable_llm_assessment: bool = True,
+        attack_surface_report: AttackSurfaceReport | None = None,
     ):
         """
         Initialize the round four executor.
@@ -180,12 +186,31 @@ class RoundFourExecutor:
             llm_client: LLM client for AI-assisted exploitability assessment.
             enable_llm_assessment: Whether to enable LLM-assisted assessment
                 for NEEDS_REVIEW vulnerabilities.
+            attack_surface_report: Pre-computed attack surface report from L1.
+                When provided, this is used instead of ContextBuilder's
+                simplified entry point detection for more accurate results.
         """
         self.logger = get_logger(__name__)
         self.source_path = source_path
         self._context_builder = context_builder or ContextBuilder()
         self._llm_client = llm_client
         self._enable_llm_assessment = enable_llm_assessment and llm_client is not None
+        self._attack_surface_report = attack_surface_report
+
+        # Build entry point lookup index for fast queries
+        self._entry_point_index: dict[str, list[EntryPoint]] = {}
+        # Track which files have entry points (for same-file matching)
+        self._entry_point_files: set[str] = set()
+        # Track imports in entry point files (for import-based matching)
+        self._entry_point_imports: dict[str, list[str]] = {}
+
+        if attack_surface_report:
+            self._build_entry_point_index(attack_surface_report)
+            self._build_entry_point_import_index()
+            self.logger.info(
+                f"Using pre-computed attack surface report with "
+                f"{attack_surface_report.total_entry_points} entry points"
+            )
 
         if self._enable_llm_assessment:
             self.logger.info("LLM-assisted exploitability assessment enabled")
@@ -193,6 +218,225 @@ class RoundFourExecutor:
             self.logger.debug("No LLM client provided, LLM assessment disabled")
         else:
             self.logger.debug("LLM assessment explicitly disabled")
+
+    def _build_entry_point_index(self, report: AttackSurfaceReport) -> None:
+        """Build an index of entry points by file for fast lookup.
+
+        Args:
+            report: The attack surface report to index.
+        """
+        for entry in report.entry_points:
+            # Index by file path
+            file_key = entry.file
+            if file_key not in self._entry_point_index:
+                self._entry_point_index[file_key] = []
+            self._entry_point_index[file_key].append(entry)
+
+            # Track files with entry points
+            self._entry_point_files.add(file_key)
+
+            # Also index by handler name for function matching
+            handler_key = entry.handler.lower()
+            if handler_key not in self._entry_point_index:
+                self._entry_point_index[handler_key] = []
+            self._entry_point_index[handler_key].append(entry)
+
+        self.logger.debug(
+            f"Built entry point index with {len(self._entry_point_index)} keys, "
+            f"{len(self._entry_point_files)} files with entry points"
+        )
+
+    def _build_entry_point_import_index(self) -> None:
+        """Build an index of imports in entry point files.
+
+        This allows us to check if a vulnerability file is imported by
+        an entry point file, indicating potential reachability.
+        """
+        for file_path in self._entry_point_files:
+            try:
+                full_path = self.source_path / file_path
+                if not full_path.exists():
+                    continue
+
+                content = full_path.read_text(encoding="utf-8", errors="ignore")
+                imports = self._extract_imports(content)
+
+                if imports:
+                    self._entry_point_imports[file_path] = imports
+
+            except Exception as e:
+                self.logger.debug(f"Failed to extract imports from {file_path}: {e}")
+
+        self.logger.debug(
+            f"Built import index for {len(self._entry_point_imports)} entry point files"
+        )
+
+    def _extract_imports(self, content: str) -> list[str]:
+        """Extract import statements from Python code.
+
+        Args:
+            content: Source code content.
+
+        Returns:
+            List of imported module/file names.
+        """
+        import re
+
+        imports = []
+
+        # Python: from X import Y
+        for match in re.finditer(r'from\s+([\w.]+)\s+import', content):
+            module = match.group(1)
+            imports.append(module)
+
+        # Python: import X
+        for match in re.finditer(r'import\s+([\w.]+)', content):
+            module = match.group(1)
+            imports.append(module)
+
+        # Java: import com.example.X
+        for match in re.finditer(r'import\s+([\w.]+)', content):
+            module = match.group(1)
+            if module not in imports:
+                imports.append(module)
+
+        return imports
+
+    def _is_imported_by_entry_point_file(self, file_path: str) -> tuple[bool, str | None]:
+        """Check if a file is imported by any entry point file.
+
+        Args:
+            file_path: File path to check.
+
+        Returns:
+            Tuple of (is_imported, importing_entry_file).
+        """
+        if not self._entry_point_imports:
+            return False, None
+
+        # Extract module name from file path
+        # e.g., "copyparty/authsrv.py" -> "authsrv" or "copyparty.authsrv"
+        file_module = file_path.replace("/", ".").replace("\\", ".")
+        if file_module.endswith(".py"):
+            file_module = file_module[:-3]
+
+        # Also try just the base name
+        base_name = file_path.split("/")[-1].replace(".py", "")
+
+        for entry_file, imports in self._entry_point_imports.items():
+            for imp in imports:
+                # Check if the import matches the file
+                if imp == file_module or imp.endswith(f".{base_name}") or imp == base_name:
+                    return True, entry_file
+                # Check partial match (e.g., "authsrv" in "copyparty.authsrv")
+                if base_name in imp.split("."):
+                    return True, entry_file
+
+        return False, None
+
+    def _find_entry_point(
+        self,
+        file_path: str,
+        function_name: str | None,
+    ) -> EntryPoint | None:
+        """Find an entry point matching the given file and function.
+
+        Args:
+            file_path: File path to search for.
+            function_name: Function name to search for.
+
+        Returns:
+            Matching EntryPoint or None if not found.
+        """
+        if not self._entry_point_index:
+            return None
+
+        # Try to find by file path first
+        entries = self._entry_point_index.get(file_path, [])
+        if entries and function_name:
+            # Look for matching handler
+            func_lower = function_name.lower()
+            for entry in entries:
+                if entry.handler.lower() == func_lower:
+                    return entry
+            # Return first entry for this file if no exact match
+            return entries[0] if entries else None
+
+        # Try to find by handler name
+        if function_name:
+            handler_key = function_name.lower()
+            entries = self._entry_point_index.get(handler_key, [])
+            if entries:
+                return entries[0]
+
+        return None
+
+    def _is_in_attack_surface(
+        self,
+        file_path: str,
+        function_name: str | None,
+    ) -> tuple[bool, str | None]:
+        """Check if the file/function is in the pre-computed attack surface.
+
+        Uses a tiered matching strategy:
+        1. Exact match: function is an entry point handler
+        2. Same-file match: function is in a file with entry points
+        3. Import-based match: file is imported by an entry point file
+
+        Args:
+            file_path: File path to check.
+            function_name: Function name to check.
+
+        Returns:
+            Tuple of (is_entry_point, entry_point_type).
+        """
+        # Map EntryPointType to string
+        type_map = {
+            EntryPointType.HTTP: "HTTP",
+            EntryPointType.RPC: "RPC",
+            EntryPointType.GRPC: "gRPC",
+            EntryPointType.MQ: "MQ",
+            EntryPointType.CRON: "SCHEDULED",
+            EntryPointType.FILE: "FILE",
+            EntryPointType.WEBSOCKET: "WEBSOCKET",
+            EntryPointType.CLI: "CLI",
+        }
+
+        # Tier 1: Exact match
+        entry = self._find_entry_point(file_path, function_name)
+        if entry:
+            return True, type_map.get(entry.type, entry.type.value)
+
+        # Tier 2: Same-file match
+        # If the vulnerability is in a file that contains entry points,
+        # it's likely reachable
+        if file_path in self._entry_point_files:
+            # Find the entry type from this file
+            entries = self._entry_point_index.get(file_path, [])
+            if entries:
+                entry_type = type_map.get(entries[0].type, "HTTP")
+                self.logger.debug(
+                    f"Same-file match: {function_name} in {file_path} "
+                    f"(file has {len(entries)} entry points)"
+                )
+                return True, f"{entry_type}_SAME_FILE"
+            return True, "SAME_FILE"
+
+        # Tier 3: Import-based match
+        # If the vulnerability file is imported by an entry point file,
+        # it may be reachable
+        is_imported, importing_file = self._is_imported_by_entry_point_file(file_path)
+        if is_imported and importing_file:
+            # Find the entry type from the importing file
+            entries = self._entry_point_index.get(importing_file, [])
+            if entries:
+                entry_type = type_map.get(entries[0].type, "HTTP")
+                self.logger.debug(
+                    f"Import-based match: {file_path} imported by {importing_file}"
+                )
+                return True, f"{entry_type}_IMPORTED"
+
+        return False, None
 
     async def execute(
         self,
@@ -310,12 +554,35 @@ class RoundFourExecutor:
         # Get function name - prefer location.function, fallback to extracting from snippet
         function_name = location.function or self._extract_function_name(location.snippet or "")
 
-        # Get call chain analysis
+        # First, check if this is in the pre-computed attack surface
+        is_entry_from_report, entry_type_from_report = self._is_in_attack_surface(
+            location.file, function_name
+        )
+
+        # Get call chain analysis (still useful for finding callers)
         call_chain = self._context_builder.analyze_call_chain(
             source_path=self.source_path,
             file_path=location.file,
             function_name=function_name,
         )
+
+        # If we have a pre-computed attack surface report, use it to enhance call_chain
+        if is_entry_from_report and call_chain:
+            # Override entry point info with more accurate data from L1
+            call_chain.is_entry_point = True
+            call_chain.entry_point_type = entry_type_from_report
+            self.logger.debug(
+                f"Enhanced call_chain with L1 data: {function_name} is {entry_type_from_report}"
+            )
+        elif is_entry_from_report and not call_chain:
+            # Create a minimal CallChainInfo from the report data
+            call_chain = CallChainInfo(
+                function_name=function_name or "unknown",
+                file_path=location.file,
+                callers=[],
+                is_entry_point=True,
+                entry_point_type=entry_type_from_report,
+            )
 
         # Get data flow analysis
         data_flow = self._context_builder.analyze_data_flow(

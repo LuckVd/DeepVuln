@@ -347,6 +347,15 @@ def prompt_scan_options() -> dict[str, Any]:
     Returns:
         Dictionary with scan options.
     """
+    # Read model from config file
+    resolved_model = None
+    try:
+        from src.core.config import get_llm_config
+        llm_config = get_llm_config()
+        resolved_model = llm_config.get("model")
+    except Exception:
+        pass
+
     # Ask scan type first
     scan_type = questionary.select(
         "Select scan type:",
@@ -368,6 +377,8 @@ def prompt_scan_options() -> dict[str, Any]:
         "full_scan": False,
         "engines": None,
         "llm_verify": False,
+        "llm_detect": False,
+        "model": resolved_model,
     }
 
     if scan_type == "deps":
@@ -402,10 +413,54 @@ def prompt_scan_options() -> dict[str, Any]:
             ).ask()
             options["llm_verify"] = llm_verify or False
 
+        # Ask about LLM-assisted detection
+        llm_detect = questionary.confirm(
+            "Enable LLM-assisted attack surface detection?",
+            default=False,
+            style=CUSTOM_STYLE,
+        ).ask()
+        options["llm_detect"] = llm_detect or False
+
+        # If LLM detect is enabled, ask about full LLM mode
+        if llm_detect:
+            llm_full_detect = questionary.confirm(
+                "Use FULL LLM mode? (no static detectors, supports any language/framework)",
+                default=False,
+                style=CUSTOM_STYLE,
+            ).ask()
+            options["llm_full_detect"] = llm_full_detect or False
+            # If full LLM mode is enabled, disable regular llm_detect
+            if llm_full_detect:
+                options["llm_detect"] = False
+        else:
+            options["llm_full_detect"] = False
+
     elif scan_type == "full":
         # Full scan with all engines
         options["full_scan"] = True
         options["llm_verify"] = True
+
+        # Ask about LLM-assisted detection
+        llm_detect = questionary.confirm(
+            "Enable LLM-assisted attack surface detection?",
+            default=True,
+            style=CUSTOM_STYLE,
+        ).ask()
+        options["llm_detect"] = llm_detect or False
+
+        # If LLM detect is enabled, ask about full LLM mode
+        if llm_detect:
+            llm_full_detect = questionary.confirm(
+                "Use FULL LLM mode? (no static detectors, supports any language/framework)",
+                default=False,
+                style=CUSTOM_STYLE,
+            ).ask()
+            options["llm_full_detect"] = llm_full_detect or False
+            # If full LLM mode is enabled, disable regular llm_detect
+            if llm_full_detect:
+                options["llm_detect"] = False
+        else:
+            options["llm_full_detect"] = False
 
     # Common options
     include_low = questionary.confirm(

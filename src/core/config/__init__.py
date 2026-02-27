@@ -97,6 +97,29 @@ def get_default_config() -> dict[str, Any]:
             "level": "INFO",
             "file": "./logs/deepvuln.log",
         },
+        "llm": {
+            "provider": "openai",
+            "model": "gpt-4",
+            "timeout": 120,
+            "max_retries": 3,
+            "max_tokens": 4096,
+            "temperature": 0.1,
+            "openai": {
+                "api_key": None,
+                "base_url": "https://api.openai.com/v1",
+                "organization": None,
+            },
+            "azure": {
+                "api_key": None,
+                "endpoint": None,
+                "deployment": None,
+                "api_version": "2024-02-15-preview",
+            },
+            "ollama": {
+                "base_url": "http://localhost:11434",
+                "model": "llama2",
+            },
+        },
     }
 
 
@@ -190,3 +213,123 @@ def get_auto_sync_days() -> int:
     """
     config = load_config()
     return config.get("database", {}).get("auto_sync_days", 7)
+
+
+# =============================================================================
+# LLM Configuration
+# =============================================================================
+
+# LLM config cache
+_llm_config_cache: dict[str, Any] | None = None
+
+
+def get_llm_config(force_reload: bool = False) -> dict[str, Any]:
+    """Get LLM configuration with environment variable overrides.
+
+    Priority:
+    1. Environment variables (highest)
+    2. Config file
+    3. Default values (lowest)
+
+    Args:
+        force_reload: Force reload config even if cached.
+
+    Returns:
+        LLM configuration dictionary.
+    """
+    global _llm_config_cache
+
+    if _llm_config_cache is not None and not force_reload:
+        return _llm_config_cache
+
+    import os
+
+    config = load_config(force_reload=force_reload)
+    llm_config = config.get("llm", {})
+
+    # Build merged config with environment variable overrides
+    result = {
+        "provider": llm_config.get("provider", "openai"),
+        "model": llm_config.get("model"),  # No default - must be configured
+        "timeout": llm_config.get("timeout", 120),
+        "max_retries": llm_config.get("max_retries", 3),
+        "max_tokens": llm_config.get("max_tokens", 4096),
+        "temperature": llm_config.get("temperature", 0.1),
+    }
+
+    # OpenAI config with env overrides
+    openai_config = llm_config.get("openai", {})
+    result["openai"] = {
+        "api_key": os.getenv("OPENAI_API_KEY") or openai_config.get("api_key"),
+        "base_url": os.getenv("OPENAI_BASE_URL") or openai_config.get("base_url", "https://api.openai.com/v1"),
+        "organization": os.getenv("OPENAI_ORG_ID") or openai_config.get("organization"),
+    }
+
+    # Azure config with env overrides
+    azure_config = llm_config.get("azure", {})
+    result["azure"] = {
+        "api_key": os.getenv("AZURE_OPENAI_API_KEY") or azure_config.get("api_key"),
+        "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT") or azure_config.get("endpoint"),
+        "deployment": azure_config.get("deployment"),
+        "api_version": azure_config.get("api_version", "2024-02-15-preview"),
+    }
+
+    # Ollama config with env overrides
+    ollama_config = llm_config.get("ollama", {})
+    result["ollama"] = {
+        "base_url": os.getenv("OLLAMA_BASE_URL") or ollama_config.get("base_url", "http://localhost:11434"),
+        "model": ollama_config.get("model", "llama2"),
+    }
+
+    _llm_config_cache = result
+    return result
+
+
+def get_llm_provider() -> str:
+    """Get the default LLM provider.
+
+    Returns:
+        Provider name: "openai", "azure", "ollama", or "custom".
+    """
+    config = get_llm_config()
+    return config.get("provider", "openai")
+
+
+def get_llm_model() -> str:
+    """Get the default LLM model.
+
+    Returns:
+        Model name.
+    """
+    config = get_llm_config()
+    return config.get("model", "gpt-4")
+
+
+def get_openai_config() -> dict[str, Any]:
+    """Get OpenAI-specific configuration.
+
+    Returns:
+        OpenAI config with api_key, base_url, organization.
+    """
+    config = get_llm_config()
+    return config.get("openai", {})
+
+
+def get_azure_config() -> dict[str, Any]:
+    """Get Azure OpenAI-specific configuration.
+
+    Returns:
+        Azure config with api_key, endpoint, deployment, api_version.
+    """
+    config = get_llm_config()
+    return config.get("azure", {})
+
+
+def get_ollama_config() -> dict[str, Any]:
+    """Get Ollama-specific configuration.
+
+    Returns:
+        Ollama config with base_url, model.
+    """
+    config = get_llm_config()
+    return config.get("ollama", {})

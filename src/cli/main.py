@@ -492,7 +492,9 @@ async def run_full_security_scan(
     full_scan = options.get("full_scan", False)
     engines = options.get("engines") or (["semgrep", "codeql", "agent"] if full_scan else [])
     llm_verify = options.get("llm_verify", False)
-    model = options.get("model", "deepseek-chat")
+    llm_detect = options.get("llm_detect", False)
+    llm_full_detect = options.get("llm_full_detect", False)
+    model = options.get("model")
     include_low = options.get("include_low_severity", False)
     no_deps = options.get("no_deps", False)
 
@@ -522,8 +524,42 @@ async def run_full_security_scan(
     result["primary_language"] = primary_lang
 
     # Attack Surface Detection
-    surface_detector = AttackSurfaceDetector()
-    surface_report = surface_detector.detect(source_path)
+    llm_client_for_detect = None
+    if llm_detect or llm_full_detect:
+        try:
+            from src.layers.l3_analysis.llm.openai_client import OpenAIClient
+            from src.core.config import get_openai_config
+
+            openai_config = get_openai_config()
+            llm_client_for_detect = OpenAIClient(
+                model=model,
+                api_key=openai_config.get("api_key"),
+                base_url=openai_config.get("base_url"),
+            )
+            if llm_full_detect:
+                console.print("  [dim]Full LLM-driven detection enabled (any language/framework)[/]")
+            else:
+                console.print("  [dim]LLM-assisted detection enabled[/]")
+        except Exception as e:
+            console.print(f"  [yellow]Warning: Failed to initialize LLM client for detection: {e}[/]")
+
+    surface_detector = AttackSurfaceDetector(
+        llm_client=llm_client_for_detect,
+        enable_llm=llm_detect or llm_full_detect,
+        llm_model=model,
+    )
+
+    # Use appropriate detection method
+    if llm_full_detect and llm_client_for_detect:
+        # Full LLM-driven detection (no static detectors)
+        surface_report = await surface_detector.detect_llm_full(source_path)
+    elif llm_detect and llm_client_for_detect:
+        # LLM-enhanced detection (static + LLM fallback)
+        surface_report = await surface_detector.detect_async(source_path)
+    else:
+        # Static detection only
+        surface_report = surface_detector.detect(source_path)
+
     total_endpoints = (
         surface_report.http_endpoints +
         surface_report.rpc_services +
@@ -547,21 +583,23 @@ async def run_full_security_scan(
     # LLM Client (for agent and verification)
     llm_client = None
     if "agent" in engines or llm_verify:
-        import os
-        api_key = os.environ.get("OPENAI_API_KEY")
-        base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        from src.core.config import get_openai_config, get_llm_config
+        llm_config = get_llm_config()
+        openai_config = get_openai_config()
+        api_key = openai_config.get("api_key")
+        base_url = openai_config.get("base_url", "https://api.openai.com/v1")
         if api_key:
             llm_client = OpenAIClient(
                 model=model,
                 api_key=api_key,
                 base_url=base_url,
-                max_tokens=4096,
-                temperature=0.1,
+                max_tokens=llm_config.get("max_tokens", 4096),
+                temperature=llm_config.get("temperature", 0.1),
             )
             console.print(f"  LLM Client: ✓ ({model})")
         else:
-            console.print("  LLM Client: ✗ (OPENAI_API_KEY not set)")
-            result["errors"].append("LLM client not available: OPENAI_API_KEY not set")
+            console.print("  LLM Client: ✗ (API key not configured)")
+            result["errors"].append("LLM client not available: API key not configured in config or environment")
 
     # Semgrep Engine
     semgrep_engine = None
@@ -728,6 +766,7 @@ async def run_full_security_scan(
                 source_path=source_path,
                 llm_client=llm_client if llm_verify else None,
                 enable_llm_assessment=llm_verify,
+                attack_surface_report=surface_report,  # Pass L1 attack surface to L3
             )
 
             verified_results = []
@@ -920,9 +959,10 @@ def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | N
     full_scan = options.get("full_scan", False)
     engines = options.get("engines")
     llm_verify = options.get("llm_verify", False)
+    llm_full_detect = options.get("llm_full_detect", False)
 
-    # Run full scan if requested
-    if full_scan or engines:
+    # Run full scan if requested (including LLM full detect)
+    if full_scan or engines or llm_full_detect:
         result = asyncio.run(run_full_security_scan(source_path, options))
         _display_full_scan_result_interactive(result, options)
         return
@@ -1303,7 +1343,9 @@ def clean() -> None:
 @click.option("--full", "-f", "full_scan", is_flag=True, help="Full scan: include code analysis (semgrep + codeql + agent)")
 @click.option("--engines", multiple=True, type=click.Choice(["semgrep", "codeql", "agent"]), help="Specify engines for code analysis")
 @click.option("--llm-verify", is_flag=True, help="Enable LLM-assisted exploitability verification (Round 4)")
-@click.option("--model", default="deepseek-chat", help="LLM model for agent and verification (default: deepseek-chat)")
+@click.option("--llm-detect", is_flag=True, help="Enable LLM-assisted attack surface detection")
+@click.option("--llm-full-detect", is_flag=True, help="Enable FULL LLM-driven attack surface detection (no static detectors, any language/framework)")
+@click.option("--model", default=None, help="LLM model for agent and verification (required for LLM features, read from config if not specified)")
 @click.option("--no-deps", is_flag=True, help="Skip dependency scanning")
 def scan(
     path: str,
@@ -1313,6 +1355,8 @@ def scan(
     full_scan: bool,
     engines: tuple[str, ...],
     llm_verify: bool,
+    llm_detect: bool,
+    llm_full_detect: bool,
     model: str,
     no_deps: bool,
 ) -> None:
@@ -1327,6 +1371,11 @@ def scan(
 
     With --llm-verify, findings are verified with LLM for exploitability.
 
+    With --llm-detect, LLM assists static detection for unknown frameworks.
+
+    With --llm-full-detect, LLM performs full attack surface detection
+    (no static detectors, supports any language/framework).
+
     Examples:
         # Quick dependency scan (default)
         deepvuln scan -p /path/to/project
@@ -1340,10 +1389,42 @@ def scan(
         # Full scan with LLM verification
         deepvuln scan -p . --full --llm-verify
 
+        # Full scan with LLM-assisted attack surface detection
+        deepvuln scan -p . --full --llm-detect
+
+        # Full scan with pure LLM attack surface detection (any language)
+        deepvuln scan -p . --full --llm-full-detect
+
         # Export report
         deepvuln scan -p . --full --export report.txt
     """
     show_banner()
+
+    # If model not specified, read from config file
+    resolved_model = model
+    if resolved_model is None:
+        try:
+            from src.core.config import get_llm_config
+            llm_config = get_llm_config()
+            resolved_model = llm_config.get("model")
+        except Exception:
+            pass
+
+    # Check if LLM features are enabled but model is not configured
+    needs_llm = llm_verify or llm_detect or llm_full_detect or full_scan
+    if needs_llm and not resolved_model:
+        from src.cli.display import show_error
+        show_error(
+            "Model Not Configured",
+            "LLM model is required for this scan but not configured.\n\n"
+            "Please either:\n"
+            "  1. Specify model via --model option\n"
+            "  2. Configure model in config.local.toml under [llm].model\n\n"
+            "Example config:\n"
+            "  [llm]\n"
+            "  model = \"glm-5\""
+        )
+        return
 
     source_path = Path(path)
     options = {
@@ -1352,7 +1433,9 @@ def scan(
         "full_scan": full_scan,
         "engines": list(engines) if engines else None,
         "llm_verify": llm_verify,
-        "model": model,
+        "llm_detect": llm_detect,
+        "llm_full_detect": llm_full_detect,
+        "model": resolved_model,
         "no_deps": no_deps,
     }
 
@@ -1376,10 +1459,11 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
     full_scan = options.get("full_scan", False)
     engines = options.get("engines")
     llm_verify = options.get("llm_verify", False)
+    llm_full_detect = options.get("llm_full_detect", False)
     no_deps = options.get("no_deps", False)
 
     # Check if code analysis is requested
-    needs_code_analysis = full_scan or engines
+    needs_code_analysis = full_scan or engines or llm_full_detect
 
     if needs_code_analysis:
         # Run full scan with code analysis

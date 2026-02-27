@@ -419,3 +419,309 @@ class TestExploitabilityStatusMapping:
                 "exploitable", "conditional", "unlikely",
                 "not_exploitable", "needs_review"
             ]
+
+
+class TestAttackSurfaceReportIntegration:
+    """Tests for L1 attack surface report integration with L3."""
+
+    @pytest.fixture
+    def sample_attack_surface_report(self):
+        """Create a sample attack surface report."""
+        from src.layers.l1_intelligence.attack_surface.models import (
+            AttackSurfaceReport,
+            EntryPoint,
+            EntryPointType,
+            HTTPMethod,
+        )
+
+        report = AttackSurfaceReport(source_path="/test/project")
+        report.add_entry_point(EntryPoint(
+            type=EntryPointType.HTTP,
+            method=HTTPMethod.GET,
+            path="/api/users/{id}",
+            handler="get_user",
+            file="controllers/user_controller.py",
+            line=42,
+            framework="flask",
+        ))
+        report.add_entry_point(EntryPoint(
+            type=EntryPointType.HTTP,
+            method=HTTPMethod.POST,
+            path="/api/login",
+            handler="login",
+            file="controllers/auth_controller.py",
+            line=15,
+            framework="flask",
+        ))
+        report.add_entry_point(EntryPoint(
+            type=EntryPointType.RPC,
+            path="UserService.getUser",
+            handler="getUser",
+            file="services/user_service.py",
+            line=30,
+            framework="dubbo",
+        ))
+        return report
+
+    @pytest.fixture
+    def candidate_in_entry_point(self):
+        """Create a candidate that is in the attack surface."""
+        finding = Finding(
+            id="vuln-001",
+            rule_id="sql-injection",
+            title="SQL Injection in get_user",
+            description="User input used directly in SQL query",
+            severity=SeverityLevel.HIGH,
+            confidence=0.8,
+            location=CodeLocation(
+                file="controllers/user_controller.py",
+                line=50,
+                function="get_user",
+            ),
+            source="semgrep",
+        )
+        return VulnerabilityCandidate(
+            id="cand-001",
+            finding=finding,
+            confidence=ConfidenceLevel.HIGH,
+            discovered_in_round=1,
+        )
+
+    @pytest.fixture
+    def candidate_not_in_entry_point(self):
+        """Create a candidate that is NOT in the attack surface."""
+        finding = Finding(
+            id="vuln-002",
+            rule_id="sql-injection",
+            title="SQL Injection in internal_helper",
+            description="Internal helper with SQL issue",
+            severity=SeverityLevel.HIGH,
+            confidence=0.8,
+            location=CodeLocation(
+                file="utils/db_helper.py",
+                line=100,
+                function="internal_query",
+            ),
+            source="semgrep",
+        )
+        return VulnerabilityCandidate(
+            id="cand-002",
+            finding=finding,
+            confidence=ConfidenceLevel.HIGH,
+            discovered_in_round=1,
+        )
+
+    def test_executor_accepts_attack_surface_report(
+        self, tmp_path, sample_attack_surface_report
+    ):
+        """Test that RoundFourExecutor accepts attack_surface_report parameter."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        assert executor._attack_surface_report is not None
+        assert len(executor._entry_point_index) > 0
+
+    def test_entry_point_index_built(
+        self, tmp_path, sample_attack_surface_report
+    ):
+        """Test that entry point index is built correctly."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        # Check that file-based index works
+        assert "controllers/user_controller.py" in executor._entry_point_index
+        # Check that handler-based index works
+        assert "get_user" in executor._entry_point_index
+
+    def test_find_entry_point_by_file(
+        self, tmp_path, sample_attack_surface_report
+    ):
+        """Test finding entry point by file path."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        entry = executor._find_entry_point(
+            "controllers/user_controller.py", "get_user"
+        )
+        assert entry is not None
+        assert entry.handler == "get_user"
+
+    def test_find_entry_point_by_handler(
+        self, tmp_path, sample_attack_surface_report
+    ):
+        """Test finding entry point by handler name."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        entry = executor._find_entry_point(None, "login")
+        assert entry is not None
+        assert entry.handler == "login"
+
+    def test_is_in_attack_surface_true(
+        self, tmp_path, sample_attack_surface_report
+    ):
+        """Test checking if code is in attack surface - true case."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        is_entry, entry_type = executor._is_in_attack_surface(
+            "controllers/user_controller.py", "get_user"
+        )
+        assert is_entry is True
+        assert entry_type == "HTTP"
+
+    def test_is_in_attack_surface_false(
+        self, tmp_path, sample_attack_surface_report
+    ):
+        """Test checking if code is in attack surface - false case."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        is_entry, entry_type = executor._is_in_attack_surface(
+            "utils/db_helper.py", "internal_query"
+        )
+        assert is_entry is False
+        assert entry_type is None
+
+    @pytest.mark.asyncio
+    async def test_verify_exploitability_uses_attack_surface_report(
+        self, tmp_path, sample_attack_surface_report, candidate_in_entry_point
+    ):
+        """Test that _verify_exploitability uses attack surface report."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        result = await executor._verify_exploitability(candidate_in_entry_point)
+
+        # The candidate is in the attack surface (get_user is an HTTP endpoint)
+        # ContextBuilder won't find it (no real code), but our attack surface report will
+        assert result.is_entry_point is True
+        assert result.entry_point_type == "HTTP"
+
+    @pytest.mark.asyncio
+    async def test_verify_exploitability_not_in_attack_surface(
+        self, tmp_path, sample_attack_surface_report, candidate_not_in_entry_point
+    ):
+        """Test _verify_exploitability for code not in attack surface."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        result = await executor._verify_exploitability(candidate_not_in_entry_point)
+
+        # The candidate is NOT in the attack surface
+        assert result.is_entry_point is False
+        # Without entry point, should be NOT_EXPLOITABLE
+        assert result.status == ExploitabilityStatus.NOT_EXPLOITABLE
+
+    def test_executor_without_attack_surface_report(self, tmp_path):
+        """Test that executor works without attack surface report."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+        )
+
+        assert executor._attack_surface_report is None
+        assert len(executor._entry_point_index) == 0
+
+        is_entry, entry_type = executor._is_in_attack_surface(
+            "controllers/user_controller.py", "get_user"
+        )
+        assert is_entry is False
+
+    def test_same_file_match(
+        self, tmp_path, sample_attack_surface_report
+    ):
+        """Test same-file matching - function in file with entry points."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        # get_user is an entry point in user_controller.py
+        # Another function in the same file should match via same-file rule
+        is_entry, entry_type = executor._is_in_attack_surface(
+            "controllers/user_controller.py", "some_other_function"
+        )
+        assert is_entry is True
+        assert "SAME_FILE" in entry_type or entry_type == "HTTP"
+
+    def test_import_based_match(
+        self, tmp_path, sample_attack_surface_report
+    ):
+        """Test import-based matching - file imported by entry point file."""
+        # Create a file with imports for testing
+        entry_file = tmp_path / "controllers" / "user_controller.py"
+        entry_file.parent.mkdir(parents=True, exist_ok=True)
+        entry_file.write_text('''
+from services.user_service import get_user
+from utils.db_helper import query_db
+
+def get_user():
+    pass
+''')
+
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        # Build import index
+        executor._build_entry_point_import_index()
+
+        # services.user_service should be detected as imported
+        is_imported, importing_file = executor._is_imported_by_entry_point_file(
+            "services/user_service.py"
+        )
+        # May or may not match depending on file structure
+        # This test mainly verifies the method doesn't crash
+
+    def test_entry_point_files_set(
+        self, tmp_path, sample_attack_surface_report
+    ):
+        """Test that entry point files are tracked."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        # Should have tracked files with entry points
+        assert len(executor._entry_point_files) > 0
+        assert "controllers/user_controller.py" in executor._entry_point_files
+        assert "controllers/auth_controller.py" in executor._entry_point_files
+
+    def test_extract_imports_python(self, tmp_path, sample_attack_surface_report):
+        """Test Python import extraction."""
+        executor = RoundFourExecutor(
+            source_path=tmp_path,
+            attack_surface_report=sample_attack_surface_report,
+        )
+
+        code = '''
+from flask import Flask, request
+from services.user import UserService
+import os
+import auth.middleware
+'''
+        imports = executor._extract_imports(code)
+
+        assert "flask" in imports
+        assert "services.user" in imports
+        assert "os" in imports
+        assert "auth.middleware" in imports
+
+

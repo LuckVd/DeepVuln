@@ -8,102 +8,170 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | 改进攻击面检测 - 支持非主流框架 |
+| **任务** | 实现全 LLM 参与的通用入口点检测系统 |
 | **状态** | completed |
 | **优先级** | high |
-| **创建日期** | 2026-02-21 |
-| **完成日期** | 2026-02-21 |
+| **创建日期** | 2026-02-27 |
+| **完成日期** | 2026-02-27 |
 
 ---
 
 ## 背景
 
-在扫描 copyparty 项目时，攻击面检测返回 0 个入口点。原因是 copyparty 使用自定义 HTTP 服务器实现，不匹配现有的框架检测器（Flask, FastAPI, Spring, Gin, Echo）。
+### 现状问题
 
-现有检测器覆盖的框架：
-- Python: Flask, FastAPI
-- Java: Spring
-- Go: Gin, Echo
+当前入口点检测存在以下限制：
 
-缺失的检测能力：
-- Python 标准库: http.server, BaseHTTPRequestHandler
-- 自定义框架路由模式
-- 非主流 Web 框架
+1. **框架绑定**：只支持固定的 Web 框架（Flask、FastAPI、Gin、Echo、Spring 等）
+2. **LLM 限制过多**：
+   - 需要 `--llm-detect` 参数才启用
+   - 只检测"看起来像 HTTP"的文件（关键词过滤）
+   - 只对静态检测失败的文件使用 LLM
+3. **语言覆盖不全**：非主流框架、自定义框架无法识别
+
+### 目标
+
+取消所有 LLM 限制，让 LLM 全面参与入口点检测：
+
+1. **项目结构分析**：把项目结构发给 LLM，让它判断哪些文件需要检测
+2. **智能文件选择**：根据 LLM 返回，选择性地读取文件内容
+3. **通用入口点识别**：LLM 分析代码内容，识别任意语言/框架的入口点
+4. **无框架限制**：不再依赖预定义的框架检测器
 
 ---
 
 ## 完成标准
 
-### P1: 添加通用 HTTP 检测器
-- [x] 识别 Python `http.server` / `BaseHTTPRequestHandler`
-- [x] 识别 `socket` + HTTP 协议处理
-- [x] 识别 Java `HttpServer` / `com.sun.net.httpserver`
-- [x] 识别 Go `net/http` 标准库用法
-- [x] 添加对应单元测试 (25 个)
+### P1: 设计 LLM 入口点检测架构
+- [x] 设计两阶段 LLM 交互流程
+- [x] 定义 Prompt 模板
+- [x] 设计返回格式解析
 
-### P2: 扩展自定义框架支持
-- [x] 分析 copyparty 路由模式
-- [x] 实现 `CustomHTTPServerDetector` 检测器
-- [x] 支持类方法路由 (run(), handle_request())
-- [x] 添加 copyparty 验证测试
+### P2: 实现阶段 1 - 项目结构分析
+- [x] 生成项目结构树
+- [x] LLM 分析需要检测的文件
+- [x] 解析 LLM 返回的文件列表
 
-### P3: 静态 + LLM 结合检测
-- [x] 实现 `LLMHTTPDetector` 类
-- [x] 实现 `HybridHTTPDetector` 静态+LLM 混合检测
-- [x] 设计 LLM prompt 识别 HTTP handlers
-- [x] 缓存 LLM 结果避免重复调用
-- [x] 添加 LLM 检测测试用例 (25 个)
+### P3: 实现阶段 2 - 入口点识别
+- [x] 读取 LLM 选中的文件内容
+- [x] LLM 分析代码识别入口点
+- [x] 解析并标准化入口点格式
 
----
+### P4: 集成到现有系统
+- [x] 修改 `AttackSurfaceDetector` 支持 LLM 主导模式
+- [x] 添加 CLI 参数 `--llm-full-detect`
+- [x] 保持向后兼容（静态检测仍可用）
 
-## 实现详情
-
-### 新增检测器
-
-1. **PythonStdlibHTTPDetector** - 检测 `BaseHTTPRequestHandler` 和 `do_*` 方法
-2. **GoStdlibDetector** - 检测 `http.HandleFunc`, `http.Handle`
-3. **JavaStdlibDetector** - 检测 `com.sun.net.httpserver.HttpHandler`
-4. **CustomHTTPServerDetector** - 检测自定义 HTTP 实现 (如 copyparty)
-
-### 检测器注册表
-
-```python
-HTTP_DETECTORS: list[type[HTTPDetector]] = [
-    # Framework-specific detectors
-    GinDetector,
-    EchoDetector,
-    SpringDetector,
-    FlaskDetector,
-    FastAPIDetector,
-    # Standard library detectors (NEW)
-    GoStdlibDetector,
-    JavaStdlibDetector,
-    PythonStdlibHTTPDetector,
-    # Custom HTTP server detector (NEW)
-    CustomHTTPServerDetector,
-]
-```
-
-### LLM 辅助检测
-
-```python
-# 使用示例
-from src.layers.l1_intelligence.attack_surface.llm_detector import create_hybrid_detector
-
-detector = create_hybrid_detector(llm_client=client, enable_llm=True)
-entry_points = await detector.detect(code, file_path)
-```
+### P5: 测试验证
+- [x] 测试 PandaWiki（Go 自定义框架）- 检测到入口点
+- [x] 测试 DeepVuln（Python 自定义 HTTP）- 检测到 17 个入口点
+- [x] 添加单元测试 - 44 个测试全部通过
 
 ---
 
-## 修改文件
+## 实现方案
+
+### 架构设计
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    LLM Full Detection Flow                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Phase 1: Project Structure Analysis                            │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Source Code                                              │   │
+│  │      │                                                    │   │
+│  │      ▼                                                    │   │
+│  │  Generate Project Tree (files, dirs, extensions)         │   │
+│  │      │                                                    │   │
+│  │      ▼                                                    │   │
+│  │  LLM: "分析项目结构，判断哪些文件可能包含入口点"           │   │
+│  │      │                                                    │   │
+│  │      ▼                                                    │   │
+│  │  Return: [file1.go, file2.py, handler/, api/...]         │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  Phase 2: Entry Point Detection                                │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  For each selected file:                                  │   │
+│  │      │                                                    │   │
+│  │      ▼                                                    │   │
+│  │  Read file content                                        │   │
+│  │      │                                                    │   │
+│  │      ▼                                                    │   │
+│  │  LLM: "分析代码，识别所有入口点（HTTP/RPC/gRPC/MQ/Cron）"  │   │
+│  │      │                                                    │   │
+│  │      ▼                                                    │   │
+│  │  Return: [{type, path, handler, line, framework}, ...]   │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Prompt 模板设计
+
+**Phase 1 - 项目结构分析**:
+```
+分析以下项目结构，识别可能包含外部入口点的文件或目录。
+
+入口点类型包括：
+- HTTP/Web API endpoints
+- RPC services (gRPC, Dubbo, Thrift)
+- Message Queue consumers
+- Scheduled jobs/Cron
+- WebSocket handlers
+- CLI commands (如果暴露给外部)
+
+项目结构：
+{project_tree}
+
+请返回 JSON 格式：
+{
+  "target_files": ["path/to/file1", "path/to/file2"],
+  "target_dirs": ["handler/", "api/"],
+  "reasoning": "简要说明选择原因"
+}
+```
+
+**Phase 2 - 入口点识别**:
+```
+分析以下代码，识别所有外部入口点。
+
+文件: {file_path}
+语言: {language}
+
+代码：
+```
+{code_content}
+```
+
+请返回 JSON 格式：
+{
+  "entry_points": [
+    {
+      "type": "http|rpc|grpc|mq|cron|ws|cli",
+      "method": "GET|POST|...",
+      "path": "/api/path",
+      "handler": "function_name",
+      "line": 42,
+      "framework": "detected_framework_or_custom",
+      "description": "简要描述"
+    }
+  ],
+  "framework_detected": "gin|flask|custom|unknown",
+  "confidence": 0.0-1.0
+}
+```
+
+### 关键文件修改
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/layers/l1_intelligence/attack_surface/http_detector.py` | 修改 | 新增 4 个检测器 |
-| `src/layers/l1_intelligence/attack_surface/llm_detector.py` | 新增 | LLM 辅助检测 |
-| `tests/unit/test_l1/test_http_detector.py` | 新增 | 25 个测试 |
-| `tests/unit/test_l1/test_llm_detector.py` | 新增 | 25 个测试 |
+| `src/layers/l1_intelligence/attack_surface/llm_detector.py` | 重构 | 实现两阶段 LLM 检测 |
+| `src/layers/l1_intelligence/attack_surface/detector.py` | 修改 | 添加 LLM 主导模式 |
+| `src/cli/main.py` | 修改 | 添加 `--llm-full-detect` 参数 |
+| `tests/unit/test_l1/test_llm_detector.py` | 新增 | LLM 检测器测试 |
 
 ---
 
@@ -111,51 +179,18 @@ entry_points = await detector.detect(code, file_path)
 
 | 时间 | 进展 |
 |------|------|
-| 2026-02-21 22:00 | 设置新目标：改进攻击面检测 |
-| 2026-02-21 22:15 | 完成 P1: 添加通用 HTTP 检测器 (4 个) |
-| 2026-02-21 22:30 | 完成 P2: 扩展自定义框架支持 |
-| 2026-02-21 22:45 | 完成 P3: 静态 + LLM 结合检测 |
-| 2026-02-21 23:00 | 所有 963 个测试通过 |
+| 2026-02-27 15:40 | 设置新目标：全 LLM 参与的通用入口点检测 |
+| 2026-02-27 16:00 | 完成 P1: 两阶段 LLM 检测架构设计 |
+| 2026-02-27 16:15 | 完成 P2-P4: 实现并集成到 CLI |
+| 2026-02-27 16:20 | 测试 PandaWiki: LLM 全检测成功识别入口点 |
+| 2026-02-27 17:00 | 测试 DeepVuln: 检测到 17 个入口点（8 HTTP + 4 Cron + 5 CLI） |
+| 2026-02-27 17:05 | 完成单元测试：44 个测试全部通过 |
 
 ---
 
-## 验证结果
+## 验证标准
 
-### copyparty 检测
-
-```
-Found 37 Python files in copyparty
-Total entry points detected: 10
-  custom: SSH_Srv at sftpd.py:54
-  custom: SFTP_Srv at sftpd.py:279
-  custom: TcpSrv at tcpsrv.py:46
-  custom: HttpSrv at httpsrv.py:104
-  custom: ThumbSrv at th_srv.py:251
-  custom: AuthSrv at authsrv.py:1050
-  custom: HttpConn at httpconn.py:41
-  custom: HttpConn.run at httpconn.py:149
-  custom: HttpCli at httpcli.py:207
-  custom: HttpCli.run at httpcli.py:330
-```
-
-### 测试覆盖
-
-| 类别 | 测试数 |
-|------|--------|
-| PythonStdlibHTTPDetector | 4 |
-| GoStdlibDetector | 3 |
-| JavaStdlibDetector | 2 |
-| CustomHTTPServerDetector | 4 |
-| CopypartyDetection | 2 |
-| DetectorRegistry | 7 |
-| LLMHTTPDetector | 11 |
-| HybridHTTPDetector | 5 |
-| 其他 | 2 |
-| **总计** | **50** |
-
-### 最终验证
-
-- [x] copyparty 项目检测到 10 个入口点 (目标: ≥10)
-- [x] 单元测试全部通过 (新增 50 个)
-- [x] 不影响现有框架检测准确率
-- [x] LLM 检测可选，不影响性能
+1. PandaWiki（Go 自定义框架）能检测到入口点
+2. copyparty（Python 自定义 HTTP）入口点检测不退化
+3. 支持任意语言/框架，不依赖预定义检测器
+4. LLM 检测可独立使用，不强制依赖静态检测

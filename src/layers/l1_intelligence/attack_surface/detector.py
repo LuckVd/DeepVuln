@@ -1,6 +1,7 @@
 """Main attack surface detector with AST and regex support."""
 
 from pathlib import Path
+from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.layers.l1_intelligence.attack_surface.ast.base import (
@@ -28,14 +29,73 @@ from src.layers.l1_intelligence.attack_surface.rpc_detector import (
 
 logger = get_logger(__name__)
 
+# Detection mode constants
+DETECT_MODE_STATIC = "static"  # Static detection only (default)
+DETECT_MODE_LLM_ENHANCE = "llm-enhance"  # Static + LLM enhancement
+DETECT_MODE_LLM_FULL = "llm-full"  # Full LLM-driven detection
+
+
+# Re-export for convenience
+__all__ = [
+    "AttackSurfaceDetector",
+    "DETECT_MODE_STATIC",
+    "DETECT_MODE_LLM_ENHANCE",
+    "DETECT_MODE_LLM_FULL",
+]
+
 
 class AttackSurfaceDetector:
-    """Main detector for identifying attack entry points."""
+    """Main detector for identifying attack entry points.
 
-    def __init__(self) -> None:
-        """Initialize the detector."""
+    Supports:
+    - Static detection (AST + regex-based)
+    - LLM-assisted detection (optional, for complex patterns)
+    """
+
+    def __init__(
+        self,
+        llm_client: Any = None,
+        enable_llm: bool = False,
+        llm_model: str = "deepseek-chat",
+    ) -> None:
+        """Initialize the detector.
+
+        Args:
+            llm_client: Optional LLM client for LLM-assisted detection.
+            enable_llm: Whether to enable LLM-assisted detection.
+            llm_model: LLM model name to use.
+        """
         self.logger = get_logger(__name__)
         self._cron_detector = CronDetector()
+        self.llm_client = llm_client
+        self.enable_llm = enable_llm
+        self.llm_model = llm_model
+        self._llm_detector = None
+
+        if enable_llm and llm_client:
+            self._init_llm_detector()
+
+    def _init_llm_detector(self) -> None:
+        """Initialize LLM detector lazily."""
+        try:
+            from src.layers.l1_intelligence.attack_surface.llm_detector import (
+                LLMHTTPDetector,
+                LLMFullDetector,
+            )
+
+            self._llm_detector = LLMHTTPDetector(
+                llm_client=self.llm_client,
+                model=self.llm_model,
+            )
+            self._llm_full_detector = LLMFullDetector(
+                llm_client=self.llm_client,
+                model=self.llm_model,
+            )
+            self.logger.info(f"LLM detector initialized with model: {self.llm_model}")
+        except ImportError as e:
+            self.logger.warning(f"Failed to initialize LLM detector: {e}")
+            self._llm_detector = None
+            self._llm_full_detector = None
 
     def detect(self, source_path: Path, frameworks: list[str] | None = None) -> AttackSurfaceReport:
         """Detect attack surface for a project.
@@ -93,6 +153,215 @@ class AttackSurfaceDetector:
         )
 
         return report
+
+    async def detect_llm_full(
+        self,
+        source_path: Path,
+        max_files: int = 50,
+    ) -> AttackSurfaceReport:
+        """Detect attack surface using full LLM-driven two-phase detection.
+
+        This method uses LLM for both:
+        1. Phase 1: Analyze project structure to identify target files
+        2. Phase 2: Analyze each target file to detect entry points
+
+        No static detectors are used - pure LLM detection.
+        Supports any language and framework.
+
+        Args:
+            source_path: Path to source code.
+            max_files: Maximum number of files to analyze in Phase 2.
+
+        Returns:
+            Attack surface report.
+        """
+        self.logger.info(f"Starting full LLM detection for {source_path}")
+
+        report = AttackSurfaceReport(source_path=str(source_path))
+
+        # Import and initialize LLMFullDetector
+        try:
+            from src.layers.l1_intelligence.attack_surface.llm_detector import LLMFullDetector
+        except ImportError as e:
+            self.logger.error(f"Failed to import LLMFullDetector: {e}")
+            report.errors.append(f"LLM detection not available: {e}")
+            return report
+
+        if not self.llm_client:
+            self.logger.error("LLM client not configured")
+            report.errors.append("LLM client not configured")
+            return report
+
+        # Create LLM full detector
+        llm_detector = LLMFullDetector(
+            llm_client=self.llm_client,
+            model=self.llm_model,
+            max_files_to_analyze=max_files,
+        )
+
+        try:
+            # Run full LLM detection
+            entry_points = await llm_detector.detect_full(source_path)
+
+            # Add entry points to report
+            for entry in entry_points:
+                report.add_entry_point(entry)
+                if entry.framework and entry.framework not in report.frameworks_detected:
+                    report.frameworks_detected.append(entry.framework)
+
+            report.files_scanned = len(entry_points)  # Approximate
+
+            self.logger.info(
+                f"Full LLM detection complete: {report.total_entry_points} entry points "
+                f"(HTTP: {report.http_endpoints}, RPC: {report.rpc_services}, "
+                f"gRPC: {report.grpc_services}, MQ: {report.mq_consumers}, "
+                f"Cron: {report.cron_jobs}, WebSocket: {report.websocket_endpoints})"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Full LLM detection failed: {e}")
+            report.errors.append(f"LLM detection failed: {e}")
+
+        return report
+
+    async def detect_hybrid(
+        self,
+        source_path: Path,
+        frameworks: list[str] | None = None,
+        llm_mode: str = DETECT_MODE_LLM_ENHANCE,
+    ) -> AttackSurfaceReport:
+        """Detect attack surface with hybrid approach.
+
+        Combines static detection with LLM detection based on mode:
+        - static: Static detection only
+        - llm-enhance: Static + LLM enhancement (default)
+        - llm-full: Pure LLM-driven detection
+
+        Args:
+            source_path: Path to source code.
+            frameworks: Optional list of known frameworks.
+            llm_mode: LLM detection mode.
+
+        Returns:
+            Attack surface report.
+        """
+        if llm_mode == DETECT_MODE_LLM_FULL:
+            return await self.detect_llm_full(source_path)
+
+        # Static detection first
+        report = self.detect(source_path, frameworks)
+
+        # LLM enhancement if enabled
+        if llm_mode == DETECT_MODE_LLM_ENHANCE and self._llm_detector:
+            try:
+                await self._llm_enhance(report, source_path)
+            except Exception as e:
+                self.logger.warning(f"LLM enhancement failed: {e}")
+
+        return report
+
+    async def detect_async(
+        self,
+        source_path: Path,
+        frameworks: list[str] | None = None,
+        use_llm_enhance: bool = True,
+    ) -> AttackSurfaceReport:
+        """Detect attack surface asynchronously with optional LLM enhancement.
+
+        Args:
+            source_path: Path to source code.
+            frameworks: Optional list of known frameworks to prioritize.
+            use_llm_enhance: Whether to use LLM to enhance detection (if enabled).
+
+        Returns:
+            Attack surface report.
+        """
+        # Run static detection first
+        report = self.detect(source_path, frameworks)
+
+        # Optionally enhance with LLM
+        if use_llm_enhance and self._llm_detector and self.enable_llm:
+            try:
+                await self._llm_enhance(report, source_path)
+            except Exception as e:
+                self.logger.warning(f"LLM enhancement failed: {e}")
+
+        return report
+
+    async def _llm_enhance(self, report: AttackSurfaceReport, source_path: Path) -> None:
+        """Enhance detection results with LLM.
+
+        For files where static detection found nothing, try LLM detection.
+
+        Args:
+            report: The report to enhance.
+            source_path: Path to source code.
+        """
+        if not self._llm_detector:
+            return
+
+        self.logger.info("Enhancing detection with LLM...")
+
+        # Find files with no detected entry points
+        files_with_entries = {Path(e.file) for e in report.entry_points}
+        source_files = self._find_source_files(source_path)
+
+        llm_found = 0
+        for file_path in source_files:
+            # Skip files that already have detected entry points
+            if file_path in files_with_entries:
+                continue
+
+            # Skip non-HTTP related files
+            try:
+                content = file_path.read_text(encoding="utf-8")
+                if not self._looks_like_http_file(content):
+                    continue
+
+                # Try LLM detection
+                entry_points = await self._llm_detector.detect(content, file_path)
+                for entry in entry_points:
+                    report.add_entry_point(entry)
+                    llm_found += 1
+                    if entry.framework and entry.framework not in report.frameworks_detected:
+                        report.frameworks_detected.append(entry.framework)
+
+            except Exception as e:
+                self.logger.debug(f"LLM detection failed on {file_path}: {e}")
+
+        if llm_found > 0:
+            self.logger.info(f"LLM enhancement found {llm_found} additional entry points")
+
+    def _looks_like_http_file(self, content: str) -> bool:
+        """Check if content looks like it might contain HTTP handling code.
+
+        Args:
+            content: File content.
+
+        Returns:
+            True if the content appears HTTP-related.
+        """
+        http_indicators = [
+            "http",
+            "server",
+            "socket",
+            "request",
+            "response",
+            "handler",
+            "route",
+            "api",
+            "endpoint",
+            "get",
+            "post",
+            "put",
+            "delete",
+        ]
+
+        content_lower = content.lower()
+        matches = sum(1 for kw in http_indicators if kw in content_lower)
+
+        # Need at least 2 indicators and some minimal code size
+        return matches >= 2 and len(content) >= 200
 
     def _find_source_files(self, source_path: Path) -> list[Path]:
         """Find source files to scan."""

@@ -53,3 +53,81 @@ level = "INFO"
 # 日志文件路径
 # 默认: "./logs/deepvuln.log"
 file = "./logs/deepvuln.log"
+
+# =============================================================================
+# LLM 配置
+# =============================================================================
+
+[llm]
+# 默认 LLM 提供商
+# 可选值: openai, azure, ollama, custom
+# 默认: openai
+provider = "openai"
+
+# 默认模型
+# OpenAI: gpt-4, gpt-4-turbo, gpt-3.5-turbo
+# Ollama: llama2, mistral, codellama 等
+# 默认: gpt-4
+model = "gpt-4"
+
+# 请求超时（秒）
+# 默认: 120
+timeout = 120
+
+# 最大重试次数
+# 默认: 3
+max_retries = 3
+
+# 最大输出 token 数
+# 默认: 4096
+max_tokens = 4096
+
+# 温度参数 (0.0-2.0)
+# 较低的值使输出更确定，较高的值使输出更随机
+# 默认: 0.1
+temperature = 0.1
+
+# -----------------------------------------------------------------------------
+# OpenAI 配置
+# -----------------------------------------------------------------------------
+[llm.openai]
+# API Key (也可通过环境变量 OPENAI_API_KEY 设置)
+# 获取地址: https://platform.openai.com/api-keys
+api_key = ""
+
+# API Base URL (用于兼容 API)
+# 默认: https://api.openai.com/v1
+base_url = "https://api.openai.com/v1"
+
+# Organization ID (可选)
+organization = ""
+
+# -----------------------------------------------------------------------------
+# Azure OpenAI 配置
+# -----------------------------------------------------------------------------
+[llm.azure]
+# API Key (也可通过环境变量 AZURE_OPENAI_API_KEY 设置)
+api_key = ""
+
+# Azure Endpoint (也可通过环境变量 AZURE_OPENAI_ENDPOINT 设置)
+# 示例: https://your-resource.openai.azure.com
+endpoint = ""
+
+# Deployment 名称
+deployment = ""
+
+# API 版本
+# 默认: 2024-02-15-preview
+api_version = "2024-02-15-preview"
+
+# -----------------------------------------------------------------------------
+# Ollama 配置 (本地模型)
+# -----------------------------------------------------------------------------
+[llm.ollama]
+# Ollama 服务地址 (也可通过环境变量 OLLAMA_BASE_URL 设置)
+# 默认: http://localhost:11434
+base_url = "http://localhost:11434"
+
+# 默认模型
+# 常用: llama2, mistral, codellama, deepseek-coder
+model = "llama2"
