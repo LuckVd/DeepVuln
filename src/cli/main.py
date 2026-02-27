@@ -665,10 +665,10 @@ async def run_full_security_scan(
                     "findings_count": len(semgrep_result.findings),
                 }
             else:
-                console.print(f"  ✗ Semgrep failed: {semgrep_result.error_message}")
+                console.print(f"  ✗ Semgrep failed: {semgrep_result.error_message}", markup=False)
                 result["phases"]["semgrep"] = {"success": False, "error": semgrep_result.error_message}
         except Exception as e:
-            console.print(f"  ✗ Semgrep error: {e}")
+            console.print(f"  ✗ Semgrep error: {e}", markup=False)
             result["errors"].append(f"Semgrep error: {e}")
 
     # =========================================================================
@@ -701,10 +701,10 @@ async def run_full_security_scan(
                     "findings_count": len(codeql_result.findings),
                 }
             else:
-                console.print(f"  ✗ CodeQL failed: {codeql_result.error_message}")
+                console.print(f"  ✗ CodeQL failed: {codeql_result.error_message}", markup=False)
                 result["phases"]["codeql"] = {"success": False, "error": codeql_result.error_message}
         except Exception as e:
-            console.print(f"  ✗ CodeQL error: {e}")
+            console.print(f"  ✗ CodeQL error: {e}", markup=False)
             result["errors"].append(f"CodeQL error: {e}")
 
     # =========================================================================
@@ -774,7 +774,7 @@ async def run_full_security_scan(
                     console.print("  ✓ Agent: No vulnerabilities found")
                     result["phases"]["agent"] = {"success": True, "findings_count": 0}
             except Exception as e:
-                console.print(f"  ✗ Agent error: {e}")
+                console.print(f"  ✗ Agent error: {e}", markup=False)
                 result["errors"].append(f"Agent error: {e}")
         else:
             console.print("  ⚠ No target files found for analysis")
@@ -840,7 +840,7 @@ async def run_full_security_scan(
             console.print(f"\n  Results: {status_counts}")
 
         except Exception as e:
-            console.print(f"  ✗ Verification error: {e}")
+            console.print(f"  ✗ Verification error: {e}", markup=False)
             result["errors"].append(f"Verification error: {e}")
 
     # =========================================================================
