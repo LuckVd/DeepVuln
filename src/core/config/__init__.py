@@ -333,3 +333,15 @@ def get_ollama_config() -> dict[str, Any]:
     """
     config = get_llm_config()
     return config.get("ollama", {})
+
+
+def get_llm_batch_size() -> int:
+    """Get LLM batch size from config.
+
+    Used for batch analysis in entry point detection.
+
+    Returns:
+        Number of files per batch (default: 50).
+    """
+    config = load_config()
+    return config.get("llm", {}).get("batch_size", 50)

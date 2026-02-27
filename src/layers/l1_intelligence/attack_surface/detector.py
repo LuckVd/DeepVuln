@@ -158,6 +158,7 @@ class AttackSurfaceDetector:
         self,
         source_path: Path,
         max_files: int = 50,
+        batch_size: int = 50,
     ) -> AttackSurfaceReport:
         """Detect attack surface using full LLM-driven two-phase detection.
 
@@ -171,6 +172,7 @@ class AttackSurfaceDetector:
         Args:
             source_path: Path to source code.
             max_files: Maximum number of files to analyze in Phase 2.
+            batch_size: Number of files per LLM batch (default: 50).
 
         Returns:
             Attack surface report.
@@ -200,8 +202,12 @@ class AttackSurfaceDetector:
         )
 
         try:
-            # Run full LLM detection
-            entry_points = await llm_detector.detect_full(source_path)
+            # Run full LLM detection with batch analysis
+            entry_points = await llm_detector.detect_full(
+                source_path,
+                batch_size=batch_size,
+                use_batch=True,
+            )
 
             # Add entry points to report
             for entry in entry_points:

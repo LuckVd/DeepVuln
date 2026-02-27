@@ -549,10 +549,16 @@ async def run_full_security_scan(
         llm_model=model,
     )
 
+    # Get batch_size from options
+    batch_size = options.get("batch_size", 50)
+
     # Use appropriate detection method
     if llm_full_detect and llm_client_for_detect:
         # Full LLM-driven detection (no static detectors)
-        surface_report = await surface_detector.detect_llm_full(source_path)
+        surface_report = await surface_detector.detect_llm_full(
+            source_path,
+            batch_size=batch_size,
+        )
     elif llm_detect and llm_client_for_detect:
         # LLM-enhanced detection (static + LLM fallback)
         surface_report = await surface_detector.detect_async(source_path)
@@ -1345,6 +1351,7 @@ def clean() -> None:
 @click.option("--llm-verify", is_flag=True, help="Enable LLM-assisted exploitability verification (Round 4)")
 @click.option("--llm-detect", is_flag=True, help="Enable LLM-assisted attack surface detection")
 @click.option("--llm-full-detect", is_flag=True, help="Enable FULL LLM-driven attack surface detection (no static detectors, any language/framework)")
+@click.option("--batch-size", default=None, type=int, help="Files per LLM batch for entry point detection (default: from config or 50)")
 @click.option("--model", default=None, help="LLM model for agent and verification (required for LLM features, read from config if not specified)")
 @click.option("--no-deps", is_flag=True, help="Skip dependency scanning")
 def scan(
@@ -1357,6 +1364,7 @@ def scan(
     llm_verify: bool,
     llm_detect: bool,
     llm_full_detect: bool,
+    batch_size: int | None,
     model: str,
     no_deps: bool,
 ) -> None:
@@ -1427,6 +1435,16 @@ def scan(
         return
 
     source_path = Path(path)
+
+    # Resolve batch_size from CLI or config
+    resolved_batch_size = batch_size
+    if resolved_batch_size is None:
+        try:
+            from src.core.config import get_llm_batch_size
+            resolved_batch_size = get_llm_batch_size()
+        except Exception:
+            resolved_batch_size = 50  # Default fallback
+
     options = {
         "include_low_severity": include_low,
         "detailed": detailed,
@@ -1435,6 +1453,7 @@ def scan(
         "llm_verify": llm_verify,
         "llm_detect": llm_detect,
         "llm_full_detect": llm_full_detect,
+        "batch_size": resolved_batch_size,
         "model": resolved_model,
         "no_deps": no_deps,
     }

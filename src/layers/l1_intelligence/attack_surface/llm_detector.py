@@ -107,7 +107,7 @@ If no entry point files are found, return:
 """
 
 
-# Phase 2: Entry Point Detection Prompt
+# Phase 2: Entry Point Detection Prompt (Single File)
 ENTRY_POINT_DETECTION_PROMPT = """Analyze the following source code and identify ALL external entry points.
 
 File: {file_path}
@@ -164,6 +164,63 @@ Return JSON format:
 
 If no entry points are found, return:
 {{"entry_points": [], "framework_detected": "unknown", "confidence": 0.0, "notes": "reason"}}
+"""
+
+
+# Phase 2 Batch: Multi-File Entry Point Detection Prompt
+BATCH_ENTRY_POINT_DETECTION_PROMPT = """Analyze the following {file_count} source files and identify ALL external entry points.
+
+Files to analyze:
+{files_content}
+
+Entry point types to identify:
+1. HTTP endpoints: Routes, handlers, controllers
+   - Look for: route definitions, handler functions, HTTP method decorators
+   - Include: method (GET/POST/PUT/DELETE/etc), path, handler function name
+
+2. RPC/gRPC services: Service definitions, method handlers
+   - Look for: service definitions, RPC method handlers
+   - Include: service name, method name, handler function
+
+3. Message Queue consumers: Queue/topic listeners, message handlers
+   - Look for: queue subscriptions, message processing functions
+   - Include: queue/topic name, handler function
+
+4. Scheduled jobs: Cron jobs, scheduled tasks, timers
+   - Look for: schedule definitions, cron expressions, timer setup
+   - Include: schedule expression, handler function
+
+5. WebSocket handlers: WebSocket endpoints, connection handlers
+   - Look for: WebSocket route definitions, connection handlers
+   - Include: path, handler function
+
+6. CLI commands: Command-line entry points (if exposed externally)
+   - Look for: command definitions, main functions that process CLI args
+   - Include: command name, handler function
+
+Return JSON format:
+{{
+    "files_analyzed": {file_count},
+    "entry_points": [
+        {{
+            "file": "path/to/file.ext",
+            "type": "http|rpc|grpc|mq|cron|websocket|cli",
+            "method": "GET|POST|PUT|DELETE|PATCH|*",
+            "path": "/api/path or service name or queue name",
+            "handler": "function_name",
+            "line": 42,
+            "auth_required": true/false,
+            "params": ["param1", "param2"],
+            "description": "Brief description"
+        }}
+    ],
+    "framework_detected": "gin|flask|fastapi|spring|express|custom|unknown",
+    "confidence": 0.0-1.0,
+    "notes": "Optional notes about the analysis"
+}}
+
+If no entry points are found, return:
+{{"files_analyzed": {file_count}, "entry_points": [], "framework_detected": "unknown", "confidence": 0.0, "notes": "reason"}}
 """
 
 
@@ -421,11 +478,18 @@ class LLMFullDetector:
         self._tree_generator = ProjectTreeGenerator()
         self._cache: dict[str, Any] = {}
 
-    async def detect_full(self, source_path: Path) -> list[EntryPoint]:
+    async def detect_full(
+        self,
+        source_path: Path,
+        batch_size: int = 50,
+        use_batch: bool = True,
+    ) -> list[EntryPoint]:
         """Run full two-phase LLM detection.
 
         Args:
             source_path: Path to source code.
+            batch_size: Number of files per batch (default: 50).
+            use_batch: Use batch analysis mode (default: True).
 
         Returns:
             List of detected entry points.
@@ -460,23 +524,177 @@ class LLMFullDetector:
             )
             target_files = target_files[:self.max_files_to_analyze]
 
-        # Phase 2: Analyze each target file
-        self.logger.info(f"Phase 2: Analyzing {len(target_files)} files...")
-        for i, file_path in enumerate(target_files, 1):
-            self.logger.debug(f"Phase 2: [{i}/{len(target_files)}] Analyzing {file_path.name}")
+        # Phase 2: Analyze files (batch or individual)
+        if use_batch and len(target_files) > 1:
+            self.logger.info(f"Phase 2: Batch analyzing {len(target_files)} files (batch_size={batch_size})...")
+            all_entry_points = await self._analyze_files_batch(target_files, source_path, batch_size)
+        else:
+            self.logger.info(f"Phase 2: Analyzing {len(target_files)} files individually...")
+            for i, file_path in enumerate(target_files, 1):
+                self.logger.debug(f"Phase 2: [{i}/{len(target_files)}] Analyzing {file_path.name}")
 
-            try:
-                result = await self._analyze_file(file_path, source_path)
-                if result.entry_points:
-                    all_entry_points.extend(result.entry_points)
-                    self.logger.info(
-                        f"Phase 2: Found {len(result.entry_points)} entry points in {file_path.name}"
-                    )
-            except Exception as e:
-                self.logger.error(f"Phase 2: Failed to analyze {file_path}: {e}")
+                try:
+                    result = await self._analyze_file(file_path, source_path)
+                    if result.entry_points:
+                        all_entry_points.extend(result.entry_points)
+                        self.logger.info(
+                            f"Phase 2: Found {len(result.entry_points)} entry points in {file_path.name}"
+                        )
+                except Exception as e:
+                    self.logger.error(f"Phase 2: Failed to analyze {file_path}: {e}")
 
         self.logger.info(f"Full LLM detection complete: {len(all_entry_points)} entry points found")
         return all_entry_points
+
+    async def _analyze_files_batch(
+        self,
+        files: list[Path],
+        source_path: Path,
+        batch_size: int = 50,
+    ) -> list[EntryPoint]:
+        """Phase 2: Analyze multiple files in batches.
+
+        This method groups files into batches and sends them together to the LLM,
+        significantly reducing the number of API calls.
+
+        Args:
+            files: List of files to analyze.
+            source_path: Root source path.
+            batch_size: Number of files per batch (default: 50).
+
+        Returns:
+            List of detected entry points.
+        """
+        all_entry_points: list[EntryPoint] = []
+
+        # Split files into batches
+        batches = [
+            files[i:i + batch_size]
+            for i in range(0, len(files), batch_size)
+        ]
+
+        self.logger.info(f"Split {len(files)} files into {len(batches)} batch(es)")
+
+        for batch_num, batch_files in enumerate(batches, 1):
+            self.logger.info(f"Analyzing batch {batch_num}/{len(batches)} ({len(batch_files)} files)")
+
+            try:
+                # Build batch content
+                files_content = self._build_batch_content(batch_files, source_path)
+
+                # Build prompt
+                prompt = BATCH_ENTRY_POINT_DETECTION_PROMPT.format(
+                    file_count=len(batch_files),
+                    files_content=files_content,
+                )
+
+                # Call LLM
+                response = await self._call_llm(prompt)
+
+                # Parse response
+                entry_points = self._parse_batch_response(response, source_path)
+                all_entry_points.extend(entry_points)
+
+                self.logger.info(f"Batch {batch_num}: Found {len(entry_points)} entry points")
+
+            except Exception as e:
+                self.logger.error(f"Batch {batch_num} failed: {e}")
+                # Fallback to individual file analysis for this batch
+                self.logger.info(f"Falling back to individual analysis for batch {batch_num}")
+                for file_path in batch_files:
+                    try:
+                        result = await self._analyze_file(file_path, source_path)
+                        if result.entry_points:
+                            all_entry_points.extend(result.entry_points)
+                    except Exception as inner_e:
+                        self.logger.error(f"Failed to analyze {file_path}: {inner_e}")
+
+        return all_entry_points
+
+    def _build_batch_content(self, files: list[Path], source_path: Path) -> str:
+        """Build content string for batch analysis.
+
+        Args:
+            files: List of file paths to include.
+            source_path: Root source path for relative paths.
+
+        Returns:
+            Formatted string containing all file contents.
+        """
+        parts = []
+
+        for file_path in files:
+            try:
+                content = file_path.read_text(encoding="utf-8")
+
+                # Truncate large files
+                if len(content) > self.max_file_size:
+                    content = content[:self.max_file_size] + "\n... (truncated)"
+                    self.logger.debug(f"Truncated large file: {file_path}")
+
+                relative_path = file_path.relative_to(source_path)
+                language = self._detect_language(file_path)
+
+                parts.append(f"""
+---
+File: {relative_path}
+Language: {language}
+---
+```{language}
+{content}
+```
+""")
+            except Exception as e:
+                self.logger.warning(f"Failed to read {file_path}: {e}")
+
+        return "\n".join(parts)
+
+    def _parse_batch_response(self, response: str, source_path: Path) -> list[EntryPoint]:
+        """Parse batch LLM response.
+
+        Args:
+            response: LLM response text.
+            source_path: Root source path.
+
+        Returns:
+            List of EntryPoint objects.
+        """
+        entry_points = []
+
+        try:
+            # Extract JSON from response
+            json_match = re.search(r"\{[\s\S]*\}", response)
+            if not json_match:
+                self.logger.warning("No JSON found in batch response")
+                return entry_points
+
+            data = json.loads(json_match.group())
+
+            for ep_data in data.get("entry_points", []):
+                # Get file path from response
+                file_str = ep_data.get("file", "")
+                if file_str:
+                    file_path = source_path / file_str
+                else:
+                    # Skip entry points without file info
+                    self.logger.warning(f"Entry point missing file info: {ep_data}")
+                    continue
+
+                entry = self._create_entry_point(ep_data, file_path)
+                if entry:
+                    entry_points.append(entry)
+
+            self.logger.info(
+                f"Batch analysis found {len(entry_points)} entry points "
+                f"(files_analyzed: {data.get('files_analyzed', 'unknown')})"
+            )
+
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Failed to parse batch response: {e}")
+        except Exception as e:
+            self.logger.error(f"Error parsing batch response: {e}")
+
+        return entry_points
 
     async def _analyze_project_structure(self, source_path: Path) -> ProjectStructureAnalysis:
         """Phase 1: Analyze project structure to identify target files.

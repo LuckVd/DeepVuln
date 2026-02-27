@@ -378,6 +378,8 @@ def prompt_scan_options() -> dict[str, Any]:
         "engines": None,
         "llm_verify": False,
         "llm_detect": False,
+        "llm_full_detect": False,
+        "batch_size": 50,
         "model": resolved_model,
     }
 
@@ -432,8 +434,19 @@ def prompt_scan_options() -> dict[str, Any]:
             # If full LLM mode is enabled, disable regular llm_detect
             if llm_full_detect:
                 options["llm_detect"] = False
+                # Ask about batch size for LLM full mode
+                batch_size = questionary.text(
+                    "Batch size for LLM analysis? (files per batch, default: 50)",
+                    default="50",
+                    style=CUSTOM_STYLE,
+                    validate=lambda x: x.isdigit() and int(x) > 0 or "Please enter a positive number",
+                ).ask()
+                options["batch_size"] = int(batch_size) if batch_size else 50
+            else:
+                options["batch_size"] = 50
         else:
             options["llm_full_detect"] = False
+            options["batch_size"] = 50
 
     elif scan_type == "full":
         # Full scan with all engines
@@ -459,8 +472,19 @@ def prompt_scan_options() -> dict[str, Any]:
             # If full LLM mode is enabled, disable regular llm_detect
             if llm_full_detect:
                 options["llm_detect"] = False
+                # Ask about batch size for LLM full mode
+                batch_size = questionary.text(
+                    "Batch size for LLM analysis? (files per batch, default: 50)",
+                    default="50",
+                    style=CUSTOM_STYLE,
+                    validate=lambda x: x.isdigit() and int(x) > 0 or "Please enter a positive number",
+                ).ask()
+                options["batch_size"] = int(batch_size) if batch_size else 50
+            else:
+                options["batch_size"] = 50
         else:
             options["llm_full_detect"] = False
+            options["batch_size"] = 50
 
     # Common options
     include_low = questionary.confirm(
