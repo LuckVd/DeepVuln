@@ -714,8 +714,28 @@ async def run_full_security_scan(
     if agent_engine:
         console.print("\n[bold cyan]Phase 3: AI Agent Analysis[/]")
 
+        # Language name to file extension mapping
+        lang_to_ext = {
+            "javascript": "js",
+            "typescript": "ts",
+            "python": "py",
+            "go": "go",
+            "java": "java",
+            "kotlin": "kt",
+            "rust": "rs",
+            "ruby": "rb",
+            "php": "php",
+            "csharp": "cs",
+            "cpp": "cpp",
+            "c": "c",
+        }
+
+        # Get file extension for primary language
+        lang_lower = primary_lang.lower()
+        ext = lang_to_ext.get(lang_lower, lang_lower)
+
         # Select target files (limit for performance)
-        all_files = list(source_path.rglob(f"*.{primary_lang.lower()}"))
+        all_files = list(source_path.rglob(f"*.{ext}"))
         target_files = [str(f) for f in all_files[:50] if f.name != "__init__.py"]
 
         if target_files:
