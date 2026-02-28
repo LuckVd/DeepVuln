@@ -549,8 +549,9 @@ async def run_full_security_scan(
         llm_model=model,
     )
 
-    # Get batch_size from options
-    batch_size = options.get("batch_size", 50)
+    # Get batch settings from options
+    batch_size = options.get("batch_size", 20)
+    batch_max_chars = options.get("batch_max_chars", 50000)
 
     # Use appropriate detection method
     if llm_full_detect and llm_client_for_detect:
@@ -558,6 +559,7 @@ async def run_full_security_scan(
         surface_report = await surface_detector.detect_llm_full(
             source_path,
             batch_size=batch_size,
+            max_batch_chars=batch_max_chars,
         )
     elif llm_detect and llm_client_for_detect:
         # LLM-enhanced detection (static + LLM fallback)
@@ -715,31 +717,88 @@ async def run_full_security_scan(
         console.print("\n[bold cyan]Phase 3: AI Agent Analysis[/]")
 
         # Language name to file extension mapping
-        lang_to_ext = {
-            "javascript": "js",
-            "typescript": "ts",
-            "python": "py",
-            "go": "go",
-            "java": "java",
-            "kotlin": "kt",
-            "rust": "rs",
-            "ruby": "rb",
-            "php": "php",
-            "csharp": "cs",
-            "cpp": "cpp",
-            "c": "c",
+        # Some languages have multiple extensions
+        lang_to_exts = {
+            "javascript": ["js", "jsx"],
+            "typescript": ["ts", "tsx"],
+            "python": ["py"],
+            "go": ["go"],
+            "java": ["java"],
+            "kotlin": ["kt"],
+            "rust": ["rs"],
+            "ruby": ["rb"],
+            "php": ["php"],
+            "csharp": ["cs"],
+            "cpp": ["cpp", "cc", "cxx"],
+            "c": ["c"],
         }
 
-        # Get file extension for primary language
-        lang_lower = primary_lang.lower()
-        ext = lang_to_ext.get(lang_lower, lang_lower)
+        # Get file extensions for ALL detected languages (not just primary)
+        all_exts = set()
+        for lang in tech_result.languages:
+            lang_name = lang.name.lower() if hasattr(lang, 'name') else str(lang).lower().replace("language.", "")
+            exts = lang_to_exts.get(lang_name, [lang_name])
+            all_exts.update(exts)
 
-        # Select target files (limit for performance)
-        all_files = list(source_path.rglob(f"*.{ext}"))
-        target_files = [str(f) for f in all_files[:50] if f.name != "__init__.py"]
+        # Also include primary language extensions as fallback
+        lang_lower = primary_lang.lower()
+        all_exts.update(lang_to_exts.get(lang_lower, [lang_lower]))
+
+        # Filter out excluded directories
+        excluded_dirs = {"node_modules", ".next", "dist", "build", "vendor", "__pycache__"}
+
+        def is_valid_file(f: Path) -> bool:
+            """Check if file is valid for analysis."""
+            return (
+                f.name != "__init__.py"
+                and not any(part in f.parts for part in excluded_dirs)
+                and f.exists()
+            )
+
+        # PRIORITY 1: Use entry point files from L1 detection
+        entry_point_files = set()
+        if surface_report and surface_report.entry_points:
+            for ep in surface_report.entry_points:
+                ep_file = source_path / ep.file
+                if is_valid_file(ep_file):
+                    entry_point_files.add(str(ep_file))
+
+        # PRIORITY 2: Collect all other source files as fallback
+        all_files = []
+        for ext in all_exts:
+            all_files.extend(source_path.rglob(f"*.{ext}"))
+
+        other_files = [
+            str(f) for f in all_files
+            if is_valid_file(f) and str(f) not in entry_point_files
+        ]
+
+        # Build target file list: entry points first, then fill with other files
+        max_files = 50
+        target_files = list(entry_point_files)[:max_files]
+
+        # Fill with other files if entry points < max_files
+        remaining_slots = max_files - len(target_files)
+        if remaining_slots > 0 and other_files:
+            target_files.extend(other_files[:remaining_slots])
+
+        # Log file selection info
+        entry_point_count = min(len(entry_point_files), max_files)
+        other_count = len(target_files) - entry_point_count
 
         if target_files:
-            console.print(f"  Analyzing {len(target_files)} files...")
+            if entry_point_count > 0 and other_count > 0:
+                console.print(
+                    f"  Analyzing {entry_point_count} entry point files"
+                    + f" + {other_count} other files"
+                    + f" (total: {len(target_files)})"
+                )
+            elif other_count > 0:
+                console.print(
+                    f"  Analyzing {other_count} other files (no entry points detected)"
+                )
+            else:
+                console.print(f"  Analyzing {len(target_files)} files...")
             try:
                 with create_progress() as progress:
                     task = progress.add_task("[cyan]Running AI analysis...", total=None)
@@ -1371,7 +1430,8 @@ def clean() -> None:
 @click.option("--llm-verify", is_flag=True, help="Enable LLM-assisted exploitability verification (Round 4)")
 @click.option("--llm-detect", is_flag=True, help="Enable LLM-assisted attack surface detection")
 @click.option("--llm-full-detect", is_flag=True, help="Enable FULL LLM-driven attack surface detection (no static detectors, any language/framework)")
-@click.option("--batch-size", default=None, type=int, help="Files per LLM batch for entry point detection (default: from config or 50)")
+@click.option("--batch-size", default=None, type=int, help="Files per LLM batch for entry point detection (deprecated, use --batch-max-chars)")
+@click.option("--batch-max-chars", default=None, type=int, help="Maximum characters per batch for LLM entry point detection (default: from config or 50000)")
 @click.option("--model", default=None, help="LLM model for agent and verification (required for LLM features, read from config if not specified)")
 @click.option("--no-deps", is_flag=True, help="Skip dependency scanning")
 def scan(
@@ -1385,6 +1445,7 @@ def scan(
     llm_detect: bool,
     llm_full_detect: bool,
     batch_size: int | None,
+    batch_max_chars: int | None,
     model: str,
     no_deps: bool,
 ) -> None:
@@ -1456,14 +1517,23 @@ def scan(
 
     source_path = Path(path)
 
-    # Resolve batch_size from CLI or config
+    # Resolve batch_size from CLI or config (deprecated)
     resolved_batch_size = batch_size
     if resolved_batch_size is None:
         try:
             from src.core.config import get_llm_batch_size
             resolved_batch_size = get_llm_batch_size()
         except Exception:
-            resolved_batch_size = 50  # Default fallback
+            resolved_batch_size = 20  # Default fallback
+
+    # Resolve batch_max_chars from CLI or config
+    resolved_batch_max_chars = batch_max_chars
+    if resolved_batch_max_chars is None:
+        try:
+            from src.core.config import get_llm_batch_max_chars
+            resolved_batch_max_chars = get_llm_batch_max_chars()
+        except Exception:
+            resolved_batch_max_chars = 50000  # Default fallback
 
     options = {
         "include_low_severity": include_low,
@@ -1474,6 +1544,7 @@ def scan(
         "llm_detect": llm_detect,
         "llm_full_detect": llm_full_detect,
         "batch_size": resolved_batch_size,
+        "batch_max_chars": resolved_batch_max_chars,
         "model": resolved_model,
         "no_deps": no_deps,
     }

@@ -8,13 +8,13 @@ Two-phase approach:
 2. Phase 2: Entry point detection - LLM analyzes code to find entry points
 """
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from src.core.logger.logger import get_logger
+from src.core.utils import JSONParseError, robust_json_loads
 from src.layers.l1_intelligence.attack_surface.models import (
     EntryPoint,
     EntryPointType,
@@ -393,8 +393,14 @@ class ProjectTreeGenerator:
 
         for ext in self.SOURCE_EXTENSIONS:
             for file_path in source_path.rglob(f"*{ext}"):
-                # Skip excluded directories
-                if any(part.lower() in self.SKIP_DIRS for part in file_path.parts):
+                # Skip excluded directories - only check relative path parts
+                # to avoid false positives from parent directory names
+                try:
+                    relative_path = file_path.relative_to(source_path)
+                    if any(part.lower() in self.SKIP_DIRS for part in relative_path.parts):
+                        continue
+                except ValueError:
+                    # File is not under source_path, skip it
                     continue
                 # Skip test files (optional, can be configured)
                 if "test" in file_path.name.lower() or "spec" in file_path.name.lower():
@@ -481,14 +487,16 @@ class LLMFullDetector:
     async def detect_full(
         self,
         source_path: Path,
-        batch_size: int = 50,
+        batch_size: int = 20,
+        max_batch_chars: int = 50000,
         use_batch: bool = True,
     ) -> list[EntryPoint]:
         """Run full two-phase LLM detection.
 
         Args:
             source_path: Path to source code.
-            batch_size: Number of files per batch (default: 50).
+            batch_size: Number of files per batch (deprecated, use max_batch_chars).
+            max_batch_chars: Maximum characters per batch (default: 50000).
             use_batch: Use batch analysis mode (default: True).
 
         Returns:
@@ -526,8 +534,13 @@ class LLMFullDetector:
 
         # Phase 2: Analyze files (batch or individual)
         if use_batch and len(target_files) > 1:
-            self.logger.info(f"Phase 2: Batch analyzing {len(target_files)} files (batch_size={batch_size})...")
-            all_entry_points = await self._analyze_files_batch(target_files, source_path, batch_size)
+            self.logger.info(
+                f"Phase 2: Batch analyzing {len(target_files)} files "
+                f"(max_batch_chars={max_batch_chars})..."
+            )
+            all_entry_points = await self._analyze_files_batch(
+                target_files, source_path, max_batch_chars=max_batch_chars
+            )
         else:
             self.logger.info(f"Phase 2: Analyzing {len(target_files)} files individually...")
             for i, file_path in enumerate(target_files, 1):
@@ -550,33 +563,40 @@ class LLMFullDetector:
         self,
         files: list[Path],
         source_path: Path,
-        batch_size: int = 50,
+        max_batch_chars: int = 50000,
     ) -> list[EntryPoint]:
-        """Phase 2: Analyze multiple files in batches.
+        """Phase 2: Analyze multiple files in batches using character-based batching.
 
-        This method groups files into batches and sends them together to the LLM,
-        significantly reducing the number of API calls.
+        This method groups files into batches based on total character count,
+        ensuring complete files are included in each batch (no mid-file truncation).
+        This prevents LLM response truncation due to output token limits.
 
         Args:
             files: List of files to analyze.
             source_path: Root source path.
-            batch_size: Number of files per batch (default: 50).
+            max_batch_chars: Maximum characters per batch (default: 50000).
 
         Returns:
             List of detected entry points.
         """
         all_entry_points: list[EntryPoint] = []
 
-        # Split files into batches
-        batches = [
-            files[i:i + batch_size]
-            for i in range(0, len(files), batch_size)
-        ]
+        # Split files into batches by character count
+        batches = self._split_files_by_chars(files, source_path, max_batch_chars)
 
-        self.logger.info(f"Split {len(files)} files into {len(batches)} batch(es)")
+        self.logger.info(f"Split {len(files)} files into {len(batches)} batch(es) by character limit")
 
         for batch_num, batch_files in enumerate(batches, 1):
-            self.logger.info(f"Analyzing batch {batch_num}/{len(batches)} ({len(batch_files)} files)")
+            # Calculate actual character count for this batch
+            batch_chars = sum(
+                min(len(f.read_text(encoding="utf-8")), self.max_file_size)
+                for f in batch_files
+                if f.exists()
+            )
+            self.logger.info(
+                f"Analyzing batch {batch_num}/{len(batches)} "
+                f"({len(batch_files)} files, ~{batch_chars} chars)"
+            )
 
             try:
                 # Build batch content
@@ -610,6 +630,59 @@ class LLMFullDetector:
                         self.logger.error(f"Failed to analyze {file_path}: {inner_e}")
 
         return all_entry_points
+
+    def _split_files_by_chars(
+        self,
+        files: list[Path],
+        source_path: Path,
+        max_chars: int,
+    ) -> list[list[Path]]:
+        """Split files into batches by character count.
+
+        This ensures:
+        1. Each batch doesn't exceed max_chars
+        2. Complete files are included (no mid-file truncation)
+        3. If a single file exceeds max_chars, it gets its own batch
+
+        Args:
+            files: List of files to split.
+            source_path: Root source path.
+            max_chars: Maximum characters per batch.
+
+        Returns:
+            List of file batches.
+        """
+        batches: list[list[Path]] = []
+        current_batch: list[Path] = []
+        current_chars = 0
+
+        for file_path in files:
+            try:
+                # Read file content and count characters
+                content = file_path.read_text(encoding="utf-8")
+                file_chars = min(len(content), self.max_file_size)
+
+                # If adding this file would exceed the limit
+                if current_chars + file_chars > max_chars and current_batch:
+                    # Start a new batch
+                    batches.append(current_batch)
+                    current_batch = []
+                    current_chars = 0
+
+                # Add file to current batch (even if it alone exceeds max_chars)
+                current_batch.append(file_path)
+                current_chars += file_chars
+
+            except Exception as e:
+                self.logger.warning(f"Failed to read {file_path} for batching: {e}")
+                # Still add the file to the batch, it will be handled in _build_batch_content
+                current_batch.append(file_path)
+
+        # Add the last batch if not empty
+        if current_batch:
+            batches.append(current_batch)
+
+        return batches
 
     def _build_batch_content(self, files: list[Path], source_path: Path) -> str:
         """Build content string for batch analysis.
@@ -662,13 +735,8 @@ Language: {language}
         entry_points = []
 
         try:
-            # Extract JSON from response
-            json_match = re.search(r"\{[\s\S]*\}", response)
-            if not json_match:
-                self.logger.warning("No JSON found in batch response")
-                return entry_points
-
-            data = json.loads(json_match.group())
+            # Use robust JSON parser to handle GLM-5's unstable JSON format
+            data = robust_json_loads(response)
 
             for ep_data in data.get("entry_points", []):
                 # Get file path from response
@@ -689,8 +757,8 @@ Language: {language}
                 f"(files_analyzed: {data.get('files_analyzed', 'unknown')})"
             )
 
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse batch response: {e}")
+        except JSONParseError as e:
+            self.logger.warning(f"Failed to parse batch response: {e}")
         except Exception as e:
             self.logger.error(f"Error parsing batch response: {e}")
 
@@ -848,13 +916,8 @@ Language: {language}
         analysis = ProjectStructureAnalysis()
 
         try:
-            # Extract JSON from response
-            json_match = re.search(r"\{[\s\S]*\}", response)
-            if not json_match:
-                self.logger.warning("No JSON found in structure analysis response")
-                return analysis
-
-            data = json.loads(json_match.group())
+            # Use robust JSON parser to handle GLM-5's unstable JSON format
+            data = robust_json_loads(response)
 
             analysis.target_files = data.get("target_files", [])
             analysis.target_dirs = data.get("target_dirs", [])
@@ -862,8 +925,8 @@ Language: {language}
             analysis.detected_frameworks = data.get("detected_frameworks", [])
             analysis.reasoning = data.get("reasoning", "")
 
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse structure analysis response: {e}")
+        except JSONParseError as e:
+            self.logger.warning(f"Failed to parse structure analysis response: {e}")
         except Exception as e:
             self.logger.error(f"Error parsing structure analysis response: {e}")
 
@@ -882,13 +945,8 @@ Language: {language}
         entry_points = []
 
         try:
-            # Extract JSON from response
-            json_match = re.search(r"\{[\s\S]*\}", response)
-            if not json_match:
-                self.logger.warning("No JSON found in entry points response")
-                return entry_points
-
-            data = json.loads(json_match.group())
+            # Use robust JSON parser to handle GLM-5's unstable JSON format
+            data = robust_json_loads(response)
 
             for ep_data in data.get("entry_points", []):
                 entry = self._create_entry_point(ep_data, file_path)
@@ -899,8 +957,8 @@ Language: {language}
                 f"LLM detected {len(entry_points)} entry points in {file_path.name}"
             )
 
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse entry points response: {e}")
+        except JSONParseError as e:
+            self.logger.warning(f"Failed to parse entry points response: {e}")
         except Exception as e:
             self.logger.error(f"Error parsing entry points response: {e}")
 

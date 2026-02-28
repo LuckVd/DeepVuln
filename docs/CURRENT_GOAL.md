@@ -8,11 +8,11 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | 实现批量 LLM 入口点检测，每次提交 50 个文件 |
+| **任务** | 修复 L3 Agent 文件选择逻辑：优先分析 L1 检测到的入口点文件 |
 | **状态** | completed |
+| **完成日期** | 2026-02-28 |
 | **优先级** | high |
-| **创建日期** | 2026-02-27 |
-| **完成日期** | 2026-02-27 |
+| **创建日期** | 2026-02-28 |
 
 ---
 
@@ -20,45 +20,43 @@
 
 ### 现状问题
 
-当前 `LLMFullDetector` 的 Phase 2 逐个文件调用 LLM：
-- 50 个文件 = 50 次 LLM 调用
-- 每次调用约 3 秒
-- 总耗时约 150 秒（2.5 分钟）
+经过调试发现，L3 Agent 分析的文件与 L1 检测到的入口点文件**完全不重叠**：
+
+```
+L1 入口点文件 (23 个): backend/api/**/*.go
+L3 分析文件 (50 个): backend/pro_imports.go, sdk/rag/*.go, ...
+重叠: 0 个文件！
+```
+
+**根本原因**：
+- `rglob("*.go")` 按目录顺序返回文件
+- `backend/api/` 目录排在 `backend/pro_imports.go` 和 `sdk/rag/` 之后
+- L3 选取前 50 个文件，完全错过了入口点文件
 
 ### 目标
 
-实现批量 LLM 分析，每次提交多个文件（默认 50 个）：
-- 减少调用次数
-- 预期加速 10-15 倍
-- 批次大小可配置
+修改 `src/cli/main.py` 的 Phase 3，让 L3 Agent 优先分析 L1 检测到的入口点文件：
+
+1. 优先使用 L1 检测到的入口点文件
+2. 如果入口点文件不足 50 个，再用其他文件填充
+3. 确保日志显示正在分析入口点文件
 
 ---
 
 ## 完成标准
 
-### P1: 核心实现
-- [x] 新增 `BATCH_ENTRY_POINT_DETECTION_PROMPT` 模板
-- [x] 新增 `_analyze_files_batch()` 方法
-- [x] 新增 `_build_batch_content()` 方法
-- [x] 新增 `_parse_batch_response()` 方法
+### P1: 核心修复
+- [x] 修改 Phase 3 文件选择逻辑
+- [x] 优先使用 `surface_report.entry_points` 中的文件
+- [x] 添加回退逻辑（如果 L1 未运行或无入口点）
 
-### P2: 配置支持
-- [x] 添加 `config.llm.batch_size` 配置项
-- [x] 添加 `get_llm_batch_size()` 函数
-- [x] 添加 `--batch-size` CLI 参数
-- [x] 添加交互式模式 batch_size 询问
+### P2: 日志改进
+- [x] 显示"Analyzing N entry point files"
+- [x] 如果有填充文件，显示"and M other files"
 
-### P3: 集成修改
-- [x] 修改 `detect_full()` 支持批量模式
-- [x] 修改 `detect_llm_full()` 传递 batch_size
-- [x] 保持向后兼容（保留逐文件分析选项）
-
-### P4: 测试验证
-- [x] 单元测试：批量内容构建
-- [x] 单元测试：批量响应解析
-- [x] 单元测试：小批量分析
-- [x] 单元测试：多批次分析
-- [x] 所有测试通过（83 tests）
+### P3: 验证
+- [x] 重新运行扫描，确认 L3 分析入口点文件
+- [x] 确认 Agent 能检测到漏洞（验证脚本通过）
 
 ---
 
@@ -66,12 +64,7 @@
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/layers/l1_intelligence/attack_surface/llm_detector.py` | 修改 | 添加批量分析方法 |
-| `src/core/config/__init__.py` | 修改 | 添加 `get_llm_batch_size()` |
-| `config.example.toml` | 修改 | 添加 `batch_size` 配置示例 |
-| `src/cli/main.py` | 修改 | 添加 `--batch-size` 参数 |
-| `src/cli/prompts.py` | 修改 | 添加交互式 batch_size 询问 |
-| `tests/unit/test_l1/test_llm_detector.py` | 修改 | 添加批量分析测试 |
+| `src/cli/main.py` | 修改 | Phase 3 文件选择逻辑 |
 
 ---
 
@@ -79,14 +72,24 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-02-27 | 设置新目标：批量 LLM 入口点检测 |
-| 2026-02-27 21:40 | feat(l1): add batch LLM entry point detection for 15x speedup |
+| 2026-02-28 22:30 | 创建调试脚本发现 L1/L3 文件重叠为 0 |
+| 2026-02-28 22:35 | 确认根本原因：文件选择逻辑未考虑入口点 |
+| 2026-02-28 22:40 | 设置目标，准备实现修复 |
+| 2026-02-28 22:45 | 修改 main.py Phase 3 文件选择逻辑 |
+| 2026-02-28 22:50 | 验证通过：L1/L3 文件重叠从 0 提升到 12 |
 
 ---
 
-## 验证结果
+## 相关调试文件
 
-1. ✅ 50 个文件只需 1-2 次 LLM 调用
-2. ✅ 检测结果与逐文件分析一致
-3. ✅ 批次大小可从配置文件设置
-4. ✅ 现有测试不回归（83 tests pass）
+- `debug_agent_response.py` - 测试 GLM-5 漏洞检测能力（证实 GLM-5 能检测漏洞）
+- `debug_context_builder.py` - 测试 ContextBuilder 输出
+- `debug_file_mismatch.py` - 分析 L1/L3 文件重叠问题
+
+---
+
+## 预期效果
+
+- Agent 优先分析 HTTP/RPC/MQ 等入口点代码
+- 提高漏洞检出率（入口点更可能包含安全问题）
+- 与 L1 检测结果形成有效联动

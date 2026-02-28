@@ -6,14 +6,13 @@ complementing pattern-based tools like Semgrep and CodeQL with semantic understa
 """
 
 import asyncio
-import json
 import os
-import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from src.core.utils import JSONParseError, robust_json_loads
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
 from src.layers.l3_analysis.llm.client import LLMClient, LLMError, LLMProvider
 from src.layers.l3_analysis.llm.openai_client import OpenAIClient
@@ -505,25 +504,8 @@ class OpenCodeAgent(BaseEngine):
         findings = []
 
         try:
-            # Extract JSON from response (may be wrapped in markdown)
-            json_match = re.search(
-                r"```(?:json)?\s*([\s\S]*?)```",
-                response,
-                re.IGNORECASE
-            )
-
-            if json_match:
-                json_str = json_match.group(1).strip()
-            else:
-                # Try to find raw JSON
-                json_start = response.find("{")
-                json_end = response.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    json_str = response[json_start:json_end]
-                else:
-                    return []
-
-            data = json.loads(json_str)
+            # Use robust JSON parser to handle GLM-5's unstable JSON format
+            data = robust_json_loads(response)
 
             # Parse findings array
             for item in data.get("findings", []):
@@ -535,7 +517,7 @@ class OpenCodeAgent(BaseEngine):
                 if finding:
                     findings.append(finding)
 
-        except json.JSONDecodeError:
+        except JSONParseError:
             # Try to extract findings from unstructured response
             pass
 
