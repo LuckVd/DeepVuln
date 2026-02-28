@@ -159,6 +159,7 @@ class AttackSurfaceDetector:
         source_path: Path,
         max_files: int = 50,
         batch_size: int = 50,
+        max_batch_chars: int = 30000,
     ) -> AttackSurfaceReport:
         """Detect attack surface using full LLM-driven two-phase detection.
 
@@ -172,7 +173,8 @@ class AttackSurfaceDetector:
         Args:
             source_path: Path to source code.
             max_files: Maximum number of files to analyze in Phase 2.
-            batch_size: Number of files per LLM batch (default: 50).
+            batch_size: Number of files per LLM batch (deprecated, use max_batch_chars).
+            max_batch_chars: Maximum characters per batch (default: 30000).
 
         Returns:
             Attack surface report.
@@ -206,6 +208,7 @@ class AttackSurfaceDetector:
             entry_points = await llm_detector.detect_full(
                 source_path,
                 batch_size=batch_size,
+                max_batch_chars=max_batch_chars,
                 use_batch=True,
             )
 

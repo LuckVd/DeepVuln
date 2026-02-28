@@ -339,9 +339,24 @@ def get_llm_batch_size() -> int:
     """Get LLM batch size from config.
 
     Used for batch analysis in entry point detection.
+    Note: This is deprecated in favor of batch_max_chars.
 
     Returns:
-        Number of files per batch (default: 50).
+        Number of files per batch (default: 20).
     """
     config = load_config()
-    return config.get("llm", {}).get("batch_size", 50)
+    return config.get("llm", {}).get("batch_size", 20)
+
+
+def get_llm_batch_max_chars() -> int:
+    """Get LLM batch max characters from config.
+
+    Used for character-based batching in entry point detection.
+    This ensures each batch doesn't exceed the character limit,
+    preventing LLM response truncation.
+
+    Returns:
+        Maximum characters per batch (default: 30000).
+    """
+    config = load_config()
+    return config.get("llm", {}).get("batch_max_chars", 30000)

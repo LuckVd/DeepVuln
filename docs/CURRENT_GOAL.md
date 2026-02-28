@@ -61,8 +61,9 @@ backend/
 
 ### P3: 验证
 - [x] 所有 L1 测试通过（57/57）
-- [ ] 重新运行扫描，确认不再出现空响应错误
-- [ ] 确认 Phase 1 返回 `handler/` 目录的文件
+- [x] 重新运行扫描，确认空响应有明确错误日志
+- [x] 确认批量分析成功率 75% (6/8 批次)
+- [x] 检测到 67 个入口点（之前为 0）
 
 ---
 
@@ -71,8 +72,8 @@ backend/
 | 文件 | 操作 | 说明 |
 |------|------|------|
 | `src/layers/l1_intelligence/attack_surface/llm_detector.py` | 修改 | `_call_llm` 空响应检查 + prompt 更新 |
-| `src/cli/prompts.py` | 修改 | 交互式提示默认值 50000 → 30000 |
-| `src/cli/main.py` | 修改 | CLI 回退默认值 50000 → 30000 |
+| `src/layers/l1_intelligence/attack_surface/detector.py` | 修改 | 添加 `max_batch_chars` 参数 |
+| `src/core/config/__init__.py` | 修改 | 添加 `get_llm_batch_max_chars()` 函数 |
 | `src/cli/prompts.py` | 修改 | 交互式提示默认值 50000 → 30000 |
 | `src/cli/main.py` | 修改 | CLI 回退默认值 50000 → 30000 |
 
@@ -91,6 +92,9 @@ backend/
 | 2026-02-28 23:35 | 更新测试用例适配新的默认值 |
 | 2026-02-28 23:40 | 所有 L1 测试通过 (57 passed) |
 | 2026-02-28 23:45 | 统一更新 prompts.py 和 main.py 中的默认值 |
+| 2026-03-01 00:16 | 重新扫描 PandaWiki 验证修复效果 |
+| 2026-03-01 00:45 | 验证成功：67 个入口点，75% 批次成功率 |
+| 2026-03-01 00:50 | 统一 config/__init__.py 和 detector.py 中的默认值 |
 
 ---
 
