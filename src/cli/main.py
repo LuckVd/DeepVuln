@@ -551,7 +551,7 @@ async def run_full_security_scan(
 
     # Get batch settings from options
     batch_size = options.get("batch_size", 20)
-    batch_max_chars = options.get("batch_max_chars", 50000)
+    batch_max_chars = options.get("batch_max_chars", 30000)
 
     # Use appropriate detection method
     if llm_full_detect and llm_client_for_detect:
@@ -1431,7 +1431,7 @@ def clean() -> None:
 @click.option("--llm-detect", is_flag=True, help="Enable LLM-assisted attack surface detection")
 @click.option("--llm-full-detect", is_flag=True, help="Enable FULL LLM-driven attack surface detection (no static detectors, any language/framework)")
 @click.option("--batch-size", default=None, type=int, help="Files per LLM batch for entry point detection (deprecated, use --batch-max-chars)")
-@click.option("--batch-max-chars", default=None, type=int, help="Maximum characters per batch for LLM entry point detection (default: from config or 50000)")
+@click.option("--batch-max-chars", default=None, type=int, help="Maximum characters per batch for LLM entry point detection (default: from config or 30000)")
 @click.option("--model", default=None, help="LLM model for agent and verification (required for LLM features, read from config if not specified)")
 @click.option("--no-deps", is_flag=True, help="Skip dependency scanning")
 def scan(
@@ -1533,7 +1533,7 @@ def scan(
             from src.core.config import get_llm_batch_max_chars
             resolved_batch_max_chars = get_llm_batch_max_chars()
         except Exception:
-            resolved_batch_max_chars = 50000  # Default fallback
+            resolved_batch_max_chars = 30000  # Default fallback
 
     options = {
         "include_low_severity": include_low,

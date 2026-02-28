@@ -8,55 +8,61 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | 修复 L3 Agent 文件选择逻辑：优先分析 L1 检测到的入口点文件 |
-| **状态** | completed |
-| **完成日期** | 2026-02-28 |
+| **任务** | 修复 L1 批量分析的两个问题：空响应处理 + 文件选择优先级 |
+| **状态** | in_progress |
 | **优先级** | high |
 | **创建日期** | 2026-02-28 |
 
 ---
 
-## 背景
+## 问题背景
 
-### 现状问题
-
-经过调试发现，L3 Agent 分析的文件与 L1 检测到的入口点文件**完全不重叠**：
+### 问题 1: 空响应导致 JSON 解析失败
 
 ```
-L1 入口点文件 (23 个): backend/api/**/*.go
-L3 分析文件 (50 个): backend/pro_imports.go, sdk/rag/*.go, ...
-重叠: 0 个文件！
+WARNING  Failed to parse batch response: Failed to parse JSON after all recovery attempts: Expecting value: line 1 column 1 (char 0)
 ```
 
-**根本原因**：
-- `rglob("*.go")` 按目录顺序返回文件
-- `backend/api/` 目录排在 `backend/pro_imports.go` 和 `sdk/rag/` 之后
-- L3 选取前 50 个文件，完全错过了入口点文件
+**原因**：
+- GLM-5 在某些情况下返回空字符串
+- `_call_llm` 方法没有检查空响应
+- 30 个文件 (~48000 字符) 可能超过 GLM-5 处理能力
 
-### 目标
+### 问题 2: 文件选择优先级错误
 
-修改 `src/cli/main.py` 的 Phase 3，让 L3 Agent 优先分析 L1 检测到的入口点文件：
+**PandaWiki 项目结构**：
+```
+backend/
+├── api/           ← 只有 DTO 结构体定义（无入口点）
+├── handler/       ← 实际的 HTTP 处理器（有入口点）
+```
 
-1. 优先使用 L1 检测到的入口点文件
-2. 如果入口点文件不足 50 个，再用其他文件填充
-3. 确保日志显示正在分析入口点文件
+**当前行为**：
+- Phase 1 返回 `api/**/*.go` 文件
+- 这些文件只包含 struct 定义，没有入口点
+
+**期望行为**：
+- Phase 1 优先返回 `handler/**/*.go` 文件
+- 这些文件包含实际的 HTTP 处理器
 
 ---
 
 ## 完成标准
 
-### P1: 核心修复
-- [x] 修改 Phase 3 文件选择逻辑
-- [x] 优先使用 `surface_report.entry_points` 中的文件
-- [x] 添加回退逻辑（如果 L1 未运行或无入口点）
+### P1: 空响应处理
+- [x] 在 `_call_llm` 中添加空响应检查和警告日志
+- [x] 减少默认 `batch_max_chars` 从 50000 到 30000
+- [x] 空响应时抛出明确异常而非静默失败
 
-### P2: 日志改进
-- [x] 显示"Analyzing N entry point files"
-- [x] 如果有填充文件，显示"and M other files"
+### P2: 文件选择优先级
+- [x] 更新 `PROJECT_STRUCTURE_PROMPT`，明确指示优先级
+- [x] 优先分析 `handler/`、`controller/`、`route/` 目录
+- [x] 跳过 `dto/`、`model/`、`schema/`、`types/` 目录
 
 ### P3: 验证
-- [x] 重新运行扫描，确认 L3 分析入口点文件
-- [x] 确认 Agent 能检测到漏洞（验证脚本通过）
+- [x] 所有 L1 测试通过（57/57）
+- [ ] 重新运行扫描，确认不再出现空响应错误
+- [ ] 确认 Phase 1 返回 `handler/` 目录的文件
 
 ---
 
@@ -64,7 +70,11 @@ L3 分析文件 (50 个): backend/pro_imports.go, sdk/rag/*.go, ...
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/cli/main.py` | 修改 | Phase 3 文件选择逻辑 |
+| `src/layers/l1_intelligence/attack_surface/llm_detector.py` | 修改 | `_call_llm` 空响应检查 + prompt 更新 |
+| `src/cli/prompts.py` | 修改 | 交互式提示默认值 50000 → 30000 |
+| `src/cli/main.py` | 修改 | CLI 回退默认值 50000 → 30000 |
+| `src/cli/prompts.py` | 修改 | 交互式提示默认值 50000 → 30000 |
+| `src/cli/main.py` | 修改 | CLI 回退默认值 50000 → 30000 |
 
 ---
 
@@ -72,24 +82,20 @@ L3 分析文件 (50 个): backend/pro_imports.go, sdk/rag/*.go, ...
 
 | 时间 | 进展 |
 |------|------|
-| 2026-02-28 22:30 | 创建调试脚本发现 L1/L3 文件重叠为 0 |
-| 2026-02-28 22:35 | 确认根本原因：文件选择逻辑未考虑入口点 |
-| 2026-02-28 22:40 | 设置目标，准备实现修复 |
-| 2026-02-28 22:45 | 修改 main.py Phase 3 文件选择逻辑 |
-| 2026-02-28 22:50 | 验证通过：L1/L3 文件重叠从 0 提升到 12 |
-
----
-
-## 相关调试文件
-
-- `debug_agent_response.py` - 测试 GLM-5 漏洞检测能力（证实 GLM-5 能检测漏洞）
-- `debug_context_builder.py` - 测试 ContextBuilder 输出
-- `debug_file_mismatch.py` - 分析 L1/L3 文件重叠问题
+| 2026-02-28 23:00 | 调试发现 GLM-5 返回空响应 |
+| 2026-02-28 23:10 | 确认 Phase 1 prompt 没有优先 handler/ 目录 |
+| 2026-02-28 23:15 | 设置目标，准备实现修复 |
+| 2026-02-28 23:20 | 修改 `_call_llm` 添加空响应检查 |
+| 2026-02-28 23:25 | 修改 `max_batch_chars` 默认值从 50000 到 30000 |
+| 2026-02-28 23:30 | 修改 `PROJECT_STRUCTURE_PROMPT` 添加优先级指令 |
+| 2026-02-28 23:35 | 更新测试用例适配新的默认值 |
+| 2026-02-28 23:40 | 所有 L1 测试通过 (57 passed) |
+| 2026-02-28 23:45 | 统一更新 prompts.py 和 main.py 中的默认值 |
 
 ---
 
 ## 预期效果
 
-- Agent 优先分析 HTTP/RPC/MQ 等入口点代码
-- 提高漏洞检出率（入口点更可能包含安全问题）
-- 与 L1 检测结果形成有效联动
+- GLM-5 不再因输入太长而返回空响应
+- Phase 1 正确选择 `handler/` 目录的文件
+- 入口点检测成功率提升

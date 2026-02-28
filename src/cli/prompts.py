@@ -379,7 +379,8 @@ def prompt_scan_options() -> dict[str, Any]:
         "llm_verify": False,
         "llm_detect": False,
         "llm_full_detect": False,
-        "batch_size": 50,
+        "batch_size": 20,
+        "batch_max_chars": 30000,
         "model": resolved_model,
     }
 
@@ -434,19 +435,19 @@ def prompt_scan_options() -> dict[str, Any]:
             # If full LLM mode is enabled, disable regular llm_detect
             if llm_full_detect:
                 options["llm_detect"] = False
-                # Ask about batch size for LLM full mode
-                batch_size = questionary.text(
-                    "Batch size for LLM analysis? (files per batch, default: 50)",
-                    default="50",
+                # Ask about batch max chars for LLM full mode
+                batch_max_chars = questionary.text(
+                    "Max characters per batch for LLM analysis? (default: 30000)",
+                    default="30000",
                     style=CUSTOM_STYLE,
                     validate=lambda x: x.isdigit() and int(x) > 0 or "Please enter a positive number",
                 ).ask()
-                options["batch_size"] = int(batch_size) if batch_size else 50
+                options["batch_max_chars"] = int(batch_max_chars) if batch_max_chars else 30000
             else:
-                options["batch_size"] = 50
+                options["batch_max_chars"] = 30000
         else:
             options["llm_full_detect"] = False
-            options["batch_size"] = 50
+            options["batch_max_chars"] = 30000
 
     elif scan_type == "full":
         # Full scan with all engines
@@ -472,19 +473,19 @@ def prompt_scan_options() -> dict[str, Any]:
             # If full LLM mode is enabled, disable regular llm_detect
             if llm_full_detect:
                 options["llm_detect"] = False
-                # Ask about batch size for LLM full mode
-                batch_size = questionary.text(
-                    "Batch size for LLM analysis? (files per batch, default: 50)",
-                    default="50",
+                # Ask about batch max chars for LLM full mode
+                batch_max_chars = questionary.text(
+                    "Max characters per batch for LLM analysis? (default: 30000)",
+                    default="30000",
                     style=CUSTOM_STYLE,
                     validate=lambda x: x.isdigit() and int(x) > 0 or "Please enter a positive number",
                 ).ask()
-                options["batch_size"] = int(batch_size) if batch_size else 50
+                options["batch_max_chars"] = int(batch_max_chars) if batch_max_chars else 30000
             else:
-                options["batch_size"] = 50
+                options["batch_max_chars"] = 30000
         else:
             options["llm_full_detect"] = False
-            options["batch_size"] = 50
+            options["batch_max_chars"] = 30000
 
     # Common options
     include_low = questionary.confirm(

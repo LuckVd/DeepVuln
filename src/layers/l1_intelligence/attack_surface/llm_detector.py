@@ -78,6 +78,20 @@ Entry point types to look for:
 - CLI commands exposed to external users
 - Lambda/Serverless function handlers
 
+**IMPORTANT PRIORITY ORDER** (analyze these directories first):
+1. handler/, handlers/ - Usually contain actual HTTP handler implementations
+2. controller/, controllers/ - Usually contain controller logic
+3. route/, routes/, router/ - Route definitions
+4. api/ (subdirectories with handler files, NOT dto/schema files)
+5. service/ (for RPC/service implementations)
+6. internal/handler/, internal/controller/ - Internal implementations
+
+**SKIP these directories** (they usually contain data definitions, NOT entry points):
+- dto/, model/, models/, schema/, schemas/, types/, entities/
+- sdk/, client/ (usually client-side code)
+- test/, tests/, spec/, __tests__/
+- config/, configs/, conf/
+
 Project: {project_name}
 
 Project Structure:
@@ -88,10 +102,11 @@ Project Structure:
 Detected Languages: {languages}
 
 Instructions:
-1. Identify files that likely contain entry point definitions
-2. Identify directories that likely contain handler/controller code
+1. **PRIORITY**: Look in handler/, controller/, route/ directories FIRST
+2. Identify files that contain ACTUAL handler functions (not just DTO/struct definitions)
 3. Skip test files, config files, utility files, and data files
-4. Consider the project's language and common framework patterns
+4. Skip directories that only contain data definitions (dto/, model/, schema/)
+5. Consider the project's language and common framework patterns
 
 Return JSON format:
 {{
@@ -488,7 +503,7 @@ class LLMFullDetector:
         self,
         source_path: Path,
         batch_size: int = 20,
-        max_batch_chars: int = 50000,
+        max_batch_chars: int = 30000,
         use_batch: bool = True,
     ) -> list[EntryPoint]:
         """Run full two-phase LLM detection.
@@ -496,7 +511,7 @@ class LLMFullDetector:
         Args:
             source_path: Path to source code.
             batch_size: Number of files per batch (deprecated, use max_batch_chars).
-            max_batch_chars: Maximum characters per batch (default: 50000).
+            max_batch_chars: Maximum characters per batch (default: 30000).
             use_batch: Use batch analysis mode (default: True).
 
         Returns:
@@ -563,7 +578,7 @@ class LLMFullDetector:
         self,
         files: list[Path],
         source_path: Path,
-        max_batch_chars: int = 50000,
+        max_batch_chars: int = 30000,
     ) -> list[EntryPoint]:
         """Phase 2: Analyze multiple files in batches using character-based batching.
 
@@ -574,7 +589,7 @@ class LLMFullDetector:
         Args:
             files: List of files to analyze.
             source_path: Root source path.
-            max_batch_chars: Maximum characters per batch (default: 50000).
+            max_batch_chars: Maximum characters per batch (default: 30000).
 
         Returns:
             List of detected entry points.
@@ -884,11 +899,14 @@ Language: {language}
 
         Returns:
             LLM response text.
+
+        Raises:
+            ValueError: If LLM returns empty response.
         """
         # Try our custom OpenAIClient (has complete method)
         if hasattr(self.llm_client, "complete"):
             response = await self.llm_client.complete(prompt)
-            return response.content
+            content = response.content
         # Try OpenAI-style client with chat.completions
         elif hasattr(self.llm_client, "chat") and hasattr(self.llm_client.chat, "completions"):
             response = await self.llm_client.chat.completions.create(
@@ -896,13 +914,23 @@ Language: {language}
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
         # Try LangChain-style client
         elif hasattr(self.llm_client, "ainvoke"):
             response = await self.llm_client.ainvoke(prompt)
-            return str(response)
+            content = str(response)
         else:
             raise ValueError("Unsupported LLM client type")
+
+        # Check for empty response
+        if not content or not content.strip():
+            prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
+            self.logger.warning(
+                f"LLM returned empty response. Prompt preview: {prompt_preview}"
+            )
+            raise ValueError("LLM returned empty response - input may be too long or model refused to respond")
+
+        return content
 
     def _parse_structure_response(self, response: str) -> ProjectStructureAnalysis:
         """Parse LLM response for project structure analysis.
