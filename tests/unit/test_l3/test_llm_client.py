@@ -346,23 +346,27 @@ class TestLLMExceptions:
         """Test LLMConfigurationError."""
         error = LLMConfigurationError("API key not configured")
         assert isinstance(error, LLMError)
-        assert str(error) == "API key not configured"
+        assert "API key not configured" in str(error)
+        assert error.suggestion == "Check your API key and configuration settings."
 
     def test_llm_rate_limit_error(self):
         """Test LLMRateLimitError."""
         error = LLMRateLimitError("Rate limit exceeded", retry_after=60)
         assert isinstance(error, LLMError)
         assert error.retry_after == 60
+        assert error.is_retryable is True
 
     def test_llm_timeout_error(self):
         """Test LLMTimeoutError."""
         error = LLMTimeoutError("Request timed out")
         assert isinstance(error, LLMError)
+        assert error.is_retryable is True
 
     def test_llm_response_error(self):
         """Test LLMResponseError."""
         error = LLMResponseError("Failed to parse response")
         assert isinstance(error, LLMError)
+        assert error.is_retryable is False
 
 
 class TestLLMProviderEnum:

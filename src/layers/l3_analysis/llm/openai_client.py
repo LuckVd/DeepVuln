@@ -17,12 +17,14 @@ import httpx
 from src.layers.l3_analysis.llm.client import (
     LLMClient,
     LLMConfigurationError,
+    LLMEmptyResponseError,
     LLMError,
     LLMProvider,
     LLMRateLimitError,
     LLMResponse,
     LLMResponseError,
     LLMTimeoutError,
+    LLMTruncatedResponseError,
     TokenUsage,
 )
 
@@ -217,6 +219,14 @@ class OpenAIClient(LLMClient):
         if "frequency_penalty" in options:
             body["frequency_penalty"] = options["frequency_penalty"]
 
+        # Build context for error reporting
+        error_context = {
+            "model": self.model,
+            "base_url": self.base_url,
+            "max_tokens": self.max_tokens,
+            "message_count": len(messages),
+        }
+
         # Execute request with retries
         last_error: Exception | None = None
 
@@ -243,13 +253,17 @@ class OpenAIClient(LLMClient):
                     raise LLMRateLimitError(
                         "Rate limit exceeded",
                         retry_after=retry_seconds,
+                        context=error_context,
                     )
 
                 # Handle other errors
                 if response.status_code != 200:
-                    error_body = response.text
+                    error_body = response.text[:1000]  # Truncate error body
                     raise LLMError(
-                        f"OpenAI API error (status {response.status_code}): {error_body}"
+                        f"OpenAI API error (status {response.status_code}): {error_body}",
+                        is_retryable=response.status_code >= 500,  # Server errors are retryable
+                        context={**error_context, "status_code": response.status_code},
+                        suggestion="Check API status or try again later." if response.status_code >= 500 else "Check your request parameters.",
                     )
 
                 # Parse response
@@ -258,13 +272,22 @@ class OpenAIClient(LLMClient):
                 return self._parse_response(data, latency)
 
             except httpx.TimeoutException as e:
-                last_error = LLMTimeoutError(f"Request timed out: {e}")
+                last_error = LLMTimeoutError(
+                    f"Request timed out after {self.timeout}s: {e}",
+                    timeout=self.timeout,
+                    context=error_context,
+                )
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)  # Exponential backoff
                     continue
 
             except httpx.RequestError as e:
-                last_error = LLMError(f"Request failed: {e}")
+                last_error = LLMError(
+                    f"Request failed: {e}",
+                    is_retryable=True,  # Network errors are usually retryable
+                    context={**error_context, "error_type": type(e).__name__},
+                    suggestion="Check network connectivity and API endpoint.",
+                )
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                     continue
@@ -272,27 +295,47 @@ class OpenAIClient(LLMClient):
             except LLMRateLimitError:
                 raise
 
+            except LLMEmptyResponseError:
+                raise  # Propagate empty response errors
+
+            except LLMTruncatedResponseError:
+                raise  # Propagate truncation errors
+
             except LLMError:
                 raise
 
             except Exception as e:
-                last_error = LLMError(f"Unexpected error: {e}")
+                last_error = LLMError(
+                    f"Unexpected error: {e}",
+                    is_retryable=False,
+                    context={**error_context, "error_type": type(e).__name__},
+                )
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(2 ** attempt)
                     continue
 
-        raise last_error or LLMError("Max retries exceeded")
+        raise last_error or LLMError("Max retries exceeded", context=error_context)
 
     def _parse_response(
         self,
         data: dict[str, Any],
         latency: float,
     ) -> LLMResponse:
-        """Parse OpenAI API response."""
+        """Parse OpenAI API response.
+
+        Raises:
+            LLMResponseError: If response parsing fails.
+            LLMEmptyResponseError: If LLM returns empty content.
+            LLMTruncatedResponseError: If response was truncated due to token limit.
+        """
         try:
             choices = data.get("choices", [])
             if not choices:
-                raise LLMResponseError("No choices in response")
+                raise LLMResponseError(
+                    "No choices in response",
+                    raw_response=str(data),
+                    context={"model": self.model},
+                )
 
             choice = choices[0]
             content = choice.get("message", {}).get("content", "")
@@ -305,6 +348,28 @@ class OpenAIClient(LLMClient):
                 completion_tokens=usage_data.get("completion_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
             )
+
+            # Check for empty response
+            if not content or not content.strip():
+                raise LLMEmptyResponseError(
+                    prompt_preview=None,  # Prompt not available here
+                    context={
+                        "model": self.model,
+                        "finish_reason": finish_reason,
+                        "usage": usage_data,
+                    },
+                )
+
+            # Check for truncated response
+            if finish_reason == "length":
+                raise LLMTruncatedResponseError(
+                    finish_reason=finish_reason,
+                    token_usage=usage_data,
+                    context={
+                        "model": self.model,
+                        "max_tokens": self.max_tokens,
+                    },
+                )
 
             # Update cumulative usage
             self._update_usage(usage)
@@ -323,7 +388,11 @@ class OpenAIClient(LLMClient):
             )
 
         except (KeyError, IndexError, TypeError) as e:
-            raise LLMResponseError(f"Failed to parse response: {e}")
+            raise LLMResponseError(
+                f"Failed to parse response: {e}",
+                raw_response=str(data),
+                context={"model": self.model},
+            )
 
     async def __aenter__(self) -> "OpenAIClient":
         """Async context manager entry."""

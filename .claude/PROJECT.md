@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-03-01 | 5de94c3 | feat(l3): add CodeQL build system support and enhance LLM error handling |
 | 2026-02-27 | 26be3ae | feat(l1): add batch LLM entry point detection for 15x speedup |
 | 2026-02-21 | b2fe941 | feat(l1): improve attack surface detection for non-mainstream frameworks |
 | 2026-02-21 | 698b1ec | feat(l3): improve vulnerability judgment accuracy (P0+P1+P3) |

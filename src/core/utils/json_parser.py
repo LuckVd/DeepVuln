@@ -323,23 +323,200 @@ def fix_incomplete_json(json_str: str) -> str:
     return result + closing
 
 
+def fix_chinese_punctuation(json_str: str) -> str:
+    """Replace Chinese punctuation with ASCII equivalents in JSON.
+
+    GLM-5 and other Chinese LLMs may output JSON with Chinese punctuation.
+
+    Handles:
+    - Chinese colon (：) -> ASCII colon (:)
+    - Chinese comma (，) -> ASCII comma (,)
+    - Chinese quotes ("") -> ASCII quotes ("")
+    - Chinese brackets (【】) -> ASCII brackets ([])
+
+    Args:
+        json_str: JSON string with potential Chinese punctuation.
+
+    Returns:
+        JSON string with ASCII punctuation.
+    """
+    # Replace Chinese punctuation
+    replacements = {
+        "：": ":",  # Chinese colon
+        "，": ",",  # Chinese comma
+        """: '"',  # Chinese left quote
+        """: '"',  # Chinese right quote
+        "【": "[",  # Chinese left bracket
+        "】": "]",  # Chinese right bracket
+        "「": '"',  # Chinese corner bracket
+        "」": '"',  # Chinese corner bracket
+        "『": '"',  # Chinese double corner bracket
+        "』": '"',  # Chinese double corner bracket
+    }
+
+    result = json_str
+    for ch_char, ascii_char in replacements.items():
+        result = result.replace(ch_char, ascii_char)
+
+    return result
+
+
+def remove_text_before_json(text: str) -> str:
+    """Remove explanatory text before JSON in LLM responses.
+
+    GLM-5 and other LLMs often add introductory text like:
+    - "这是分析结果："
+    - "以下是JSON格式的输出："
+    - "Based on my analysis:"
+
+    Args:
+        text: Text that may contain JSON with leading text.
+
+    Returns:
+        Text with leading explanatory text removed.
+    """
+    # Common patterns of introductory text
+    patterns = [
+        # Chinese patterns
+        r"^[\s\S]*?(?=这是.*?[：:]\s*[\{\[])",
+        r"^[\s\S]*?(?=以下是.*?[：:]\s*[\{\[])",
+        r"^[\s\S]*?(?=分析结果.*?[：:]\s*[\{\[])",
+        r"^[\s\S]*?(?=结果.*?[：:]\s*[\{\[])",
+        # English patterns
+        r"^[\s\S]*?(?=Here\s*(?:is|are)\s*(?:the\s*)?[a-zA-Z\s]*[：:]\s*[\{\[])",
+        r"^[\s\S]*?(?=Based\s+on\s+(?:my\s+)?(?:the\s+)?analysis[：:]\s*[\{\[])",
+        r"^[\s\S]*?(?=The\s+(?:following\s+)?(?:is\s+)?(?:the\s+)?result[s]?[：:]\s*[\{\[])",
+        # Generic: find first { or [
+        r"^[\s\S]*?(?=[\{\[])",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = text[match.end():]
+            # Verify the result starts with { or [
+            if result.strip().startswith(("{", "[")):
+                return result
+
+    # Fallback: just find first { or [
+    first_brace = text.find("{")
+    first_bracket = text.find("[")
+
+    if first_brace == -1 and first_bracket == -1:
+        return text
+
+    if first_brace == -1:
+        return text[first_bracket:]
+    if first_bracket == -1:
+        return text[first_brace:]
+
+    return text[min(first_brace, first_bracket):]
+
+
+def fix_unquoted_keys(json_str: str) -> str:
+    """Attempt to fix unquoted keys in JSON.
+
+    Some LLMs may output {key: "value"} instead of {"key": "value"}.
+
+    Args:
+        json_str: JSON string with potentially unquoted keys.
+
+    Returns:
+        JSON string with quoted keys.
+    """
+    # Pattern to match unquoted keys: identifier followed by colon
+    # This is a simple heuristic and may not work in all cases
+    pattern = r'(\{|\,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:'
+
+    def add_quotes(match):
+        prefix = match.group(1)
+        key = match.group(2)
+        return f'{prefix}"{key}":'
+
+    return re.sub(pattern, add_quotes, json_str)
+
+
+def fix_newlines_in_strings(json_str: str) -> str:
+    """Escape unescaped newlines in JSON string values.
+
+    Some LLMs may include literal newlines in string values.
+
+    Args:
+        json_str: JSON string with potentially unescaped newlines.
+
+    Returns:
+        JSON string with escaped newlines.
+    """
+    result = []
+    i = 0
+    in_string = False
+    escape_next = False
+
+    while i < len(json_str):
+        char = json_str[i]
+
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+
+        if char == "\\" and in_string:
+            result.append(char)
+            escape_next = True
+            i += 1
+            continue
+
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+
+        if in_string and char == "\n":
+            result.append("\\n")
+            i += 1
+            continue
+
+        if in_string and char == "\r":
+            result.append("\\r")
+            i += 1
+            continue
+
+        if in_string and char == "\t":
+            result.append("\\t")
+            i += 1
+            continue
+
+        result.append(char)
+        i += 1
+
+    return "".join(result)
+
+
 def robust_json_loads(
     text: str,
     fix_comments: bool = True,
     fix_trailing: bool = True,
     fix_quotes: bool = True,
     fix_incomplete: bool = True,
+    fix_chinese: bool = True,
+    fix_unquoted: bool = True,
 ) -> dict | list:
     """Parse JSON with fault tolerance for common LLM output issues.
 
     Strategy:
     1. Try direct json.loads()
     2. Extract from Markdown code blocks
-    3. Extract first JSON object using bracket counting
-    4. Remove comments
-    5. Fix trailing commas
-    6. Fix single quotes
-    7. Try to fix incomplete JSON
+    3. Remove explanatory text before JSON
+    4. Extract first JSON object using bracket counting
+    5. Fix Chinese punctuation (GLM-5)
+    6. Remove comments
+    7. Fix trailing commas
+    8. Fix single quotes
+    9. Fix unquoted keys
+    10. Fix newlines in strings
+    11. Try to fix incomplete JSON
 
     Args:
         text: Text containing JSON (possibly malformed).
@@ -347,6 +524,8 @@ def robust_json_loads(
         fix_trailing: Whether to fix trailing commas.
         fix_quotes: Whether to fix single quotes.
         fix_incomplete: Whether to try fixing incomplete JSON.
+        fix_chinese: Whether to fix Chinese punctuation.
+        fix_unquoted: Whether to try fixing unquoted keys.
 
     Returns:
         Parsed JSON data (dict or list).
@@ -371,7 +550,14 @@ def robust_json_loads(
         except json.JSONDecodeError:
             json_str = extracted
 
-    # Strategy 3: Extract first JSON object
+    # Strategy 3: Remove explanatory text before JSON (common in GLM-5)
+    json_str = remove_text_before_json(json_str)
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as e:
+        original_error = e
+
+    # Strategy 4: Extract first JSON object
     extracted = extract_first_json_object(json_str)
     if extracted:
         try:
@@ -379,7 +565,15 @@ def robust_json_loads(
         except json.JSONDecodeError:
             json_str = extracted
 
-    # Strategy 4: Remove comments
+    # Strategy 5: Fix Chinese punctuation (GLM-5 specific)
+    if fix_chinese:
+        json_str = fix_chinese_punctuation(json_str)
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 6: Remove comments
     if fix_comments:
         json_str = fix_json_comments(json_str)
         try:
@@ -387,7 +581,7 @@ def robust_json_loads(
         except json.JSONDecodeError:
             pass
 
-    # Strategy 5: Fix trailing commas
+    # Strategy 7: Fix trailing commas
     if fix_trailing:
         json_str = fix_trailing_commas(json_str)
         try:
@@ -395,7 +589,7 @@ def robust_json_loads(
         except json.JSONDecodeError:
             pass
 
-    # Strategy 6: Fix single quotes
+    # Strategy 8: Fix single quotes
     if fix_quotes:
         json_str = fix_single_quotes(json_str)
         # Also need to re-fix trailing commas after quote conversion
@@ -406,7 +600,22 @@ def robust_json_loads(
         except json.JSONDecodeError:
             pass
 
-    # Strategy 7: Fix incomplete JSON
+    # Strategy 9: Fix unquoted keys
+    if fix_unquoted:
+        json_str = fix_unquoted_keys(json_str)
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 10: Fix newlines in strings
+    json_str = fix_newlines_in_strings(json_str)
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 11: Fix incomplete JSON
     if fix_incomplete:
         json_str = fix_incomplete_json(json_str)
         try:

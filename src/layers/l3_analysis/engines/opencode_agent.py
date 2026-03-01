@@ -14,7 +14,14 @@ from typing import Any
 
 from src.core.utils import JSONParseError, robust_json_loads
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
-from src.layers.l3_analysis.llm.client import LLMClient, LLMError, LLMProvider
+from src.layers.l3_analysis.llm.client import (
+    LLMClient,
+    LLMEmptyResponseError,
+    LLMError,
+    LLMJSONParseError,
+    LLMProvider,
+    LLMTruncatedResponseError,
+)
 from src.layers.l3_analysis.llm.openai_client import OpenAIClient
 from src.layers.l3_analysis.llm.ollama_client import OllamaClient
 from src.layers.l3_analysis.models import (
@@ -479,18 +486,38 @@ class OpenCodeAgent(BaseEngine):
 
                 return findings
 
+            except LLMTruncatedResponseError as e:
+                # Response was truncated - log detailed info
+                self.logger.warning(
+                    f"LLM response truncated for {file_path}. "
+                    f"Finish reason: {e.finish_reason}, "
+                    f"Token usage: {e.token_usage}. "
+                    f"Suggestion: {e.suggestion}"
+                )
+                return []
+
+            except LLMEmptyResponseError as e:
+                # Empty response - might be temporary
+                self.logger.warning(
+                    f"LLM returned empty response for {file_path}. "
+                    f"Context: {e.context}. "
+                    f"Suggestion: {e.suggestion}"
+                )
+                return []
+
             except LLMError as e:
-                # Log error but continue with other files
-                import logging
-                logging.getLogger(__name__).warning(
-                    f"LLM error analyzing {file_path}: {e}"
+                # Other LLM errors - log with full context
+                self.logger.warning(
+                    f"LLM error analyzing {file_path}: {e}. "
+                    f"Is retryable: {e.is_retryable}, "
+                    f"Context: {e.context}, "
+                    f"Suggestion: {e.suggestion}"
                 )
                 return []
 
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).error(
-                    f"Error analyzing {file_path}: {e}"
+                self.logger.error(
+                    f"Unexpected error analyzing {file_path}: {type(e).__name__}: {e}"
                 )
                 return []
 
@@ -517,9 +544,18 @@ class OpenCodeAgent(BaseEngine):
                 if finding:
                     findings.append(finding)
 
-        except JSONParseError:
-            # Try to extract findings from unstructured response
-            pass
+        except JSONParseError as e:
+            # Log detailed error for debugging
+            response_preview = response[:500] + "..." if len(response) > 500 else response
+            self.logger.warning(
+                f"Failed to parse LLM response as JSON for {file_path}. "
+                f"Error: {e}. Response preview: {response_preview}"
+            )
+        except Exception as e:
+            self.logger.error(
+                f"Unexpected error parsing LLM response for {file_path}: "
+                f"{type(e).__name__}: {e}"
+            )
 
         return findings
 

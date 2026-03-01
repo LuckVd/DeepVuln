@@ -20,6 +20,12 @@ from src.layers.l1_intelligence.attack_surface.models import (
     EntryPointType,
     HTTPMethod,
 )
+from src.layers.l3_analysis.llm.client import (
+    LLMEmptyResponseError,
+    LLMError,
+    LLMJSONParseError,
+    LLMTruncatedResponseError,
+)
 
 logger = get_logger(__name__)
 
@@ -79,18 +85,34 @@ Entry point types to look for:
 - Lambda/Serverless function handlers
 
 **IMPORTANT PRIORITY ORDER** (analyze these directories first):
-1. handler/, handlers/ - Usually contain actual HTTP handler implementations
-2. controller/, controllers/ - Usually contain controller logic
+1. handler/, handlers/, internal/handler/ - Usually contain actual HTTP handler implementations
+2. controller/, controllers/, internal/controller/ - Usually contain controller logic
 3. route/, routes/, router/ - Route definitions
-4. api/ (subdirectories with handler files, NOT dto/schema files)
-5. service/ (for RPC/service implementations)
-6. internal/handler/, internal/controller/ - Internal implementations
+4. service/ (for RPC/service implementations)
+5. cmd/ (for Go CLI entry points)
+6. api/ - ONLY if contains actual handler files, NOT dto/schema subdirectories
 
-**SKIP these directories** (they usually contain data definitions, NOT entry points):
+**CRITICAL - SKIP these directories** (they contain data definitions, NOT entry points):
 - dto/, model/, models/, schema/, schemas/, types/, entities/
+- api/dto/, api/schema/, api/model/, api/types/, api/pb/ (proto-generated DTOs)
 - sdk/, client/ (usually client-side code)
 - test/, tests/, spec/, __tests__/
 - config/, configs/, conf/
+- pkg/dto/, pkg/model/, internal/model/, internal/dto/
+
+**For Go Backend Projects** (like Gin, Echo frameworks):
+- PREFER: backend/handler/, handler/v1/, internal/handler/, pkg/handler/
+- SKIP: backend/api/dto/, backend/api/schema/, any *.pb.go or *.dto.go files
+
+**Examples of CORRECT choices**:
+- backend/handler/v1/user_handler.go - HTTP handler (CORRECT)
+- internal/handler/auth.go - Internal handler (CORRECT)
+- handler/user_controller.py - Controller (CORRECT)
+
+**Examples of WRONG choices** (DO NOT select):
+- backend/api/dto/user.dto.go - DTO definition (SKIP)
+- backend/api/schema/user.pb.go - Proto generated (SKIP)
+- model/user.go - Data model (SKIP)
 
 Project: {project_name}
 
@@ -107,11 +129,12 @@ Instructions:
 3. Skip test files, config files, utility files, and data files
 4. Skip directories that only contain data definitions (dto/, model/, schema/)
 5. Consider the project's language and common framework patterns
+6. For Go projects: prioritize backend/handler/ over backend/api/
 
 Return JSON format:
 {{
     "target_files": ["path/to/file1.ext", "path/to/file2.ext"],
-    "target_dirs": ["handler/", "api/", "controller/"],
+    "target_dirs": ["handler/", "controller/"],
     "detected_languages": ["go", "python", "typescript"],
     "detected_frameworks": ["gin", "flask", "express"],
     "reasoning": "Brief explanation of your selection"
@@ -503,7 +526,7 @@ class LLMFullDetector:
         self,
         source_path: Path,
         batch_size: int = 20,
-        max_batch_chars: int = 30000,
+        max_batch_chars: int = 25000,  # Reduced from 30000 to avoid empty responses
         use_batch: bool = True,
     ) -> list[EntryPoint]:
         """Run full two-phase LLM detection.
@@ -578,7 +601,7 @@ class LLMFullDetector:
         self,
         files: list[Path],
         source_path: Path,
-        max_batch_chars: int = 30000,
+        max_batch_chars: int = 25000,  # Reduced from 30000 to avoid empty responses
     ) -> list[EntryPoint]:
         """Phase 2: Analyze multiple files in batches using character-based batching.
 
@@ -589,7 +612,7 @@ class LLMFullDetector:
         Args:
             files: List of files to analyze.
             source_path: Root source path.
-            max_batch_chars: Maximum characters per batch (default: 30000).
+            max_batch_chars: Maximum characters per batch (default: 25000).
 
         Returns:
             List of detected entry points.
@@ -632,8 +655,60 @@ class LLMFullDetector:
 
                 self.logger.info(f"Batch {batch_num}: Found {len(entry_points)} entry points")
 
+            except LLMTruncatedResponseError as e:
+                # Response was truncated - try with fewer files
+                self.logger.warning(
+                    f"Batch {batch_num} response truncated (finish_reason={e.finish_reason}). "
+                    f"Suggestion: {e.suggestion}"
+                )
+                # Fallback to individual file analysis
+                self.logger.info(f"Falling back to individual analysis for batch {batch_num}")
+                for file_path in batch_files:
+                    try:
+                        result = await self._analyze_file(file_path, source_path)
+                        if result.entry_points:
+                            all_entry_points.extend(result.entry_points)
+                    except Exception as inner_e:
+                        self.logger.error(f"Failed to analyze {file_path}: {inner_e}")
+
+            except LLMEmptyResponseError as e:
+                # Empty response - input might be too long
+                self.logger.warning(
+                    f"Batch {batch_num} received empty response. "
+                    f"Prompt length: {e.context.get('prompt_length', 'unknown')}. "
+                    f"Suggestion: {e.suggestion}"
+                )
+                # Fallback to individual file analysis
+                self.logger.info(f"Falling back to individual analysis for batch {batch_num}")
+                for file_path in batch_files:
+                    try:
+                        result = await self._analyze_file(file_path, source_path)
+                        if result.entry_points:
+                            all_entry_points.extend(result.entry_points)
+                    except Exception as inner_e:
+                        self.logger.error(f"Failed to analyze {file_path}: {inner_e}")
+
+            except LLMError as e:
+                # Other LLM errors
+                self.logger.error(
+                    f"Batch {batch_num} failed with LLM error: {e}. "
+                    f"Is retryable: {e.is_retryable}. "
+                    f"Suggestion: {e.suggestion}"
+                )
+                # Fallback to individual file analysis
+                self.logger.info(f"Falling back to individual analysis for batch {batch_num}")
+                for file_path in batch_files:
+                    try:
+                        result = await self._analyze_file(file_path, source_path)
+                        if result.entry_points:
+                            all_entry_points.extend(result.entry_points)
+                    except Exception as inner_e:
+                        self.logger.error(f"Failed to analyze {file_path}: {inner_e}")
+
             except Exception as e:
-                self.logger.error(f"Batch {batch_num} failed: {e}")
+                self.logger.error(
+                    f"Batch {batch_num} failed with unexpected error: {type(e).__name__}: {e}"
+                )
                 # Fallback to individual file analysis for this batch
                 self.logger.info(f"Falling back to individual analysis for batch {batch_num}")
                 for file_path in batch_files:
@@ -889,7 +964,60 @@ Language: {language}
             self.logger.warning("No target files resolved, falling back to all source files")
             resolved.update(self._tree_generator.get_source_files(source_path))
 
-        return sorted(resolved)
+        # Validate and prioritize files
+        validated = self._validate_and_prioritize_files(list(resolved))
+        return sorted(validated, key=lambda p: str(p))
+
+    def _validate_and_prioritize_files(self, files: list[Path]) -> list[Path]:
+        """Validate and prioritize target files.
+
+        This method filters out files that are clearly not entry points
+        (DTOs, schemas, proto-generated files) and prioritizes handler files.
+
+        Args:
+            files: List of file paths to validate.
+
+        Returns:
+            Validated and prioritized list of file paths.
+        """
+        # Patterns that indicate non-entry-point files
+        skip_patterns = [
+            "dto", "schema", "model", "types", "entities",
+            ".pb.go", ".pb.ts", ".pb.py",  # Proto-generated files
+            "_dto.", "_schema.", "_model.",
+        ]
+
+        # Patterns that indicate high-priority entry point files
+        high_priority_patterns = [
+            "handler", "controller", "router", "route",
+            "service", "endpoint", "api", "http",
+        ]
+
+        high_priority: list[Path] = []
+        normal_priority: list[Path] = []
+
+        for file_path in files:
+            path_str = str(file_path).lower()
+
+            # Skip files matching skip patterns
+            if any(pattern in path_str for pattern in skip_patterns):
+                self.logger.debug(f"Skipping non-entry-point file: {file_path.name}")
+                continue
+
+            # Prioritize handler/controller files
+            if any(pattern in path_str for pattern in high_priority_patterns):
+                high_priority.append(file_path)
+            else:
+                normal_priority.append(file_path)
+
+        # Return high priority files first
+        result = high_priority + normal_priority
+        self.logger.info(
+            f"File prioritization: {len(high_priority)} high-priority, "
+            f"{len(normal_priority)} normal-priority, "
+            f"{len(files) - len(result)} skipped"
+        )
+        return result
 
     async def _call_llm(self, prompt: str) -> str:
         """Call LLM with the given prompt.
@@ -901,36 +1029,98 @@ Language: {language}
             LLM response text.
 
         Raises:
-            ValueError: If LLM returns empty response.
+            LLMEmptyResponseError: If LLM returns empty response.
+            LLMTruncatedResponseError: If response was truncated.
+            LLMError: For other LLM errors.
         """
-        # Try our custom OpenAIClient (has complete method)
-        if hasattr(self.llm_client, "complete"):
-            response = await self.llm_client.complete(prompt)
-            content = response.content
-        # Try OpenAI-style client with chat.completions
-        elif hasattr(self.llm_client, "chat") and hasattr(self.llm_client.chat, "completions"):
-            response = await self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-            )
-            content = response.choices[0].message.content
-        # Try LangChain-style client
-        elif hasattr(self.llm_client, "ainvoke"):
-            response = await self.llm_client.ainvoke(prompt)
-            content = str(response)
-        else:
-            raise ValueError("Unsupported LLM client type")
+        # Build context for error reporting
+        prompt_preview = prompt[:300] + "..." if len(prompt) > 300 else prompt
+        context = {
+            "model": self.model,
+            "prompt_length": len(prompt),
+            "client_type": type(self.llm_client).__name__,
+        }
 
-        # Check for empty response
-        if not content or not content.strip():
-            prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
-            self.logger.warning(
-                f"LLM returned empty response. Prompt preview: {prompt_preview}"
-            )
-            raise ValueError("LLM returned empty response - input may be too long or model refused to respond")
+        try:
+            # Try our custom OpenAIClient (has complete method)
+            if hasattr(self.llm_client, "complete"):
+                response = await self.llm_client.complete(prompt)
+                content = response.content
 
-        return content
+                # Check for truncation
+                if hasattr(response, "finish_reason") and response.finish_reason == "length":
+                    self.logger.warning(
+                        f"LLM response truncated (finish_reason=length). "
+                        f"Prompt length: {len(prompt)}, model: {self.model}"
+                    )
+                    raise LLMTruncatedResponseError(
+                        finish_reason=response.finish_reason,
+                        token_usage={
+                            "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                            "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                        },
+                        context=context,
+                    )
+
+            # Try OpenAI-style client with chat.completions
+            elif hasattr(self.llm_client, "chat") and hasattr(self.llm_client.chat, "completions"):
+                response = await self.llm_client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                )
+                content = response.choices[0].message.content
+
+                # Check for truncation
+                if response.choices[0].finish_reason == "length":
+                    self.logger.warning(
+                        f"LLM response truncated (finish_reason=length). "
+                        f"Prompt length: {len(prompt)}, model: {self.model}"
+                    )
+                    raise LLMTruncatedResponseError(
+                        finish_reason=response.choices[0].finish_reason,
+                        context=context,
+                    )
+
+            # Try LangChain-style client
+            elif hasattr(self.llm_client, "ainvoke"):
+                response = await self.llm_client.ainvoke(prompt)
+                content = str(response)
+            else:
+                raise LLMError(
+                    f"Unsupported LLM client type: {type(self.llm_client).__name__}",
+                    is_retryable=False,
+                    context=context,
+                    suggestion="Use OpenAIClient or a compatible LLM client.",
+                )
+
+            # Check for empty response
+            if not content or not content.strip():
+                self.logger.warning(
+                    f"LLM returned empty response. Model: {self.model}, "
+                    f"Prompt length: {len(prompt)}, Prompt preview: {prompt_preview}"
+                )
+                raise LLMEmptyResponseError(
+                    prompt_preview=prompt_preview,
+                    context=context,
+                )
+
+            return content
+
+        except LLMError:
+            # Re-raise our custom errors
+            raise
+        except Exception as e:
+            self.logger.error(
+                f"Unexpected LLM error: {type(e).__name__}: {e}. "
+                f"Model: {self.model}, Prompt length: {len(prompt)}"
+            )
+            raise LLMError(
+                f"Unexpected error calling LLM: {e}",
+                is_retryable=True,
+                context={**context, "error_type": type(e).__name__},
+                suggestion="Check LLM service availability and configuration.",
+            )
 
     def _parse_structure_response(self, response: str) -> ProjectStructureAnalysis:
         """Parse LLM response for project structure analysis.
@@ -954,9 +1144,19 @@ Language: {language}
             analysis.reasoning = data.get("reasoning", "")
 
         except JSONParseError as e:
-            self.logger.warning(f"Failed to parse structure analysis response: {e}")
+            # Log detailed error for debugging
+            response_preview = response[:500] + "..." if len(response) > 500 else response
+            self.logger.warning(
+                f"Failed to parse structure analysis response as JSON. "
+                f"Error: {e}. Response preview: {response_preview}"
+            )
+            # Store error info for debugging
+            analysis.reasoning = f"JSON parse error: {e}"
         except Exception as e:
-            self.logger.error(f"Error parsing structure analysis response: {e}")
+            self.logger.error(
+                f"Unexpected error parsing structure analysis response: {type(e).__name__}: {e}"
+            )
+            analysis.reasoning = f"Parse error: {e}"
 
         return analysis
 
@@ -986,9 +1186,17 @@ Language: {language}
             )
 
         except JSONParseError as e:
-            self.logger.warning(f"Failed to parse entry points response: {e}")
+            # Log detailed error for debugging
+            response_preview = response[:500] + "..." if len(response) > 500 else response
+            self.logger.warning(
+                f"Failed to parse entry points response as JSON for {file_path.name}. "
+                f"Error: {e}. Response preview: {response_preview}"
+            )
         except Exception as e:
-            self.logger.error(f"Error parsing entry points response: {e}")
+            self.logger.error(
+                f"Unexpected error parsing entry points response for {file_path.name}: "
+                f"{type(e).__name__}: {e}"
+            )
 
         return entry_points
 

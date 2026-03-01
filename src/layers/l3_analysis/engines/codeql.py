@@ -5,7 +5,9 @@ CodeQL is a powerful code analysis engine that enables deep dataflow analysis
 to find complex vulnerabilities that pattern matching might miss.
 """
 
+import asyncio
 import json
+import os
 import shutil
 import tempfile
 import uuid
@@ -13,6 +15,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from rich.markup import escape
+
+from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
 from src.layers.l3_analysis.models import (
     CodeLocation,
@@ -21,6 +26,8 @@ from src.layers.l3_analysis.models import (
     ScanResult,
     SeverityLevel,
 )
+
+logger = get_logger(__name__)
 
 
 # CodeQL severity mapping to our SeverityLevel
@@ -112,6 +119,7 @@ class CodeQLEngine(BaseEngine):
         timeout: int = 600,  # CodeQL needs more time than Semgrep
         max_memory_mb: int = 8192,  # CodeQL uses more memory
         search_path: list[str] | None = None,
+        auto_download_packs: bool = True,
     ):
         """
         Initialize the CodeQL engine.
@@ -121,11 +129,15 @@ class CodeQLEngine(BaseEngine):
             timeout: Maximum scan duration in seconds.
             max_memory_mb: Maximum memory usage in MB.
             search_path: Additional paths to search for CodeQL packs.
+            auto_download_packs: Whether to automatically download missing packs.
         """
         super().__init__(timeout=timeout, max_memory_mb=max_memory_mb)
         self.codeql_path = codeql_path
         self.search_path = search_path
+        self.auto_download_packs = auto_download_packs
         self._version: str | None = None
+        self._available_packs: dict[str, bool] = {}  # Cache for pack availability
+        self._packs_checked: bool = False
 
     def is_available(self) -> bool:
         """
@@ -189,6 +201,9 @@ class CodeQLEngine(BaseEngine):
         severity_filter: list[SeverityLevel] | None = None,
         database_path: Path | None = None,
         overwrite_database: bool = True,
+        skip_build: bool = False,
+        build_command: str | None = None,
+        llm_client: Any = None,
         **options,
     ) -> ScanResult:
         """
@@ -206,6 +221,9 @@ class CodeQLEngine(BaseEngine):
             severity_filter: Only return findings at these severity levels.
             database_path: Path to store the CodeQL database (temp if not specified).
             overwrite_database: Whether to overwrite existing database.
+            skip_build: Whether to skip the build step (use --no-build).
+            build_command: Custom build command to use (overrides auto-detection).
+            llm_client: LLM client for build diagnostics.
             **options: Additional options.
 
         Returns:
@@ -271,20 +289,45 @@ class CodeQLEngine(BaseEngine):
             cleanup_db = True
 
         try:
+            # Phase 0: Build project (if required)
+            build_diagnostic = None
+            if not skip_build:
+                build_result = await self._execute_build(
+                    source_path=source_path,
+                    language=codeql_lang,
+                    build_command=build_command,
+                    llm_client=llm_client,
+                )
+                if build_result and not build_result.get("success", True):
+                    build_diagnostic = build_result.get("diagnostic")
+                    # Log build failure but continue with database creation
+                    # CodeQL might still work with partial build
+                    logger.warning(
+                        f"Build completed with issues. Build diagnostic: "
+                        f"{build_diagnostic.to_dict() if build_diagnostic else 'None'}"
+                    )
+
             # Phase 1: Create database
             db_success = await self._create_database(
                 source_path=source_path,
                 database_path=database_path,
                 language=codeql_lang,
                 overwrite=overwrite_database,
+                skip_build=skip_build,
             )
 
             if not db_success:
+                error_msg = "Failed to create CodeQL database. "
+                if build_diagnostic:
+                    error_msg += f"Build diagnostic: {build_diagnostic.root_cause}. "
+                    if build_diagnostic.suggestions:
+                        error_msg += f"Suggestions: {'; '.join(build_diagnostic.suggestions[:3])}"
+                else:
+                    error_msg += "Check if the project can be built successfully."
                 return self.finalize_scan_result(
                     result,
                     success=False,
-                    error_message="Failed to create CodeQL database. "
-                    "Check if the project can be built successfully.",
+                    error_message=error_msg,
                 )
 
             # Phase 2: Analyze database
@@ -339,6 +382,117 @@ class CodeQLEngine(BaseEngine):
             if cleanup_db and database_path and database_path.exists():
                 shutil.rmtree(database_path, ignore_errors=True)
 
+    async def scan_multi_language(
+        self,
+        source_path: Path,
+        languages: list[str] | None = None,
+        min_file_percentage: float = 10.0,
+        **options,
+    ) -> ScanResult:
+        """
+        Scan a multi-language project by analyzing each language separately.
+
+        This method detects all languages in the project and creates separate
+        CodeQL databases for each, combining the results.
+
+        Args:
+            source_path: Path to the source code.
+            languages: Specific languages to scan (auto-detected if not specified).
+            min_file_percentage: Minimum percentage for a language to be included.
+            **options: Additional options passed to scan().
+
+        Returns:
+            Combined ScanResult from all language scans.
+        """
+        self.validate_source_path(source_path)
+
+        # Check if CodeQL is available
+        if not self.is_available():
+            result = self.create_scan_result(source_path, [])
+            return self.finalize_scan_result(
+                result,
+                success=False,
+                error_message="CodeQL CLI is not installed or not in PATH.",
+            )
+
+        # Detect languages if not specified
+        if not languages:
+            detected = await self.detect_all_languages(source_path, min_file_percentage)
+            languages = [lang for lang, count, pct in detected]
+
+        if not languages:
+            result = self.create_scan_result(source_path, [])
+            return self.finalize_scan_result(
+                result,
+                success=False,
+                error_message="No supported languages detected in the project.",
+            )
+
+        logger.info(f"Multi-language scan: detected languages: {languages}")
+
+        # Create combined result
+        combined_result = self.create_scan_result(source_path, [])
+        successful_scans = 0
+        failed_languages = []
+
+        for language in languages:
+            codeql_lang = self.normalize_language(language)
+            if not codeql_lang:
+                logger.warning(f"Language '{language}' is not supported by CodeQL, skipping.")
+                continue
+
+            logger.info(f"Scanning language: {language} (CodeQL: {codeql_lang})")
+
+            # Find subdirectories for this language
+            subdirs = self._find_language_subdirectories(source_path, codeql_lang)
+
+            # Scan each subdirectory
+            for subdir in subdirs:
+                try:
+                    # Create a separate database for this language/subdirectory
+                    result = await self.scan(
+                        source_path=subdir,
+                        language=codeql_lang,
+                        **options,
+                    )
+
+                    if result.success:
+                        successful_scans += 1
+                        # Combine findings
+                        for finding in result.findings:
+                            combined_result.add_finding(finding)
+                    else:
+                        logger.warning(
+                            f"Scan failed for {language} in {subdir.name}: "
+                            f"{escape(str(result.error_message))}"
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"Exception scanning {language} in {subdir.name}: {escape(str(e))}"
+                    )
+                    failed_languages.append(f"{language} ({subdir.name})")
+
+        # Determine overall success
+        if successful_scans > 0:
+            combined_result.success = True
+            if failed_languages:
+                combined_result.error_message = (
+                    f"Partial success: {successful_scans} language(s) scanned, "
+                    f"failed: {', '.join(failed_languages)}"
+                )
+        else:
+            combined_result.success = False
+            combined_result.error_message = (
+                f"All language scans failed. Languages attempted: {', '.join(languages)}"
+            )
+
+        return self.finalize_scan_result(
+            combined_result,
+            success=combined_result.success,
+            error_message=combined_result.error_message,
+        )
+
     async def _detect_language(self, source_path: Path) -> str | None:
         """
         Detect the primary programming language of a project.
@@ -384,12 +538,221 @@ class CodeQLEngine(BaseEngine):
         # Return most common language
         return max(extensions, key=extensions.get)
 
+    async def detect_all_languages(
+        self,
+        source_path: Path,
+        min_file_percentage: float = 5.0,
+    ) -> list[tuple[str, int, float]]:
+        """
+        Detect all programming languages in a project.
+
+        Args:
+            source_path: Path to the source code.
+            min_file_percentage: Minimum percentage of files to include a language.
+
+        Returns:
+            List of (language, file_count, percentage) tuples, sorted by file count.
+        """
+        extension_to_lang = {
+            ".java": "java",
+            ".py": "python",
+            ".go": "go",
+            ".js": "javascript",
+            ".jsx": "javascript",
+            ".ts": "typescript",
+            ".tsx": "typescript",
+            ".c": "c",
+            ".cpp": "cpp",
+            ".cc": "cpp",
+            ".cxx": "cpp",
+            ".cs": "csharp",
+            ".rb": "ruby",
+            ".swift": "swift",
+            ".kt": "kotlin",
+            ".scala": "scala",
+        }
+
+        # Count files by language
+        lang_counts: dict[str, int] = {}
+        total_files = 0
+
+        for ext in extension_to_lang:
+            files = list(source_path.rglob(f"*{ext}"))
+            if files:
+                lang = extension_to_lang[ext]
+                lang_counts[lang] = lang_counts.get(lang, 0) + len(files)
+                total_files += len(files)
+
+        if not lang_counts:
+            return []
+
+        # Calculate percentages and filter
+        result = []
+        for lang, count in lang_counts.items():
+            percentage = (count / total_files) * 100
+            if percentage >= min_file_percentage:
+                result.append((lang, count, percentage))
+
+        # Sort by file count descending
+        result.sort(key=lambda x: x[1], reverse=True)
+        return result
+
+    async def is_multi_language_project(
+        self,
+        source_path: Path,
+        min_secondary_percentage: float = 10.0,
+    ) -> bool:
+        """
+        Check if a project contains multiple significant languages.
+
+        Args:
+            source_path: Path to the source code.
+            min_secondary_percentage: Minimum percentage for a secondary language.
+
+        Returns:
+            True if the project has multiple significant languages.
+        """
+        languages = await self.detect_all_languages(source_path)
+        significant_languages = [
+            lang for lang, count, pct in languages
+            if pct >= min_secondary_percentage
+        ]
+        return len(significant_languages) > 1
+
+    def _find_language_subdirectories(
+        self,
+        source_path: Path,
+        language: str,
+    ) -> list[Path]:
+        """
+        Find subdirectories that primarily contain a specific language.
+
+        Args:
+            source_path: Root source path.
+            language: Target language to find.
+
+        Returns:
+            List of paths to subdirectories containing the language.
+        """
+        extension_to_lang = {
+            "java": [".java"],
+            "python": [".py"],
+            "go": [".go"],
+            "javascript": [".js", ".jsx"],
+            "typescript": [".ts", ".tsx"],
+            "cpp": [".c", ".cpp", ".cc", ".cxx"],
+            "csharp": [".cs"],
+            "ruby": [".rb"],
+            "swift": [".swift"],
+        }
+
+        extensions = extension_to_lang.get(language, [])
+        if not extensions:
+            return [source_path]
+
+        # Common directory patterns for different project types
+        subdir_patterns = [
+            "src", "lib", "app", "backend", "frontend", "server", "client",
+            "api", "web", "core", "main", "pkg", "cmd",
+        ]
+
+        result_dirs = []
+
+        # Check immediate subdirectories
+        for subdir in source_path.iterdir():
+            if not subdir.is_dir():
+                continue
+            if subdir.name.startswith("."):
+                continue
+
+            # Count files of target language in this subdirectory
+            lang_file_count = 0
+            for ext in extensions:
+                lang_file_count += len(list(subdir.rglob(f"*{ext}")))
+
+            if lang_file_count > 0:
+                result_dirs.append(subdir)
+
+        # If no subdirectories found, use the source path itself
+        if not result_dirs:
+            return [source_path]
+
+        return result_dirs
+
+    async def _execute_build(
+        self,
+        source_path: Path,
+        language: str,
+        build_command: str | None = None,
+        llm_client: Any = None,
+    ) -> dict[str, Any] | None:
+        """Execute build before CodeQL database creation.
+
+        Args:
+            source_path: Path to the source code.
+            language: Programming language.
+            build_command: Custom build command (overrides auto-detection).
+            llm_client: LLM client for build diagnostics.
+
+        Returns:
+            Dict with build result and diagnostic info, or None if build skipped.
+        """
+        from src.layers.l3_analysis.build import (
+            BuildExecutor,
+            BuildSystemDetector,
+            diagnose_build_failure,
+        )
+
+        # Detect build system
+        detector = BuildSystemDetector()
+        config = detector.detect(source_path, language)
+
+        # Override build command if provided
+        if build_command:
+            config.build_command = build_command
+
+        # Skip if no build required or no build command
+        if not config.requires_build or not config.build_command:
+            logger.info(f"No build required for language: {language}")
+            return {"success": True, "skipped": True, "reason": "No build required"}
+
+        # Execute build
+        logger.info(
+            f"Executing build for {language}. "
+            f"Build system: {config.build_system.value}, "
+            f"Command: {config.build_command}"
+        )
+
+        executor = BuildExecutor(timeout=self.timeout)
+        result = await executor.execute(config, source_path)
+
+        # If build failed, try to diagnose
+        if not result.success and not result.skipped:
+            diagnostic = diagnose_build_failure(
+                result=result,
+                config=config,
+                source_path=source_path,
+                llm_client=llm_client,
+            )
+            return {
+                "success": False,
+                "result": result,
+                "diagnostic": diagnostic,
+            }
+
+        return {
+            "success": True,
+            "result": result,
+            "diagnostic": None,
+        }
+
     async def _create_database(
         self,
         source_path: Path,
         database_path: Path,
         language: str,
         overwrite: bool = True,
+        skip_build: bool = False,
     ) -> bool:
         """
         Create a CodeQL database from source code.
@@ -399,6 +762,7 @@ class CodeQLEngine(BaseEngine):
             database_path: Path where the database will be created.
             language: CodeQL language name.
             overwrite: Whether to overwrite existing database.
+            skip_build: Whether to skip the build step (--no-build).
 
         Returns:
             True if database creation succeeded.
@@ -414,6 +778,18 @@ class CodeQLEngine(BaseEngine):
             "--quiet",  # Reduce output noise
         ]
 
+        # Handle build mode
+        if skip_build:
+            # For languages that support --build-mode=none (C#), use it
+            # For others, use --command with a no-op command
+            if language == "csharp":
+                cmd.append("--build-mode=none")
+                logger.info("Using --build-mode=none (build step will be skipped)")
+            else:
+                # Use a no-op command for Go, Java, etc.
+                cmd.extend(["--command", "echo 'Skipping build'"])
+                logger.info("Using no-op build command (build step will be skipped)")
+
         # Add search path if specified
         if self.search_path:
             for path in self.search_path:
@@ -427,20 +803,46 @@ class CodeQLEngine(BaseEngine):
 
             # CodeQL returns 0 on success
             if returncode == 0:
+                logger.info(f"CodeQL database created successfully: {database_path}")
                 return True
 
-            # Log error for debugging
+            # Log detailed error for debugging
+            error_context = {
+                "language": language,
+                "source_path": str(source_path),
+                "database_path": str(database_path),
+                "return_code": returncode,
+            }
+
+            # Parse common error patterns and provide suggestions
+            suggestion = None
             if stderr:
-                import logging
-                logging.getLogger(__name__).warning(
-                    f"CodeQL database creation failed: {stderr}"
-                )
+                stderr_lower = stderr.lower()
+                if "no code could be extracted" in stderr_lower:
+                    suggestion = "No extractable code found. Check if the language is correct and source files exist."
+                elif "out of memory" in stderr_lower:
+                    suggestion = "CodeQL ran out of memory. Try increasing max_memory_mb or reducing source size."
+                elif "timeout" in stderr_lower:
+                    suggestion = "Database creation timed out. Try increasing timeout or reducing source size."
+                elif "unsupported language" in stderr_lower:
+                    suggestion = f"Language '{language}' is not supported. Check CodeQL version and extractors."
+                elif "permission denied" in stderr_lower:
+                    suggestion = "Permission denied. Check file permissions and database path."
+
+            logger.warning(
+                f"CodeQL database creation failed. "
+                f"Command: {escape(' '.join(cmd))}. "
+                f"Return code: {returncode}. "
+                f"Stderr: {escape(stderr[:1000] if stderr else 'None')}. "
+                f"Context: {error_context}. "
+                f"Suggestion: {suggestion or 'Check CodeQL logs for details.'}"
+            )
             return False
 
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(
-                f"CodeQL database creation exception: {e}"
+            logger.error(
+                f"CodeQL database creation exception: {type(e).__name__}: {escape(str(e))}. "
+                f"Language: {language}, Source: {source_path}"
             )
             return False
 
@@ -526,9 +928,34 @@ class CodeQLEngine(BaseEngine):
             returncode, stdout, stderr = await self.run_command(cmd)
 
             if returncode != 0:
-                import logging
-                logging.getLogger(__name__).warning(
-                    f"CodeQL analysis failed with code {returncode}: {stderr}"
+                # Build error context
+                error_context = {
+                    "language": language,
+                    "database_path": str(database_path),
+                    "query_suite": query_suite,
+                    "return_code": returncode,
+                }
+
+                # Parse common error patterns and provide suggestions
+                suggestion = None
+                if stderr:
+                    stderr_lower = stderr.lower()
+                    if "no queries found" in stderr_lower:
+                        suggestion = f"No queries found for language '{language}'. Try downloading the query pack: codeql pack download {DEFAULT_QUERY_PACKS.get(language, 'codeql/<lang>-queries')}"
+                    elif "database not found" in stderr_lower or "does not exist" in stderr_lower:
+                        suggestion = "Database does not exist. Database creation may have failed."
+                    elif "out of memory" in stderr_lower:
+                        suggestion = "CodeQL ran out of memory during analysis. Try increasing max_memory_mb."
+                    elif "timeout" in stderr_lower:
+                        suggestion = "Analysis timed out. Try increasing timeout."
+
+                logger.warning(
+                    f"CodeQL analysis failed. "
+                    f"Command: {escape(' '.join(cmd))}. "
+                    f"Return code: {returncode}. "
+                    f"Stderr: {escape(stderr[:1000] if stderr else 'None')}. "
+                    f"Context: {error_context}. "
+                    f"Suggestion: {suggestion or 'Check CodeQL logs for details.'}"
                 )
                 return None
 
@@ -537,9 +964,17 @@ class CodeQLEngine(BaseEngine):
                 with open(sarif_path, "r", encoding="utf-8") as f:
                     return json.load(f)
 
+            logger.warning(f"SARIF output file not found: {sarif_path}")
             return None
 
-        except Exception:
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse SARIF output: {escape(str(e))}")
+            return None
+        except Exception as e:
+            logger.error(
+                f"CodeQL analysis exception: {type(e).__name__}: {escape(str(e))}. "
+                f"Language: {language}, Database: {database_path}"
+            )
             return None
         finally:
             # Cleanup SARIF file
@@ -556,6 +991,25 @@ class CodeQLEngine(BaseEngine):
         Returns:
             True if pack is available.
         """
+        # Check cache first
+        if pack_name in self._available_packs:
+            return self._available_packs[pack_name]
+
+        # Check if pack is already installed
+        if await self._is_pack_installed(pack_name):
+            self._available_packs[pack_name] = True
+            return True
+
+        # Auto-download if enabled
+        if not self.auto_download_packs:
+            logger.warning(
+                f"Query pack '{pack_name}' is not installed and auto-download is disabled. "
+                f"Run 'codeql pack download {pack_name}' manually."
+            )
+            self._available_packs[pack_name] = False
+            return False
+
+        logger.info(f"Downloading CodeQL query pack: {pack_name}")
         cmd = [
             self.codeql_path,
             "pack",
@@ -565,9 +1019,90 @@ class CodeQLEngine(BaseEngine):
 
         try:
             returncode, stdout, stderr = await self.run_command(cmd)
-            return returncode == 0
-        except Exception:
+            success = returncode == 0
+            if success:
+                logger.info(f"Successfully downloaded query pack: {pack_name}")
+            else:
+                logger.warning(
+                    f"Failed to download query pack '{pack_name}': {stderr}"
+                )
+            self._available_packs[pack_name] = success
+            return success
+        except Exception as e:
+            logger.error(f"Error downloading query pack '{pack_name}': {e}")
+            self._available_packs[pack_name] = False
             return False
+
+    async def _is_pack_installed(self, pack_name: str) -> bool:
+        """
+        Check if a query pack is already installed.
+
+        Args:
+            pack_name: Name of the query pack.
+
+        Returns:
+            True if pack is installed.
+        """
+        # Check default CodeQL pack installation location
+        pack_base = Path.home() / ".codeql" / "packages"
+        pack_dir = pack_base / pack_name.replace("/", os.sep if 'os' in dir() else "/")
+
+        if pack_dir.exists():
+            # Look for versioned directory
+            versions = list(pack_dir.glob("*/"))
+            return len(versions) > 0
+
+        return False
+
+    async def ensure_all_packs_for_language(self, language: str) -> bool:
+        """
+        Ensure all required packs for a language are downloaded.
+
+        Args:
+            language: CodeQL language name.
+
+        Returns:
+            True if all packs are available.
+        """
+        pack_name = DEFAULT_QUERY_PACKS.get(language)
+        if not pack_name:
+            logger.warning(f"No query pack defined for language: {language}")
+            return False
+
+        return await self._ensure_query_pack(pack_name)
+
+    async def preload_common_packs(self) -> dict[str, bool]:
+        """
+        Pre-download commonly used query packs.
+
+        Returns:
+            Dict mapping pack names to download success status.
+        """
+        results = {}
+        common_languages = ["python", "javascript", "java", "go"]
+
+        logger.info("Preloading common CodeQL query packs...")
+
+        for lang in common_languages:
+            pack_name = DEFAULT_QUERY_PACKS.get(lang)
+            if pack_name:
+                success = await self._ensure_query_pack(pack_name)
+                results[pack_name] = success
+
+        successful = sum(1 for v in results.values() if v)
+        total = len(results)
+        logger.info(f"Preloaded {successful}/{total} CodeQL query packs")
+
+        return results
+
+    def get_pack_status(self) -> dict[str, bool]:
+        """
+        Get the cached status of query packs.
+
+        Returns:
+            Dict mapping pack names to availability status.
+        """
+        return self._available_packs.copy()
 
     async def _resolve_query_path(self, language: str, query_suite: str) -> str | None:
         """
