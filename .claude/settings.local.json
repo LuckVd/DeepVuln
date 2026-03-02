@@ -22,7 +22,23 @@
       "Bash(python -c:*)",
       "Bash(curl:*)",
       "Bash(semgrep:*)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python:*)",
+      "Bash(timeout 300 deepvuln scan:*)",
+      "Bash(find:*)",
+      "Bash(codeql resolve languages:*)",
+      "Bash(codeql resolve packs:*)",
+      "Bash(codeql database create:*)",
+      "Bash(uv run flake8:*)",
+      "Bash(tee:*)",
+      "Bash(docker build:*)",
+      "Bash(export HTTP_PROXY=http://127.0.0.1:7890)",
+      "Bash(export HTTPS_PROXY=http://127.0.0.1:7890)",
+      "Bash(docker pull:*)",
+      "Bash(docker run:*)"
     ]
   }
 }

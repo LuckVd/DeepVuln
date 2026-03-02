@@ -528,13 +528,15 @@ async def run_full_security_scan(
     if llm_detect or llm_full_detect:
         try:
             from src.layers.l3_analysis.llm.openai_client import OpenAIClient
-            from src.core.config import get_openai_config
+            from src.core.config import get_openai_config, get_llm_config
 
             openai_config = get_openai_config()
+            llm_config = get_llm_config()
             llm_client_for_detect = OpenAIClient(
                 model=model,
                 api_key=openai_config.get("api_key"),
                 base_url=openai_config.get("base_url"),
+                max_tokens=llm_config.get("max_tokens", 4096),
             )
             if llm_full_detect:
                 console.print("  [dim]Full LLM-driven detection enabled (any language/framework)[/]")
