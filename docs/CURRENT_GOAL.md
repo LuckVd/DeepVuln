@@ -8,64 +8,60 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | 优化对抗验证层：Prompt优化 + 按需多轮对抗 |
+| **任务** | 实现扫描并行优化：引擎并行 + 验证并行 + 对抗并行 |
 | **状态** | **completed** ✅ |
 | **优先级** | high |
-| **创建日期** | 2026-03-02 |
-| **完成日期** | 2026-03-02 |
+| **创建日期** | 2026-03-03 |
+| **完成日期** | 2026-03-03 |
 
 ---
 
 ## 完成标准
 
-### P1: Prompt 优化 ✅
+### P1: LLM 并发控制基础设施 ✅
 
-- [x] **Few-Shot 示例**：为攻击者、防御者、仲裁者各添加 2-4 个高质量示例
-- [x] **上下文增强**：传递完整调用链、入口点签名、数据流节点
-- [x] **角色专业化**：攻击者=渗透测试思维，防御者=代码审计思维，仲裁者=安全研究思维
-- [x] **链式思考**：添加 5 步分析步骤引导
-- [x] **置信度校准**：明确定义 0-1 分 5 档置信度
+- [x] **LLMConcurrencyManager 类**：全局 LLM 并发控制
+  - Semaphore 限制并发数
+  - 可配置 max_concurrent (默认 5)
+  - 支持不同提供商的不同限制
+- [x] **配置项**：`settings.llm.max_concurrent`
+- [x] **全局管理器**：get_global_concurrency_manager()
 
-### P2: 按需多轮对抗机制 ✅
+### P2: 引擎级并行化 (Phase 1/2/3) ✅
 
-- [x] **触发条件**：
-  - `verdict == NEEDS_REVIEW`
-  - 或 `|attacker_strength - defender_strength| < 0.2`
-  - 或 `confidence < 0.6`
-- [x] **反驳机制**：
-  - `AttackerVerifier.rebut(defender_argument)` - 攻击者反驳防御者
-  - `DefenderVerifier.rebut(attacker_argument)` - 防御者反驳攻击者
-- [x] **循环控制**：
-  - 最多 3 轮（可配置）
-  - 达到明确判定时提前终止
-- [x] **仲裁者增强**：
-  - 接收所有轮次的辩论历史
-  - 基于完整上下文做最终判断
+- [x] **并行执行**：Semgrep、CodeQL、Agent 同时运行
+- [x] **asyncio.gather**：收集各引擎结果
+- [x] **错误隔离**：单个引擎失败不影响其他引擎
+- [x] **进度显示**：并行执行时的进度反馈
 
-### P3: 测试验证 ✅
+### P3: Phase 4 验证并行化 ✅
 
-- [x] 单元测试：模型和配置 (`test_adversarial_models.py`)
-- [x] 单元测试：各角色 Verifier (`test_adversarial_verifiers.py`)
-- [x] 集成测试：多轮对抗流程 (`test_adversarial_multiround.py`)
-- [x] 端到端测试：完整场景 (`test_adversarial_e2e.py`)
+- [x] **批量验证**：使用 asyncio.gather 并行处理 findings
+- [x] **并发控制**：通过 LLMConcurrencyManager 限制
+- [x] **结果聚合**：保持结果顺序
+
+### P4: Phase 4.5 对抗验证并行化 ✅
+
+- [x] **批量对抗验证**：并行处理多个 findings
+- [x] **并发控制**：通过 LLMConcurrencyManager 限制
+- [x] **错误处理**：return_exceptions=True
+
+### P5: 测试与验证 ✅
+
+- [x] 单元测试：21 个测试用例全部通过
+- [x] 并发控制逻辑验证
 
 ---
 
 ## 变更文件
 
-| 文件 | 操作 | 行数 |
+| 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/layers/l3_analysis/prompts/adversarial.py` | 重写 | 1229 行 |
-| `src/layers/l3_analysis/verification/models.py` | 重写 | 430 行 |
-| `src/layers/l3_analysis/verification/adversarial.py` | 重写 | 672 行 |
-| `src/layers/l3_analysis/verification/attacker.py` | 重写 | 298 行 |
-| `src/layers/l3_analysis/verification/defender.py` | 重写 | 428 行 |
-| `src/layers/l3_analysis/verification/arbiter.py` | 重写 | 477 行 |
-| `tests/unit/test_l3/test_adversarial_models.py` | 新建 | 400+ 行 |
-| `tests/unit/test_l3/test_adversarial_verifiers.py` | 新建 | 600+ 行 |
-| `tests/unit/test_l3/test_adversarial_multiround.py` | 新建 | 500+ 行 |
-| `tests/unit/test_l3/test_adversarial_e2e.py` | 新建 | 500+ 行 |
-| `tests/unit/test_l3/conftest_adversarial.py` | 新建 | 300+ 行 |
+| `src/core/llm/__init__.py` | 新建 | 模块入口 |
+| `src/core/llm/concurrency.py` | 新建 | LLM 并发管理器 (~300 行) |
+| `src/core/config/settings.py` | 修改 | 添加 LLMSettings 类 |
+| `src/cli/main.py` | 修改 | Phase 1/2/3 并行 + Phase 4/4.5 并行 |
+| `tests/unit/test_core/test_concurrency.py` | 新建 | 21 个并发控制测试 |
 
 ---
 
@@ -73,60 +69,67 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-02 | 设置目标 |
-| 2026-03-02 | 完成 P1 Prompt 优化 |
-| 2026-03-02 | 完成 P2 多轮对抗机制 |
-| 2026-03-02 | 完成 P3 测试验证 |
-| 2026-03-02 | ✅ 目标完成 |
+| 2026-03-03 | 设置目标，分析性能瓶颈 |
+| 2026-03-03 | 完成 P1: LLM 并发控制基础设施 |
+| 2026-03-03 | 完成 P2: 引擎级并行化 |
+| 2026-03-03 | 完成 P3: Phase 4 验证并行化 |
+| 2026-03-03 | 完成 P4: Phase 4.5 对抗验证并行化 |
+| 2026-03-03 | 完成 P5: 21 个测试全部通过 |
+| 2026-03-03 | ✅ 目标完成 |
 
 ---
 
-## 关键改进
+## 预期收益
 
-### 1. Prompt 优化
+| 优化项 | 当前耗时 | 优化后 | 节省 |
+|--------|----------|--------|------|
+| Phase 1/2/3 引擎 | ~60 min | ~25 min | 35 min |
+| Phase 4 验证 | ~20 min | ~3 min | 17 min |
+| Phase 4.5 对抗 | ~60 min | ~10 min | 50 min |
+| **总计** | **~2.4 h** | **~1 h** | **~60%** |
 
-- **Few-Shot 示例**：每个角色 2-4 个高质量示例，展示好的输出格式
-- **角色专业化**：
-  - 攻击者 = 渗透测试专家思维
-  - 防御者 = 代码审计专家思维
-  - 仲裁者 = 安全研究专家思维
-- **链式思考**：5 步分析流程引导
-- **置信度校准**：0.9-1.0 Definitive / 0.7-0.9 Strong / 0.5-0.7 Moderate / 0.3-0.5 Weak / 0.0-0.3 Speculative
+---
 
-### 2. 多轮对抗机制
+## 使用方式
 
-```
-Round 1: analyze() → evaluate()
-    ↓ (if NEEDS_REVIEW / strength_diff < 0.2 / confidence < 0.6)
-Round 2: rebut() → evaluate()
-    ↓ (if still uncertain)
-Round 3: rebut() → evaluate()
-    ↓ (max rounds reached)
-Return final verdict
+### 配置并发数
+
+```bash
+# 环境变量
+export DEEPVULN_LLM_MAX_CONCURRENT=10
+export DEEPVULN_LLM_PROVIDER=openai
 ```
 
-### 3. 新增配置
+### 代码中使用
 
 ```python
-AdversarialVerifierConfig:
-  max_rounds: int = 3              # 最大轮次
-  parallel_analysis: bool = True   # 首轮并行
-  sequential_rebuttal: bool = True # 反驳顺序执行
-  trigger_conditions: TriggerConditions  # 触发条件
+from src.core.llm import configure_global_concurrency, get_global_concurrency_manager
+
+# 配置全局并发管理器
+configure_global_concurrency(max_concurrent=10)
+
+# 或获取现有管理器
+manager = get_global_concurrency_manager()
+print(f"Max concurrent: {manager.max_concurrent}")
+print(f"Stats: {manager.stats.to_dict()}")
 ```
 
-### 4. 新增模型
+---
 
-- `DebateRound` - 单轮辩论记录
-- `TriggerConditions` - 触发条件配置
-- `VerificationResult.debate_rounds` - 所有轮次历史
-- `VerificationResult.max_rounds_reached` - 是否达到最大轮数
+## 风险与缓解
+
+| 风险 | 缓解措施 |
+|------|----------|
+| API 限流 (429) | Semaphore + 已有重试机制 |
+| 内存占用增加 | 限制最大并发数 |
+| 结果顺序混乱 | 使用索引映射保持顺序 |
+| 部分任务失败 | return_exceptions=True + 错误处理 |
 
 ---
 
 ## 下一步建议
 
-1. **实际测试**：用真实漏洞样本测试多轮对抗效果
-2. **性能优化**：考虑 LLM 调用缓存、并行优化
-3. **对比评估**：对比单轮 vs 多轮的判断准确度
-4. **阈值调优**：根据实际效果调整触发条件阈值
+1. **实际测试**：用真实项目测试并行扫描效果
+2. **阈值调优**：根据实际 API 限流情况调整 max_concurrent
+3. **监控统计**：添加扫描耗时统计输出
+4. **CodeQL 缓存**：实现数据库缓存进一步优化

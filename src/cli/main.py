@@ -642,85 +642,13 @@ async def run_full_security_scan(
         console.print("  Agent: ✓")
 
     # =========================================================================
-    # Phase 1: Semgrep Quick Scan
+    # Phase 1/2/3: Parallel Engine Scan (Semgrep + CodeQL + Agent)
     # =========================================================================
 
-    if semgrep_engine and semgrep_engine.is_available():
-        console.print("\n[bold cyan]Phase 1: Semgrep Scan[/]")
-
-        try:
-            with create_progress() as progress:
-                task = progress.add_task("[cyan]Running Semgrep...", total=None)
-                semgrep_result = await semgrep_engine.scan(
-                    source_path=source_path,
-                    severity_filter=None,
-                    use_auto_config=True,
-                )
-                progress.update(task, completed=True, description="[green]Done!")
-
-            if semgrep_result.success:
-                for finding in semgrep_result.findings:
-                    result["all_findings"].append({
-                        "source": "semgrep",
-                        "finding": finding,
-                    })
-                console.print(f"  ✓ Semgrep: {len(semgrep_result.findings)} findings")
-                result["phases"]["semgrep"] = {
-                    "success": True,
-                    "findings_count": len(semgrep_result.findings),
-                }
-            else:
-                console.print(f"  ✗ Semgrep failed: {semgrep_result.error_message}", markup=False)
-                result["phases"]["semgrep"] = {"success": False, "error": semgrep_result.error_message}
-        except Exception as e:
-            console.print(f"  ✗ Semgrep error: {e}", markup=False)
-            result["errors"].append(f"Semgrep error: {e}")
-
-    # =========================================================================
-    # Phase 2: CodeQL Deep Analysis
-    # =========================================================================
-
-    if codeql_engine and codeql_engine.is_available():
-        console.print("\n[bold cyan]Phase 2: CodeQL Analysis[/]")
-        console.print("  [dim]Creating database and running queries...[/]")
-
-        try:
-            with create_progress() as progress:
-                task = progress.add_task("[cyan]Running CodeQL...", total=None)
-                codeql_result = await codeql_engine.scan(
-                    source_path=source_path,
-                    language=primary_lang.lower(),
-                    severity_filter=None,
-                )
-                progress.update(task, completed=True, description="[green]Done!")
-
-            if codeql_result.success:
-                for finding in codeql_result.findings:
-                    result["all_findings"].append({
-                        "source": "codeql",
-                        "finding": finding,
-                    })
-                console.print(f"  ✓ CodeQL: {len(codeql_result.findings)} findings")
-                result["phases"]["codeql"] = {
-                    "success": True,
-                    "findings_count": len(codeql_result.findings),
-                }
-            else:
-                console.print(f"  ✗ CodeQL failed: {codeql_result.error_message}", markup=False)
-                result["phases"]["codeql"] = {"success": False, "error": codeql_result.error_message}
-        except Exception as e:
-            console.print(f"  ✗ CodeQL error: {e}", markup=False)
-            result["errors"].append(f"CodeQL error: {e}")
-
-    # =========================================================================
-    # Phase 3: AI Agent Analysis
-    # =========================================================================
-
+    # Prepare Agent file list (needed for parallel execution)
+    agent_target_files = None
     if agent_engine:
-        console.print("\n[bold cyan]Phase 3: AI Agent Analysis[/]")
-
         # Language name to file extension mapping
-        # Some languages have multiple extensions
         lang_to_exts = {
             "javascript": ["js", "jsx"],
             "typescript": ["ts", "tsx"],
@@ -736,29 +664,25 @@ async def run_full_security_scan(
             "c": ["c"],
         }
 
-        # Get file extensions for ALL detected languages (not just primary)
+        # Get file extensions for ALL detected languages
         all_exts = set()
         for lang in tech_result.languages:
             lang_name = lang.name.lower() if hasattr(lang, 'name') else str(lang).lower().replace("language.", "")
             exts = lang_to_exts.get(lang_name, [lang_name])
             all_exts.update(exts)
 
-        # Also include primary language extensions as fallback
         lang_lower = primary_lang.lower()
         all_exts.update(lang_to_exts.get(lang_lower, [lang_lower]))
 
-        # Filter out excluded directories
         excluded_dirs = {"node_modules", ".next", "dist", "build", "vendor", "__pycache__"}
 
         def is_valid_file(f: Path) -> bool:
-            """Check if file is valid for analysis."""
             return (
                 f.name != "__init__.py"
                 and not any(part in f.parts for part in excluded_dirs)
                 and f.exists()
             )
 
-        # PRIORITY 1: Use entry point files from L1 detection
         entry_point_files = set()
         if surface_report and surface_report.entry_points:
             for ep in surface_report.entry_points:
@@ -766,7 +690,6 @@ async def run_full_security_scan(
                 if is_valid_file(ep_file):
                     entry_point_files.add(str(ep_file))
 
-        # PRIORITY 2: Collect all other source files as fallback
         all_files = []
         for ext in all_exts:
             all_files.extend(source_path.rglob(f"*.{ext}"))
@@ -776,115 +699,160 @@ async def run_full_security_scan(
             if is_valid_file(f) and str(f) not in entry_point_files
         ]
 
-        # Build target file list: entry points first, then fill with other files
         max_files = 50
-        target_files = list(entry_point_files)[:max_files]
-
-        # Fill with other files if entry points < max_files
-        remaining_slots = max_files - len(target_files)
+        agent_target_files = list(entry_point_files)[:max_files]
+        remaining_slots = max_files - len(agent_target_files)
         if remaining_slots > 0 and other_files:
-            target_files.extend(other_files[:remaining_slots])
+            agent_target_files.extend(other_files[:remaining_slots])
 
-        # Log file selection info
-        entry_point_count = min(len(entry_point_files), max_files)
-        other_count = len(target_files) - entry_point_count
+    # Build parallel scan tasks
+    scan_tasks = []
+    task_names = []
 
-        if target_files:
-            if entry_point_count > 0 and other_count > 0:
-                console.print(
-                    f"  Analyzing {entry_point_count} entry point files"
-                    + f" + {other_count} other files"
-                    + f" (total: {len(target_files)})"
-                )
-            elif other_count > 0:
-                console.print(
-                    f"  Analyzing {other_count} other files (no entry points detected)"
-                )
+    if semgrep_engine and semgrep_engine.is_available():
+        scan_tasks.append(("semgrep", semgrep_engine.scan(
+            source_path=source_path,
+            severity_filter=None,
+            use_auto_config=True,
+        )))
+
+    if codeql_engine and codeql_engine.is_available():
+        scan_tasks.append(("codeql", codeql_engine.scan(
+            source_path=source_path,
+            language=primary_lang.lower(),
+            severity_filter=None,
+        )))
+
+    if agent_engine and agent_target_files:
+        scan_tasks.append(("agent", agent_engine.scan(
+            source_path=source_path,
+            files=agent_target_files,
+            vulnerability_focus=[
+                "sql_injection",
+                "xss",
+                "command_injection",
+                "path_traversal",
+                "ssrf",
+                "hardcoded_secrets",
+                "crypto_weakness",
+                "auth_bypass",
+            ],
+        )))
+
+    # Execute all scans in parallel
+    if scan_tasks:
+        console.print("\n[bold cyan]Phase 1/2/3: Parallel Engine Scan[/]")
+        console.print(f"  Running {len(scan_tasks)} engines in parallel: {[t[0] for t in scan_tasks]}")
+
+        with create_progress() as progress:
+            task = progress.add_task(f"[cyan]Scanning with {len(scan_tasks)} engines...", total=None)
+
+            # Run all scans concurrently
+            scan_results = await asyncio.gather(
+                *[t[1] for t in scan_tasks],
+                return_exceptions=True,
+            )
+
+            progress.update(task, completed=True, description="[green]All engines completed!")
+
+        # Process results
+        for (engine_name, _), scan_result in zip(scan_tasks, scan_results):
+            if isinstance(scan_result, Exception):
+                console.print(f"  ✗ {engine_name.capitalize()} error: {scan_result}", markup=False)
+                result["errors"].append(f"{engine_name.capitalize()} error: {scan_result}")
+                result["phases"][engine_name] = {"success": False, "error": str(scan_result)}
+            elif scan_result.success:
+                findings_count = len(scan_result.findings) if hasattr(scan_result, 'findings') else 0
+                for finding in (scan_result.findings or []):
+                    result["all_findings"].append({
+                        "source": engine_name,
+                        "finding": finding,
+                    })
+                console.print(f"  ✓ {engine_name.capitalize()}: {findings_count} findings")
+                result["phases"][engine_name] = {
+                    "success": True,
+                    "findings_count": findings_count,
+                }
             else:
-                console.print(f"  Analyzing {len(target_files)} files...")
-            try:
-                with create_progress() as progress:
-                    task = progress.add_task("[cyan]Running AI analysis...", total=None)
-                    agent_result = await agent_engine.scan(
-                        source_path=source_path,
-                        files=target_files,
-                        vulnerability_focus=[
-                            "sql_injection",
-                            "xss",
-                            "command_injection",
-                            "path_traversal",
-                            "ssrf",
-                            "hardcoded_secrets",
-                            "crypto_weakness",
-                            "auth_bypass",
-                        ],
-                    )
-                    progress.update(task, completed=True, description="[green]Done!")
-
-                if agent_result.findings:
-                    for finding in agent_result.findings:
-                        result["all_findings"].append({
-                            "source": "agent",
-                            "finding": finding,
-                        })
-                    console.print(f"  ✓ Agent: {len(agent_result.findings)} findings")
-                    result["phases"]["agent"] = {
-                        "success": True,
-                        "findings_count": len(agent_result.findings),
-                    }
-                else:
-                    console.print("  ✓ Agent: No vulnerabilities found")
-                    result["phases"]["agent"] = {"success": True, "findings_count": 0}
-            except Exception as e:
-                console.print(f"  ✗ Agent error: {e}", markup=False)
-                result["errors"].append(f"Agent error: {e}")
-        else:
-            console.print("  ⚠ No target files found for analysis")
+                error_msg = scan_result.error_message if hasattr(scan_result, 'error_message') else "Unknown error"
+                console.print(f"  ✗ {engine_name.capitalize()} failed: {error_msg}", markup=False)
+                result["phases"][engine_name] = {"success": False, "error": error_msg}
 
     # =========================================================================
-    # Phase 4: Exploitability Verification (with optional LLM)
+    # Phase 4: Exploitability Verification (with optional LLM) - PARALLEL
     # =========================================================================
 
     if result["all_findings"] and (llm_verify or llm_client):
-        console.print("\n[bold cyan]Phase 4: Exploitability Verification[/]")
+        console.print("\n[bold cyan]Phase 4: Exploitability Verification (Parallel)[/]")
         console.print(f"  LLM Verification: {'✓' if llm_verify else '✗'}")
 
         try:
+            from src.core.llm import get_global_concurrency_manager
+
             executor = RoundFourExecutor(
                 source_path=source_path,
                 llm_client=llm_client if llm_verify else None,
                 enable_llm_assessment=llm_verify,
-                attack_surface_report=surface_report,  # Pass L1 attack surface to L3
+                attack_surface_report=surface_report,
             )
 
-            verified_results = []
             total = len(result["all_findings"])
+            console.print(f"  Verifying {total} findings in parallel...")
 
-            for i, item in enumerate(result["all_findings"], 1):
+            # Build verification tasks
+            async def verify_single_finding(item: dict) -> dict:
+                """Verify a single finding with concurrency control."""
                 finding = item["finding"]
-                console.print(f"  [{i}/{total}] {finding.title[:50]}...")
-
                 try:
-                    candidate = VulnerabilityCandidate(
-                        id=str(uuid.uuid4())[:8],
-                        finding=finding,
-                        confidence=ConfidenceLevel.MEDIUM,
-                        discovered_in_round=1,
-                    )
+                    # Use global concurrency manager for LLM calls
+                    concurrency_manager = get_global_concurrency_manager()
 
-                    verify_result = await executor._verify_exploitability(candidate)
-                    verified_results.append({
+                    async with concurrency_manager:
+                        candidate = VulnerabilityCandidate(
+                            id=str(uuid.uuid4())[:8],
+                            finding=finding,
+                            confidence=ConfidenceLevel.MEDIUM,
+                            discovered_in_round=1,
+                        )
+                        verify_result = await executor._verify_exploitability(candidate)
+
+                    return {
                         "source": item["source"],
                         "finding": finding,
                         "exploitability": verify_result,
-                    })
+                    }
                 except Exception as e:
-                    verified_results.append({
+                    return {
                         "source": item["source"],
                         "finding": finding,
                         "exploitability": None,
                         "error": str(e),
-                    })
+                    }
+
+            # Execute all verifications in parallel with concurrency control
+            with create_progress() as progress:
+                task = progress.add_task(f"[cyan]Verifying {total} findings...", total=None)
+
+                verified_results = await asyncio.gather(
+                    *[verify_single_finding(item) for item in result["all_findings"]],
+                    return_exceptions=True,
+                )
+
+                # Handle any unexpected exceptions
+                processed_results = []
+                for i, r in enumerate(verified_results):
+                    if isinstance(r, Exception):
+                        processed_results.append({
+                            "source": result["all_findings"][i]["source"],
+                            "finding": result["all_findings"][i]["finding"],
+                            "exploitability": None,
+                            "error": str(r),
+                        })
+                    else:
+                        processed_results.append(r)
+
+                verified_results = processed_results
+                progress.update(task, completed=True, description="[green]Verification complete!")
 
             result["verified_findings"] = verified_results
 
@@ -899,18 +867,18 @@ async def run_full_security_scan(
                 status_counts[status] = status_counts.get(status, 0) + 1
 
             result["statistics"]["by_exploitability"] = status_counts
-            console.print(f"\n  Results: {status_counts}")
+            console.print(f"  Results: {status_counts}")
 
         except Exception as e:
             console.print(f"  ✗ Verification error: {e}", markup=False)
             result["errors"].append(f"Verification error: {e}")
 
     # =========================================================================
-    # Phase 4.5: Adversarial Verification (L3.5)
+    # Phase 4.5: Adversarial Verification (L3.5) - PARALLEL
     # =========================================================================
 
     if adversarial and result["verified_findings"] and llm_client:
-        console.print("\n[bold cyan]Phase 4.5: Adversarial Verification (L3.5)[/]")
+        console.print("\n[bold cyan]Phase 4.5: Adversarial Verification (Parallel)[/]")
         console.print("  [dim]Three-role debate: Attacker vs Defender → Arbiter[/]")
 
         try:
@@ -919,6 +887,7 @@ async def run_full_security_scan(
                 AdversarialVerifierConfig,
                 VerdictType,
             )
+            from src.core.llm import get_global_concurrency_manager
 
             adversarial_config = AdversarialVerifierConfig(
                 enabled=True,
@@ -932,9 +901,6 @@ async def run_full_security_scan(
                 config=adversarial_config,
             )
 
-            adversarial_results = []
-            total = len(result["verified_findings"])
-
             # Only verify non-suspicious, medium+ severity findings
             findings_to_verify = [
                 v for v in result["verified_findings"]
@@ -943,12 +909,12 @@ async def run_full_security_scan(
             ]
 
             if findings_to_verify:
-                console.print(f"  Verifying {len(findings_to_verify)} findings (medium+ severity)")
+                console.print(f"  Verifying {len(findings_to_verify)} findings in parallel (medium+ severity)")
 
-                for i, item in enumerate(findings_to_verify, 1):
+                # Build parallel verification tasks
+                async def verify_single_adversarial(item: dict) -> dict:
+                    """Verify a single finding with adversarial verification and concurrency control."""
                     finding = item["finding"]
-                    console.print(f"  [{i}/{len(findings_to_verify)}] {finding.title[:40]}...")
-
                     try:
                         # Get code context
                         code_context = finding.location.snippet or finding.description
@@ -964,25 +930,54 @@ async def run_full_security_scan(
                             except Exception:
                                 pass
 
-                        verify_result = await verifier.verify_finding(
-                            finding=finding,
-                            code_context=code_context,
-                        )
+                        # Use global concurrency manager
+                        concurrency_manager = get_global_concurrency_manager()
+                        async with concurrency_manager:
+                            verify_result = await verifier.verify_finding(
+                                finding=finding,
+                                code_context=code_context,
+                            )
 
-                        adversarial_results.append({
+                        return {
                             "source": item["source"],
                             "finding": finding,
                             "adversarial": verify_result,
-                        })
-
+                        }
                     except Exception as e:
-                        console.print(f"    [yellow]Warning: {e}[/]")
-                        adversarial_results.append({
+                        return {
                             "source": item["source"],
                             "finding": finding,
                             "adversarial": None,
                             "error": str(e),
-                        })
+                        }
+
+                # Execute all adversarial verifications in parallel
+                with create_progress() as progress:
+                    task = progress.add_task(
+                        f"[cyan]Adversarial verifying {len(findings_to_verify)} findings...",
+                        total=None
+                    )
+
+                    adversarial_results = await asyncio.gather(
+                        *[verify_single_adversarial(item) for item in findings_to_verify],
+                        return_exceptions=True,
+                    )
+
+                    # Handle any unexpected exceptions
+                    processed_results = []
+                    for i, r in enumerate(adversarial_results):
+                        if isinstance(r, Exception):
+                            processed_results.append({
+                                "source": findings_to_verify[i]["source"],
+                                "finding": findings_to_verify[i]["finding"],
+                                "adversarial": None,
+                                "error": str(r),
+                            })
+                        else:
+                            processed_results.append(r)
+
+                    adversarial_results = processed_results
+                    progress.update(task, completed=True, description="[green]Adversarial verification complete!")
 
                 # Store adversarial results
                 result["adversarial_results"] = adversarial_results
@@ -1046,17 +1041,48 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     """
     from datetime import datetime
 
+    # Build adversarial lookup: finding_id -> adversarial result
+    adversarial_lookup = {}
+    for adv in result.get("adversarial_results", []):
+        finding = adv.get("finding")
+        if finding and hasattr(finding, "id"):
+            adversarial_lookup[finding.id] = adv
+
     # Separate confirmed findings from suspicious code
+    # Also categorize by adversarial verdict
     confirmed_findings = []
     suspicious_findings = []
+    adversarial_confirmed = []
+    adversarial_false_positive = []
+    adversarial_conditional = []
+    adversarial_needs_review = []
 
     for v in result.get("verified_findings", []):
         finding = v["finding"]
         is_suspicious = finding.metadata.get("is_suspicious", False) if finding.metadata else False
+
+        # Get adversarial result if available
+        adv_result = adversarial_lookup.get(finding.id if hasattr(finding, "id") else None)
+        v["adversarial"] = adv_result  # Attach to v for later use
+
         if is_suspicious:
             suspicious_findings.append(v)
         else:
             confirmed_findings.append(v)
+
+            # Categorize by adversarial verdict
+            if adv_result and adv_result.get("adversarial"):
+                adv = adv_result["adversarial"]
+                if hasattr(adv, "verdict") and adv.verdict:
+                    verdict_value = adv.verdict.verdict.value if hasattr(adv.verdict.verdict, "value") else str(adv.verdict.verdict)
+                    if verdict_value == "confirmed":
+                        adversarial_confirmed.append(v)
+                    elif verdict_value == "false_positive":
+                        adversarial_false_positive.append(v)
+                    elif verdict_value == "conditional":
+                        adversarial_conditional.append(v)
+                    elif verdict_value == "needs_review":
+                        adversarial_needs_review.append(v)
 
     lines = []
     lines.append("=" * 70)
@@ -1104,6 +1130,15 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
         lines.append("  By Exploitability:")
         for status, count in stats["by_exploitability"].items():
             lines.append(f"    - {status}: {count}")
+
+    # Adversarial Verification Statistics
+    if result.get("adversarial_results"):
+        lines.append("  By Adversarial Verdict:")
+        lines.append(f"    - CONFIRMED: {len(adversarial_confirmed)}")
+        lines.append(f"    - CONDITIONAL: {len(adversarial_conditional)}")
+        lines.append(f"    - FALSE_POSITIVE: {len(adversarial_false_positive)}")
+        lines.append(f"    - NEEDS_REVIEW: {len(adversarial_needs_review)}")
+
     lines.append("")
 
     # Errors
@@ -1126,13 +1161,27 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
             for i, v in enumerate(confirmed_findings[:50], 1):
                 finding = v["finding"]
                 exp = v.get("exploitability")
+                adv = v.get("adversarial")
 
                 lines.append(f"\n{i}. {finding.title}")
                 lines.append(f"   Source: {v['source']}")
                 lines.append(f"   Location: {finding.location.to_display()}")
                 lines.append(f"   Severity: {finding.severity.value.upper()}")
 
-                if exp:
+                # Prefer adversarial verification result over exploitability
+                if adv and adv.get("adversarial"):
+                    adv_result = adv["adversarial"]
+                    if hasattr(adv_result, "verdict") and adv_result.verdict:
+                        verdict = adv_result.verdict
+                        verdict_value = verdict.verdict.value if hasattr(verdict.verdict, "value") else str(verdict.verdict)
+                        confidence = verdict.confidence if hasattr(verdict, "confidence") else 0.5
+                        reasoning = verdict.reasoning if hasattr(verdict, "reasoning") else ""
+
+                        lines.append(f"   Adversarial Verdict: {verdict_value.upper()}")
+                        lines.append(f"   Confidence: {confidence:.0%}")
+                        if reasoning:
+                            lines.append(f"   Reasoning: {reasoning[:300]}...")
+                elif exp:
                     lines.append(f"   Exploitability: {exp.status.value.upper()}")
                     lines.append(f"   Confidence: {exp.confidence:.0%}")
                     if exp.reasoning:

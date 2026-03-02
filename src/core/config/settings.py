@@ -148,6 +148,40 @@ class FetcherSettings(BaseSettings):
     )
 
 
+class LLMSettings(BaseSettings):
+    """LLM configuration settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="DEEPVULN_LLM_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    max_concurrent: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Maximum concurrent LLM API requests",
+    )
+    provider: str = Field(
+        default="unknown",
+        description="LLM provider (openai, azure, glm, anthropic, local)",
+    )
+    timeout: int = Field(
+        default=120,
+        ge=10,
+        le=600,
+        description="LLM API request timeout in seconds",
+    )
+    max_retries: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="Maximum retry attempts for LLM API calls",
+    )
+
+
 class Settings(BaseSettings):
     """Main application settings."""
 
@@ -162,6 +196,7 @@ class Settings(BaseSettings):
     git: GitSettings = Field(default_factory=GitSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     fetcher: FetcherSettings = Field(default_factory=FetcherSettings)
+    llm: LLMSettings = Field(default_factory=LLMSettings)
 
     @classmethod
     def from_yaml(cls, path: Path) -> "Settings":
@@ -181,12 +216,14 @@ class Settings(BaseSettings):
         git_config = config.get("git", {})
         logging_config = config.get("logging", {})
         fetcher_config = config.get("fetcher", {})
+        llm_config = config.get("llm", {})
 
         return cls(
             workspace=WorkspaceSettings(**workspace_config),
             git=GitSettings(**git_config),
             logging=LoggingSettings(**logging_config),
             fetcher=FetcherSettings(**fetcher_config),
+            llm=LLMSettings(**llm_config),
         )
 
     @classmethod
