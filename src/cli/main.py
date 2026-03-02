@@ -929,6 +929,18 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     """
     from datetime import datetime
 
+    # Separate confirmed findings from suspicious code
+    confirmed_findings = []
+    suspicious_findings = []
+
+    for v in result.get("verified_findings", []):
+        finding = v["finding"]
+        is_suspicious = finding.metadata.get("is_suspicious", False) if finding.metadata else False
+        if is_suspicious:
+            suspicious_findings.append(v)
+        else:
+            confirmed_findings.append(v)
+
     lines = []
     lines.append("=" * 70)
     lines.append("DeepVuln Full Security Scan Report")
@@ -968,6 +980,8 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     stats = result.get("statistics", {})
     lines.append(f"  Total Findings: {stats.get('total_findings', 0)}")
     lines.append(f"  Verified: {stats.get('verified_count', 0)}")
+    lines.append(f"  Confirmed Vulnerabilities: {len(confirmed_findings)}")
+    lines.append(f"  Suspicious Code: {len(suspicious_findings)}")
 
     if "by_exploitability" in stats:
         lines.append("  By Exploitability:")
@@ -985,25 +999,53 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
         lines.append("")
 
     # Detailed Findings (if requested)
-    if options.get("detailed") and result.get("verified_findings"):
-        lines.append("=" * 70)
-        lines.append("Detailed Findings")
-        lines.append("=" * 70)
+    if options.get("detailed"):
+        # Confirmed Findings
+        if confirmed_findings:
+            lines.append("=" * 70)
+            lines.append("Confirmed Vulnerabilities")
+            lines.append("=" * 70)
 
-        for i, v in enumerate(result["verified_findings"][:50], 1):
-            finding = v["finding"]
-            exp = v.get("exploitability")
+            for i, v in enumerate(confirmed_findings[:50], 1):
+                finding = v["finding"]
+                exp = v.get("exploitability")
 
-            lines.append(f"\n{i}. {finding.title}")
-            lines.append(f"   Source: {v['source']}")
-            lines.append(f"   Location: {finding.location.to_display()}")
-            lines.append(f"   Severity: {finding.severity.value.upper()}")
+                lines.append(f"\n{i}. {finding.title}")
+                lines.append(f"   Source: {v['source']}")
+                lines.append(f"   Location: {finding.location.to_display()}")
+                lines.append(f"   Severity: {finding.severity.value.upper()}")
 
-            if exp:
-                lines.append(f"   Exploitability: {exp.status.value.upper()}")
-                lines.append(f"   Confidence: {exp.confidence:.0%}")
-                if exp.reasoning:
-                    lines.append(f"   Reasoning: {exp.reasoning[:200]}...")
+                if exp:
+                    lines.append(f"   Exploitability: {exp.status.value.upper()}")
+                    lines.append(f"   Confidence: {exp.confidence:.0%}")
+                    if exp.reasoning:
+                        lines.append(f"   Reasoning: {exp.reasoning[:200]}...")
+
+        # Suspicious Code
+        if suspicious_findings:
+            lines.append("")
+            lines.append("=" * 70)
+            lines.append("Suspicious Code - Manual Review Required")
+            lines.append("=" * 70)
+            lines.append("These code patterns may indicate vulnerabilities but require human verification.")
+            lines.append("")
+
+            for i, v in enumerate(suspicious_findings[:30], 1):
+                finding = v["finding"]
+                metadata = finding.metadata or {}
+                vuln_type = metadata.get("potential_vulnerability", "unknown")
+                recommended_action = metadata.get("recommended_action", "manual_review")
+
+                lines.append(f"\n{i}. [SUSPICIOUS] {finding.title}")
+                lines.append(f"   Source: {v['source']}")
+                lines.append(f"   Location: {finding.location.to_display()}")
+                lines.append(f"   Potential Type: {vuln_type}")
+                lines.append(f"   Confidence: {finding.confidence:.0%}")
+                lines.append(f"   Why Suspicious: {finding.description}")
+                lines.append(f"   Recommended Action: {recommended_action}")
+
+                if finding.location.snippet:
+                    lines.append(f"   Code: {finding.location.snippet[:100]}")
 
     lines.append("")
     lines.append("=" * 70)
@@ -1016,6 +1058,8 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     console.print(f"[green]Report exported to: {export_path}[/]")
     console.print(f"  Total Findings: {stats.get('total_findings', 0)}")
     console.print(f"  Verified: {stats.get('verified_count', 0)}")
+    if suspicious_findings:
+        console.print(f"  [yellow]Suspicious Code: {len(suspicious_findings)}[/]")
 
 
 def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | None = None) -> None:
@@ -1160,8 +1204,34 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
     total = stats.get("total_findings", 0)
     verified = stats.get("verified_count", 0)
 
+    # Separate confirmed findings from suspicious code
+    confirmed_findings = []
+    suspicious_findings = []
+
+    for v in result.get("verified_findings", []):
+        finding = v["finding"]
+        # Check if this is marked as suspicious in metadata
+        is_suspicious = finding.metadata.get("is_suspicious", False) if finding.metadata else False
+        if is_suspicious:
+            suspicious_findings.append(v)
+        else:
+            confirmed_findings.append(v)
+
+    # Also check all_findings for suspicious code (if not verified yet)
+    if not result.get("verified_findings"):
+        for item in result.get("all_findings", []):
+            finding = item["finding"]
+            is_suspicious = finding.metadata.get("is_suspicious", False) if finding.metadata else False
+            if is_suspicious:
+                suspicious_findings.append(item)
+
+    confirmed_count = len(confirmed_findings)
+    suspicious_count = len(suspicious_findings)
+
     console.print(f"[bold]Total Findings:[/] {total}")
     console.print(f"[bold]Verified:[/] {verified}")
+    if suspicious_count > 0:
+        console.print(f"[bold yellow]Suspicious Code:[/] {suspicious_count} [dim](requires manual review)[/]")
 
     # Exploitability breakdown
     if "by_exploitability" in stats:
@@ -1179,11 +1249,11 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
             emoji = status_emoji.get(status, "⚪")
             console.print(f"  {emoji} {status.upper()}: {count}")
 
-    # Findings table
-    if result.get("verified_findings"):
+    # Confirmed Findings table
+    if confirmed_findings:
         console.print()
 
-        findings_table = Table(title="Verified Findings", show_header=True)
+        findings_table = Table(title="Confirmed Findings", show_header=True)
         findings_table.add_column("Status", width=12)
         findings_table.add_column("Severity", width=10)
         findings_table.add_column("Source", width=10)
@@ -1205,7 +1275,7 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
             "info": "dim",
         }
 
-        for v in result["verified_findings"][:30]:  # Limit display
+        for v in confirmed_findings[:30]:  # Limit display
             finding = v["finding"]
             exp = v.get("exploitability")
 
@@ -1237,8 +1307,84 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
 
         console.print(findings_table)
 
-        if len(result["verified_findings"]) > 30:
-            console.print(f"\n[dim]... and {len(result['verified_findings']) - 30} more findings[/]")
+        if len(confirmed_findings) > 30:
+            console.print(f"\n[dim]... and {len(confirmed_findings) - 30} more findings[/]")
+
+    # Suspicious Code table (separate section)
+    if suspicious_findings:
+        console.print()
+        console.print("[bold yellow]⚠ Suspicious Code - Requires Manual Review[/]")
+        console.print("[dim]These code patterns may indicate vulnerabilities but require human verification.[/]")
+        console.print()
+
+        suspicious_table = Table(title="Suspicious Code Patterns", show_header=True)
+        suspicious_table.add_column("Type", width=18)
+        suspicious_table.add_column("Confidence", width=10)
+        suspicious_table.add_column("Source", width=10)
+        suspicious_table.add_column("Location", width=35)
+        suspicious_table.add_column("Why Suspicious", width=40)
+
+        for v in suspicious_findings[:20]:  # Limit display
+            finding = v["finding"]
+            metadata = finding.metadata or {}
+
+            # Get potential vulnerability type
+            vuln_type = metadata.get("potential_vulnerability", "unknown")
+            type_str = f"[yellow]{vuln_type}[/]"
+
+            # Confidence with color
+            conf = finding.confidence
+            if conf >= 0.5:
+                conf_str = f"[orange3]{conf:.0%}[/]"
+            else:
+                conf_str = f"[dim]{conf:.0%}[/]"
+
+            # Source
+            source = v.get("source", "unknown")
+
+            # Location
+            location = finding.location.to_display()
+            if len(location) > 35:
+                location = location[:32] + "..."
+
+            # Why suspicious (from description or metadata)
+            why = finding.description[:40] if finding.description else "Pattern detected"
+            if len(why) > 40:
+                why = why[:37] + "..."
+
+            suspicious_table.add_row(
+                type_str,
+                conf_str,
+                source,
+                location,
+                why,
+            )
+
+        console.print(suspicious_table)
+
+        if len(suspicious_findings) > 20:
+            console.print(f"\n[dim]... and {len(suspicious_findings) - 20} more suspicious patterns[/]")
+
+        # Add recommended actions section
+        console.print()
+        console.print("[bold]Recommended Actions:[/]")
+        action_counts = {}
+        for v in suspicious_findings:
+            metadata = v["finding"].metadata or {}
+            action = metadata.get("recommended_action", "manual_review")
+            action_counts[action] = action_counts.get(action, 0) + 1
+
+        action_labels = {
+            "manual_review": "Manual code review",
+            "verify_data_flow": "Trace data flow",
+            "check_sanitization": "Check input sanitization",
+            "check_authentication": "Verify authentication",
+            "check_authorization": "Verify authorization",
+        }
+
+        for action, count in sorted(action_counts.items(), key=lambda x: -x[1]):
+            label = action_labels.get(action, action)
+            console.print(f"  • {label}: {count} items")
 
     # Errors
     if result.get("errors"):
@@ -1281,40 +1427,99 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
     console.print()
     console.rule("[bold cyan]Detailed Findings[/]")
 
-    for i, v in enumerate(result.get("verified_findings", [])[:20], 1):
+    # Separate confirmed findings from suspicious code
+    confirmed_findings = []
+    suspicious_findings = []
+
+    for v in result.get("verified_findings", []):
         finding = v["finding"]
-        exp = v.get("exploitability")
+        is_suspicious = finding.metadata.get("is_suspicious", False) if finding.metadata else False
+        if is_suspicious:
+            suspicious_findings.append(v)
+        else:
+            confirmed_findings.append(v)
 
-        console.print(f"\n[bold]{i}. {finding.title}[/]")
-        console.print(f"   [dim]Source:[/] {v['source']}")
-        console.print(f"   [dim]Location:[/] {finding.location.to_display()}")
-        console.print(f"   [dim]Severity:[/] {finding.severity.value.upper()}")
+    # Display confirmed findings first
+    if confirmed_findings:
+        console.print("\n[bold green]✓ Confirmed Vulnerabilities[/]")
+        for i, v in enumerate(confirmed_findings[:20], 1):
+            finding = v["finding"]
+            exp = v.get("exploitability")
 
-        if exp:
-            status_emoji = {
-                "exploitable": "🔴",
-                "conditional": "🟠",
-                "needs_review": "⚪",
-                "unlikely": "🟡",
-                "not_exploitable": "🟢",
+            console.print(f"\n[bold]{i}. {finding.title}[/]")
+            console.print(f"   [dim]Source:[/] {v['source']}")
+            console.print(f"   [dim]Location:[/] {finding.location.to_display()}")
+            console.print(f"   [dim]Severity:[/] {finding.severity.value.upper()}")
+
+            if exp:
+                status_emoji = {
+                    "exploitable": "🔴",
+                    "conditional": "🟠",
+                    "needs_review": "⚪",
+                    "unlikely": "🟡",
+                    "not_exploitable": "🟢",
+                }
+                emoji = status_emoji.get(exp.status.value, "⚪")
+                console.print(f"   [dim]Exploitability:[/] {emoji} {exp.status.value.upper()}")
+                console.print(f"   [dim]Confidence:[/] {exp.confidence:.0%}")
+
+                if exp.reasoning:
+                    reasoning = exp.reasoning[:300]
+                    console.print(f"   [dim]Reasoning:[/] {reasoning}...")
+
+                if exp.severity_adjustment:
+                    orig = exp.severity_adjustment.original_severity.value.upper()
+                    adj = exp.severity_adjustment.adjusted_severity.value.upper()
+                    if orig != adj:
+                        console.print(f"   [dim]Adjusted:[/] {orig} → {adj}")
+
+            if finding.description:
+                desc = finding.description[:200]
+                console.print(f"   [dim]Description:[/] {desc}...")
+
+            if finding.fix_suggestion:
+                console.print(f"   [dim]Fix:[/] {finding.fix_suggestion[:150]}...")
+
+    # Display suspicious code separately
+    if suspicious_findings:
+        console.print("\n")
+        console.rule("[bold yellow]⚠ Suspicious Code - Manual Review Required[/]")
+
+        for i, v in enumerate(suspicious_findings[:15], 1):
+            finding = v["finding"]
+            metadata = finding.metadata or {}
+
+            vuln_type = metadata.get("potential_vulnerability", "unknown")
+            recommended_action = metadata.get("recommended_action", "manual_review")
+
+            console.print(f"\n[bold yellow]{i}. [Suspicious] {finding.title}[/]")
+            console.print(f"   [dim]Source:[/] {v['source']}")
+            console.print(f"   [dim]Location:[/] {finding.location.to_display()}")
+            console.print(f"   [dim]Potential Type:[/] {vuln_type}")
+            console.print(f"   [dim]Confidence:[/] {finding.confidence:.0%}")
+
+            if finding.description:
+                console.print(f"   [dim]Why Suspicious:[/] {finding.description}")
+
+            # Show code snippet if available
+            if finding.location.snippet:
+                console.print(f"   [dim]Code:[/]")
+                console.print(f"   [dim]  {finding.location.snippet[:100]}[/]")
+
+            # Recommended action
+            action_labels = {
+                "manual_review": "Manual code review recommended",
+                "verify_data_flow": "Trace data flow from source to sink",
+                "check_sanitization": "Check input sanitization",
+                "check_authentication": "Verify authentication mechanisms",
+                "check_authorization": "Verify authorization checks",
             }
-            emoji = status_emoji.get(exp.status.value, "⚪")
-            console.print(f"   [dim]Exploitability:[/] {emoji} {exp.status.value.upper()}")
-            console.print(f"   [dim]Confidence:[/] {exp.confidence:.0%}")
+            action_label = action_labels.get(recommended_action, recommended_action)
+            console.print(f"   [dim]Action:[/] {action_label}")
 
-            if exp.reasoning:
-                reasoning = exp.reasoning[:300]
-                console.print(f"   [dim]Reasoning:[/] {reasoning}...")
-
-            if exp.severity_adjustment:
-                orig = exp.severity_adjustment.original_severity.value.upper()
-                adj = exp.severity_adjustment.adjusted_severity.value.upper()
-                if orig != adj:
-                    console.print(f"   [dim]Adjusted:[/] {orig} → {adj}")
-
-        if finding.description:
-            desc = finding.description[:200]
-            console.print(f"   [dim]Description:[/] {desc}...")
+    # Summary if no findings
+    if not confirmed_findings and not suspicious_findings:
+        console.print("\n[dim]No findings to display.[/]")
 
 
 @click.group(invoke_without_command=True)

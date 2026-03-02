@@ -6,6 +6,7 @@ complementing pattern-based tools like Semgrep and CodeQL with semantic understa
 """
 
 import asyncio
+import logging
 import os
 import uuid
 from datetime import UTC, datetime
@@ -116,6 +117,7 @@ class OpenCodeAgent(BaseEngine):
         self.max_file_size = max_file_size
         self.max_files = max_files
         self.max_concurrent = max_concurrent
+        self.logger = logging.getLogger(__name__)
 
         # Initialize LLM client
         if llm_client:
@@ -332,6 +334,21 @@ class OpenCodeAgent(BaseEngine):
                 error_message=f"Scan failed: {e}",
             )
 
+    def _should_skip_file(self, file_path: Path, source_path: Path) -> bool:
+        """Check if a file should be skipped based on its relative path.
+
+        Only checks directories within the source project, not parent directories.
+        This avoids false positives when the source_path itself contains
+        skip directory names (e.g., /opt/target/project).
+        """
+        try:
+            relative_path = file_path.relative_to(source_path)
+            # Check each part of the relative path against skip directories
+            return any(part in SKIP_DIRECTORIES for part in relative_path.parts)
+        except ValueError:
+            # file_path is not relative to source_path
+            return True
+
     def _detect_language(self, source_path: Path) -> str | None:
         """Detect the primary programming language of a project."""
         extensions: dict[str, int] = {}
@@ -357,10 +374,10 @@ class OpenCodeAgent(BaseEngine):
 
         for ext, lang in extension_to_lang.items():
             files = list(source_path.rglob(f"*{ext}"))
-            # Skip files in excluded directories
+            # Skip files in excluded directories (only check relative path)
             files = [
                 f for f in files
-                if not any(skip in f.parts for skip in SKIP_DIRECTORIES)
+                if not self._should_skip_file(f, source_path)
             ]
             if files:
                 extensions[lang] = extensions.get(lang, 0) + len(files)
@@ -376,8 +393,8 @@ class OpenCodeAgent(BaseEngine):
 
         for ext in ANALYZABLE_EXTENSIONS:
             for file_path in source_path.rglob(f"*{ext}"):
-                # Skip excluded directories
-                if any(skip in file_path.parts for skip in SKIP_DIRECTORIES):
+                # Skip excluded directories (only check relative path)
+                if self._should_skip_file(file_path, source_path):
                     continue
 
                 # Check file size
@@ -527,7 +544,10 @@ class OpenCodeAgent(BaseEngine):
         file_path: str,
         source_path: Path,
     ) -> list[Finding]:
-        """Parse LLM response into Finding objects."""
+        """Parse LLM response into Finding objects.
+
+        Also parses suspicious_code section from the response.
+        """
         findings = []
 
         try:
@@ -544,6 +564,21 @@ class OpenCodeAgent(BaseEngine):
                 if finding:
                     findings.append(finding)
 
+            # Parse suspicious_code array - these are lower confidence findings
+            # that need manual review or further verification
+            for item in data.get("suspicious_code", []):
+                finding = self._convert_suspicious_to_finding(
+                    item=item,
+                    file_path=file_path,
+                    source_path=source_path,
+                )
+                if finding:
+                    findings.append(finding)
+                    self.logger.info(
+                        f"Found suspicious code in {file_path}: "
+                        f"{item.get('why_suspicious', 'unknown')}"
+                    )
+
         except JSONParseError as e:
             # Log detailed error for debugging
             response_preview = response[:500] + "..." if len(response) > 500 else response
@@ -558,6 +593,76 @@ class OpenCodeAgent(BaseEngine):
             )
 
         return findings
+
+    def _convert_suspicious_to_finding(
+        self,
+        item: dict[str, Any],
+        file_path: str,
+        source_path: Path,
+    ) -> Finding | None:
+        """Convert a suspicious_code item to a Finding object.
+
+        Suspicious code findings have lower confidence and are marked
+        for manual review.
+        """
+        try:
+            # Parse location (format: "file.py:45" or just line number)
+            location_str = item.get("location", f"{file_path}:1")
+            if ":" in location_str:
+                parts = location_str.rsplit(":", 1)
+                loc_file = parts[0] if parts[0] else file_path
+                try:
+                    line = int(parts[1])
+                except ValueError:
+                    line = 1
+            else:
+                loc_file = file_path
+                try:
+                    line = int(location_str)
+                except ValueError:
+                    line = 1
+
+            # Create location
+            location = CodeLocation(
+                file=loc_file,
+                line=line,
+                end_line=line,
+                snippet=item.get("code_snippet"),
+            )
+
+            # Map vulnerability type
+            vuln_type = item.get("potential_vulnerability", "suspicious")
+            why_suspicious = item.get("why_suspicious", "Suspicious code pattern detected")
+
+            # Build title - prefix with [Suspicious] to indicate needs review
+            title = f"[Suspicious] {why_suspicious[:80]}"
+
+            # Build finding with LOW severity for suspicious code
+            finding = Finding(
+                id=f"suspicious-{uuid.uuid4().hex[:8]}",
+                rule_id=f"suspicious_{vuln_type}",
+                type=FindingType.VULNERABILITY,
+                severity=SeverityLevel.LOW,  # Suspicious code is always LOW
+                confidence=float(item.get("confidence", 0.3)),
+                title=title,
+                description=why_suspicious,
+                fix_suggestion=item.get("recommended_action"),
+                location=location,
+                source="agent",
+                cwe=None,
+                owasp=None,
+                metadata={
+                    "is_suspicious": True,
+                    "potential_vulnerability": vuln_type,
+                    "recommended_action": item.get("recommended_action"),
+                },
+            )
+
+            return finding
+
+        except Exception as e:
+            self.logger.debug(f"Failed to parse suspicious code item: {e}")
+            return None
 
     def _convert_to_finding(
         self,

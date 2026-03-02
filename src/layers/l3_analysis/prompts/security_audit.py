@@ -9,7 +9,255 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-# Vulnerability types the agent should look for
+# =============================================================================
+# VULNERABILITY PATTERN LIBRARY
+# =============================================================================
+# Detailed patterns for each vulnerability type including:
+# - vulnerable_patterns: Code patterns that indicate vulnerability
+# - sinks: Dangerous functions that can be exploited
+# - sanitizers: Functions/patterns that mitigate the vulnerability
+# - languages: Language-specific patterns
+
+VULNERABILITY_PATTERNS = {
+    "sql_injection": {
+        "name": "SQL Injection",
+        "cwe": "CWE-89",
+        "description": "User input is used in SQL queries without proper sanitization",
+        "vulnerable_patterns": [
+            # Python
+            'f"SELECT * FROM {table}"',
+            'f"SELECT * FROM users WHERE id = {user_id}"',
+            'cursor.execute("SELECT * FROM " + table_name)',
+            'cursor.execute(query % user_input)',
+            'cursor.execute(query.format(user_input))',
+            '.raw("SELECT * FROM " + user_input)',
+            '.extra(where=[user_input])',
+            # JavaScript/TypeScript
+            'connection.query(`SELECT * FROM ${table}`)',
+            'sequelize.query(`SELECT * FROM users WHERE id = ${id}`)',
+            'knex.raw(`SELECT * FROM ${table}`)',
+            # Java
+            '"SELECT * FROM " + tableName',
+            'createQuery("FROM User WHERE id = " + id)',
+            'createNativeQuery("SELECT * FROM " + table)',
+            # Go
+            'fmt.Sprintf("SELECT * FROM %s", table)',
+            'db.Query("SELECT * FROM " + table)',
+        ],
+        "sinks": [
+            "execute(", "executemany(", "executescript(",
+            "raw(", "extra(", "Raw(",
+            "query(", "Query(", "QueryRow(",
+            "createQuery(", "createNativeQuery(",
+            "prepareStatement(", "createStatement(",
+        ],
+        "sanitizers": [
+            "parameterized", "%s", "?", "$1", ":param",
+            "bindparam", "bindParam", "setString", "setInt",
+            "PreparedStatement", "sql.NamedArg", "sql.Named(",
+        ],
+    },
+    "xss": {
+        "name": "Cross-Site Scripting (XSS)",
+        "cwe": "CWE-79",
+        "description": "User input is reflected in HTML without proper escaping",
+        "vulnerable_patterns": [
+            # JavaScript/TypeScript
+            "innerHTML =",
+            "outerHTML =",
+            "document.write(",
+            "dangerouslySetInnerHTML=",
+            "v-html=",
+            '{{{ user_input }}}',  # Handlebars raw
+            "| safe",  # Jinja2/Django
+            "| raw",  # Blade/Laravel
+            "res.write(",
+            "response.write(",
+            # Python
+            "mark_safe(",
+            "Markup(",
+            # React
+            "defaultProps.dangerouslySetInnerHTML",
+        ],
+        "sinks": [
+            "innerHTML", "outerHTML", "insertAdjacentHTML",
+            "document.write", "document.writeln",
+            "dangerouslySetInnerHTML", "v-html",
+            "res.write", "response.write",
+            ".html(",  # jQuery
+        ],
+        "sanitizers": [
+            "escape(", "htmlspecialchars(", "htmlentities(",
+            "DOMPurify.sanitize(", "sanitize(",
+            "encodeURI", "encodeURIComponent",
+            "text()", "textContent", "innerText",
+            "escapeHtml", "html_escape", "e(",
+        ],
+    },
+    "command_injection": {
+        "name": "Command Injection",
+        "cwe": "CWE-78",
+        "description": "User input is used in system commands without sanitization",
+        "vulnerable_patterns": [
+            # Python
+            "os.system(",
+            "subprocess.call(",
+            'subprocess.Popen("',
+            "os.popen(",
+            "commands.getoutput(",
+            "eval(",
+            "exec(",
+            # JavaScript
+            "child_process.exec(",
+            "exec(",
+            "spawn(",
+            "execSync(",
+            # Java
+            "Runtime.exec(",
+            "ProcessBuilder(",
+            # Go
+            "exec.Command(",
+            "exec.CommandContext(",
+        ],
+        "sinks": [
+            "os.system", "os.popen", "subprocess.call", "subprocess.Popen",
+            "subprocess.run", "commands.getoutput",
+            "child_process.exec", "child_process.spawn", "exec", "execSync",
+            "Runtime.exec", "ProcessBuilder",
+            "exec.Command", "exec.CommandContext",
+            "eval(", "exec(",
+        ],
+        "sanitizers": [
+            "shlex.quote(", "shell_quote(", "escapeshellarg(",
+            "subprocess.run(shell=False)",
+            "subprocess.Popen(shell=False)",
+            "shellescape(", "quote(",
+        ],
+    },
+    "path_traversal": {
+        "name": "Path Traversal",
+        "cwe": "CWE-22",
+        "description": "User input is used in file paths without validation",
+        "vulnerable_patterns": [
+            'open("' + "user_input",
+            "open(f",
+            'readFile("' + "user_input",
+            "fs.readFile(",
+            "send_file(",
+            "sendfile(",
+            "static(",
+            "os.path.join(base, user_input)",
+            "path.join(base, user_input)",
+            "filepath.Join(base, user_input)",
+        ],
+        "sinks": [
+            "open(", "read(", "write(", "readFile", "writeFile",
+            "send_file", "sendfile", "static",
+            "os.path.join", "path.join", "filepath.Join",
+            "File(", "FileInputStream", "FileOutputStream",
+            "ioutil.ReadFile", "os.ReadFile", "os.Open",
+        ],
+        "sanitizers": [
+            "os.path.basename(", "path.basename(",
+            "os.path.realpath(", "os.path.abspath(",
+            "filepath.Base(", "filepath.Clean(",
+            "realpath(", "canonicalize(",
+            "Path.normalize(", "Paths.get(",
+        ],
+    },
+    "ssrf": {
+        "name": "Server-Side Request Forgery (SSRF)",
+        "cwe": "CWE-918",
+        "description": "User input controls URLs or hosts for server-side requests",
+        "vulnerable_patterns": [
+            "requests.get(",
+            "urllib.request.urlopen(",
+            "http.get(",
+            "fetch(",
+            "axios.get(",
+            "HttpClient(",
+            "http.Get(",
+            "curl_exec(",
+            "file_get_contents(",
+        ],
+        "sinks": [
+            "requests.get", "requests.post", "requests.put",
+            "urllib.request.urlopen", "urllib.urlopen",
+            "http.get", "http.post", "http.request",
+            "fetch", "axios", "got", "superagent",
+            "HttpClient", "URL", "URLConnection",
+            "http.Get", "http.Post", "http.NewRequest",
+            "curl_exec", "file_get_contents",
+        ],
+        "sanitizers": [
+            "validators.url(", "validate_url(",
+            "urlparse(", "URL(",
+            "whitelist", "allowlist",
+            "socket.gethostbyname(",
+        ],
+    },
+    "deserialization": {
+        "name": "Unsafe Deserialization",
+        "cwe": "CWE-502",
+        "description": "Untrusted data is deserialized without validation",
+        "vulnerable_patterns": [
+            "pickle.loads(",
+            "pickle.load(",
+            "yaml.load(",
+            "marshal.loads(",
+            "ObjectInputStream",
+            "readObject(",
+            "JSON.parse(",
+            "eval(",
+            "new Function(",
+        ],
+        "sinks": [
+            "pickle.loads", "pickle.load", "cPickle.loads",
+            "yaml.load", "yaml.unsafe_load",
+            "marshal.loads", "marshal.load",
+            "ObjectInputStream", "readObject",
+            "JSON.parse", "eval", "Function(",
+            "unserialize(", "maybe_unserialize(",
+        ],
+        "sanitizers": [
+            "yaml.safe_load(", "json.loads(",
+            "JSON.parse(", "JSON.parseStrict(",
+            "ObjectMapper", "Gson", "Jackson",
+            "signature verification", "hmac",
+        ],
+    },
+    "code_injection": {
+        "name": "Code Injection",
+        "cwe": "CWE-94",
+        "description": "User input is evaluated or executed as code",
+        "vulnerable_patterns": [
+            "eval(",
+            "exec(",
+            "compile(",
+            "new Function(",
+            "setTimeout(user_input)",
+            "setInterval(user_input)",
+            "vm.runInContext(",
+            "vm.runInNewContext(",
+        ],
+        "sinks": [
+            "eval", "exec", "compile",
+            "Function(", "setTimeout", "setInterval",
+            "vm.runInContext", "vm.runInNewContext", "vm.runInThisContext",
+            "ScriptEngine", "eval(",
+        ],
+        "sanitizers": [
+            # Very few safe alternatives for eval
+            "JSON.parse", "ast.literal_eval",
+            "new Function with static code only",
+        ],
+    },
+}
+
+# =============================================================================
+# VULNERABILITY TYPES (Basic Info)
+# =============================================================================
+
 VULNERABILITY_TYPES = {
     "sql_injection": {
         "name": "SQL Injection",
@@ -88,6 +336,86 @@ VULNERABILITY_TYPES = {
     },
 }
 
+
+# =============================================================================
+# ATTACKER PERSPECTIVE PROMPT
+# =============================================================================
+
+ATTACKER_PERSPECTIVE = """
+## Attacker Mindset Analysis
+
+Before concluding "not exploitable" or "INFO", think like an attacker:
+
+### 1. What if I control the input?
+- Can I inject SQL/XSS/commands through this parameter?
+- Can I bypass validation with special characters or encoding?
+- Can I manipulate the data format (JSON, XML, serialization)?
+
+### 2. What if I chain this with another issue?
+- Can this be combined with IDOR to access others' data?
+- Can this lead to privilege escalation?
+- Can this expose sensitive configuration or secrets?
+- Can this be used to pivot to internal systems?
+
+### 3. What if the defense fails?
+- What if the sanitizer has bypass techniques?
+- What if the WAF is misconfigured or bypassed?
+- What if authentication has weaknesses?
+- What if the framework has known vulnerabilities?
+
+### 4. Edge Cases to Consider
+- What about Unicode/encoding tricks?
+- What about null bytes or special characters?
+- What about race conditions?
+- What about type confusion?
+
+**IMPORTANT**: When in doubt, report as "suspicious_code" rather than skipping.
+Let the verification layer (L5) or human reviewer confirm exploitability.
+"""
+
+
+# =============================================================================
+# VULNERABILITY PATTERNS REFERENCE FOR PROMPT
+# =============================================================================
+
+def get_vulnerability_patterns_prompt(focus_types: list[str] | None = None) -> str:
+    """Generate a prompt section with vulnerability patterns to look for.
+
+    Args:
+        focus_types: List of vulnerability types to include. If None, includes all.
+
+    Returns:
+        Formatted string with vulnerability patterns.
+    """
+    types_to_include = focus_types if focus_types else list(VULNERABILITY_PATTERNS.keys())
+
+    sections = ["## Vulnerability Patterns to Look For\n"]
+
+    for vuln_type in types_to_include:
+        if vuln_type not in VULNERABILITY_PATTERNS:
+            continue
+
+        pattern = VULNERABILITY_PATTERNS[vuln_type]
+        sections.append(f"### {pattern['name']} ({pattern['cwe']})")
+        sections.append(f"{pattern['description']}\n")
+
+        # Add vulnerable patterns
+        if pattern.get("vulnerable_patterns"):
+            sections.append("**Vulnerable Patterns:**")
+            for vp in pattern["vulnerable_patterns"][:5]:  # Limit to 5 examples
+                sections.append(f"- `{vp}`")
+            sections.append("")
+
+        # Add sinks
+        if pattern.get("sinks"):
+            sections.append("**Dangerous Sinks:**")
+            sinks_str = ", ".join(f"`{s}`" for s in pattern["sinks"][:8])
+            sections.append(f"{sinks_str}\n")
+
+        sections.append("")
+
+    return "\n".join(sections)
+
 # Severity guidelines for consistent assessment
 SEVERITY_GUIDELINES = {
     "critical": "Exploitation can cause severe damage without user interaction. Examples: RCE, SQL injection with data exfiltration, authentication bypass.",
@@ -111,7 +439,10 @@ class SecurityAuditPrompt:
 
     def get_system_prompt(self) -> str:
         """Get the system prompt for the security audit."""
-        return """You are an expert security code auditor with deep knowledge of application security vulnerabilities, secure coding practices, and threat modeling.
+        # Build vulnerability patterns section based on focus
+        patterns_section = get_vulnerability_patterns_prompt(self.vulnerability_focus)
+
+        return f"""You are an expert security code auditor with deep knowledge of application security vulnerabilities, secure coding practices, and threat modeling.
 
 Your task is to analyze code snippets for security vulnerabilities and provide detailed, actionable findings.
 
@@ -125,6 +456,7 @@ Your task is to analyze code snippets for security vulnerabilities and provide d
 - Business logic vulnerabilities
 - Language-specific security issues
 
+{patterns_section}
 ## Analysis Approach
 
 1. **Identify data sources**: Look for user input, external data, and untrusted sources
@@ -133,61 +465,14 @@ Your task is to analyze code snippets for security vulnerabilities and provide d
 4. **Check sanitization**: Verify if proper validation/sanitization exists
 5. **Assess impact**: Evaluate the potential harm if exploited
 
-## Exploitability Assessment (CRITICAL)
-
-Before reporting ANY vulnerability, you MUST answer these questions:
-
-### 1. Attack Surface Analysis
-- Is the vulnerable code reachable from external entry points (HTTP/RPC/MQ/File)?
-- What triggers this code path? (API call, user action, internal process?)
-- Is authentication/authorization required to reach this code?
-- If the code is only called internally by trusted code, the risk is LOW.
-
-### 2. Data Source Analysis
-- Where does the data come from?
-- Is it user-controlled (HTTP params, request body, file upload)?
-- Is it internal configuration (config files, environment variables, hardcoded)?
-- Is it from trusted internal sources (database, internal API)?
-- **User-controlled** → Higher severity
-- **Internal config/trusted source** → Lower severity (INFO or LOW)
-
-### 3. Exploitation Feasibility
-- What conditions must be met to exploit this vulnerability?
-- Are there any sanitizers, validators, or security controls in the data flow?
-- Is this a theoretical vulnerability or practically exploitable?
-- Does exploitation require rare conditions or specific configurations?
-
-### 4. Severity Calibration Rules
-
-**Downgrade to INFO if:**
-- Code is not reachable from external entry points
-- Input comes from internal configuration only
-- Exploitation requires already having admin/root access
-- The "vulnerable" pattern is actually a false positive
-
-**Downgrade to LOW if:**
-- Input has limited user control (e.g., only from authenticated users)
-- Exploitation requires specific rare conditions
-- Multiple preconditions must be met
-- Impact is minimal even if exploited
-
-**Keep MEDIUM if:**
-- User input reaches vulnerable code but with some limitations
-- Exploitation is possible but not straightforward
-- Impact is moderate
-
-**Reserve HIGH/CRITICAL for:**
-- Direct user control of vulnerable code
-- No authentication required for exploitation
-- Severe impact (RCE, data exfiltration, auth bypass)
-
+{ATTACKER_PERSPECTIVE}
 ## Output Format
 
 You MUST respond with valid JSON in this exact format:
 ```json
-{
+{{
   "findings": [
-    {
+    {{
       "type": "vulnerability_type_snake_case",
       "severity": "critical|high|medium|low|info",
       "confidence": 0.0-1.0,
@@ -203,24 +488,33 @@ You MUST respond with valid JSON in this exact format:
       "recommendation": "How to fix this vulnerability",
       "cwe": "CWE-XXX",
       "owasp": "A01:2021"
-    }
+    }}
+  ],
+  "suspicious_code": [
+    {{
+      "location": "file.py:45",
+      "code_snippet": "dangerous code pattern",
+      "why_suspicious": "This pattern is commonly associated with X vulnerability",
+      "potential_vulnerability": "vulnerability_type",
+      "confidence": 0.3,
+      "recommended_action": "manual_review|verify_data_flow|check_sanitization"
+    }}
   ],
   "summary": "Brief overall assessment",
   "security_score": 1-10
-}
+}}
 ```
 
 ## Important Rules
 
-1. Only report ACTUAL vulnerabilities with clear evidence
-2. Include specific line numbers when possible
-3. Provide actionable remediation advice
-4. Be conservative with confidence scores
-5. If no vulnerabilities found, return empty findings array
+1. **Be thorough**: Look for ALL the vulnerable patterns listed above
+2. **Include suspicious_code**: If you see a dangerous pattern but are unsure about exploitability, add it to suspicious_code
+3. **Don't skip uncertain findings**: Better to report as suspicious than to miss a real vulnerability
+4. Include specific line numbers when possible
+5. Provide actionable remediation advice
 6. Always respond with valid JSON only - no additional text
-7. **CRITICAL**: Always assess exploitability before assigning severity
-8. **CRITICAL**: If input is not user-controlled, severity should be INFO or LOW
-9. **CRITICAL**: If code is not externally reachable, severity should be INFO"""  # noqa: E501
+7. **CRITICAL**: Think like an attacker - what could go wrong?
+8. **CRITICAL**: When in doubt, add to suspicious_code rather than skipping"""  # noqa: E501
 
     def get_user_prompt_for_file(
         self,
