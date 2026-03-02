@@ -3,6 +3,8 @@ Defender Verifier - Checks for sanitizers and defense mechanisms.
 
 This role analyzes vulnerability candidates from a defender's perspective,
 identifying security controls that may prevent exploitation.
+
+Enhanced with multi-round debate support (rebuttal capability).
 """
 
 import json
@@ -11,8 +13,11 @@ import re
 from typing import Any
 
 from ..llm.client import LLMClient, LLMError
-from ..prompts.adversarial import DEFENDER_SYSTEM_PROMPT, get_defender_user_prompt
-from ..prompts.security_audit import VULNERABILITY_PATTERNS
+from ..prompts.adversarial import (
+    DEFENDER_SYSTEM_PROMPT,
+    get_defender_rebuttal_prompt,
+    get_defender_user_prompt,
+)
 from .models import ArgumentStrength, VerificationArgument
 
 logger = logging.getLogger(__name__)
@@ -27,6 +32,8 @@ class DefenderVerifier:
     - Finding validation checks
     - Discovering framework-level protections
     - Analyzing exploitation barriers
+
+    In multi-round debates, can rebut attacker's arguments.
     """
 
     # Common sanitizer patterns by language
@@ -158,6 +165,7 @@ class DefenderVerifier:
         code_context: str,
         related_code: str | None = None,
         attacker_argument: dict[str, Any] | None = None,
+        round_number: int = 1,
     ) -> VerificationArgument:
         """
         Analyze a vulnerability from a defender's perspective.
@@ -167,6 +175,7 @@ class DefenderVerifier:
             code_context: The vulnerable code snippet.
             related_code: Additional context code.
             attacker_argument: The attacker's argument to counter.
+            round_number: Current debate round number.
 
         Returns:
             VerificationArgument with defender's analysis.
@@ -200,25 +209,7 @@ class DefenderVerifier:
             )
 
             # Parse response
-            content = response.content.strip()
-
-            # Try to extract JSON from markdown code blocks
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
-
-            result = json.loads(content)
-
-            # Map strength string to enum
-            strength_str = result.get("strength", "moderate").lower()
-            strength_map = {
-                "weak": ArgumentStrength.WEAK,
-                "moderate": ArgumentStrength.MODERATE,
-                "strong": ArgumentStrength.STRONG,
-                "definitive": ArgumentStrength.DEFINITIVE,
-            }
-            strength = strength_map.get(strength_str, ArgumentStrength.MODERATE)
+            result = self._parse_response(response.content)
 
             # Merge static analysis results with LLM results
             sanitizers = list(set(
@@ -231,53 +222,225 @@ class DefenderVerifier:
                 result.get("framework_protections", []) + static_defenses.get("framework", [])
             ))
 
-            # Adjust confidence based on static findings
-            confidence = float(result.get("confidence", 0.5))
-            if sanitizers:
-                confidence = min(1.0, confidence + 0.1 * len(sanitizers[:3]))
-            if validations:
-                confidence = min(1.0, confidence + 0.05 * len(validations[:3]))
-
-            return VerificationArgument(
-                role="defender",
-                claim=result.get("claim", "This vulnerability is not exploitable"),
-                evidence=result.get("evidence", []),
-                reasoning=result.get("reasoning", ""),
-                strength=strength,
-                confidence=confidence,
-                counter_arguments=result.get("counter_arguments", []),
-                sanitizers_found=sanitizers,
-                validation_checks=validations,
+            # Build argument
+            return self._build_argument(
+                result=result,
+                sanitizers=sanitizers,
+                validations=validations,
                 framework_protections=framework_protections,
+                round_number=round_number,
+                is_rebuttal=False,
             )
 
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse defender response as JSON: {e}")
             # Fall back to static analysis results
-            return VerificationArgument(
-                role="defender",
-                claim="Static analysis found potential defenses",
-                evidence=static_defenses.get("evidence", []),
-                reasoning="LLM response parsing failed, using static analysis results",
-                strength=ArgumentStrength.MODERATE if static_defenses.get("sanitizers") else ArgumentStrength.WEAK,
-                confidence=0.3 if static_defenses.get("sanitizers") else 0.1,
-                counter_arguments=[],
-                sanitizers_found=static_defenses.get("sanitizers", []),
-                validation_checks=static_defenses.get("validations", []),
-                framework_protections=static_defenses.get("framework", []),
+            return self._create_fallback_argument(
+                static_defenses=static_defenses,
+                round_number=round_number,
             )
 
         except LLMError as e:
             logger.error(f"LLM error in defender analysis: {e}")
-            return VerificationArgument(
-                role="defender",
-                claim="Analysis failed due to LLM error",
-                evidence=[],
-                reasoning=str(e),
-                strength=ArgumentStrength.WEAK,
-                confidence=0.0,
-                counter_arguments=[],
+            return self._create_error_argument(
+                error_message=str(e),
+                round_number=round_number,
             )
+
+    async def rebut(
+        self,
+        finding: dict[str, Any],
+        code_context: str,
+        attacker_argument: VerificationArgument,
+        previous_defender_argument: VerificationArgument,
+    ) -> VerificationArgument:
+        """
+        Rebut the attacker's counter-argument.
+
+        This is used in multi-round debates to respond to the attacker's
+        claims and strengthen the defender's case.
+
+        Args:
+            finding: The vulnerability finding.
+            code_context: The vulnerable code snippet.
+            attacker_argument: The attacker's counter-argument.
+            previous_defender_argument: The defender's previous argument.
+
+        Returns:
+            VerificationArgument with defender's rebuttal.
+        """
+        round_number = previous_defender_argument.round_number + 1
+
+        # Truncate code if needed
+        if len(code_context) > self.max_context_length:
+            code_context = code_context[: self.max_context_length] + "\n... (truncated)"
+
+        # Do static analysis for additional defense detection
+        static_defenses = {}
+        if self.use_static_analysis:
+            static_defenses = self._static_defense_analysis(
+                code=code_context,
+                vuln_type=finding.get("type", ""),
+                language=finding.get("language", ""),
+            )
+
+        # Build rebuttal prompt
+        user_prompt = get_defender_rebuttal_prompt(
+            finding=finding,
+            code_context=code_context,
+            attacker_argument=attacker_argument.model_dump(),
+            previous_defender_argument=previous_defender_argument.model_dump(),
+        )
+
+        try:
+            # Call LLM with the same system prompt (defender mindset)
+            response = await self.llm_client.complete_with_context(
+                system_prompt=DEFENDER_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+            )
+
+            # Parse response
+            result = self._parse_response(response.content)
+
+            # Merge static analysis results
+            sanitizers = list(set(
+                result.get("sanitizers_found", []) + static_defenses.get("sanitizers", [])
+            ))
+            validations = list(set(
+                result.get("validation_checks", []) + static_defenses.get("validations", [])
+            ))
+            framework_protections = list(set(
+                result.get("framework_protections", []) + static_defenses.get("framework", [])
+            ))
+
+            # Build argument with rebuttal flag
+            return self._build_argument(
+                result=result,
+                sanitizers=sanitizers,
+                validations=validations,
+                framework_protections=framework_protections,
+                round_number=round_number,
+                is_rebuttal=True,
+            )
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse defender rebuttal as JSON: {e}")
+            return self._create_fallback_argument(
+                static_defenses=static_defenses,
+                round_number=round_number,
+                is_rebuttal=True,
+            )
+
+        except LLMError as e:
+            logger.error(f"LLM error in defender rebuttal: {e}")
+            return self._create_error_argument(
+                error_message=str(e),
+                round_number=round_number,
+                is_rebuttal=True,
+            )
+
+    def _parse_response(self, content: str) -> dict[str, Any]:
+        """Parse LLM response content to JSON."""
+        content = content.strip()
+
+        # Try to extract JSON from markdown code blocks
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0].strip()
+
+        return json.loads(content)
+
+    def _build_argument(
+        self,
+        result: dict[str, Any],
+        sanitizers: list[str],
+        validations: list[str],
+        framework_protections: list[str],
+        round_number: int = 1,
+        is_rebuttal: bool = False,
+    ) -> VerificationArgument:
+        """Build a VerificationArgument from parsed result."""
+        # Map strength string to enum
+        strength_str = result.get("strength", "moderate").lower()
+        strength_map = {
+            "weak": ArgumentStrength.WEAK,
+            "moderate": ArgumentStrength.MODERATE,
+            "strong": ArgumentStrength.STRONG,
+            "definitive": ArgumentStrength.DEFINITIVE,
+        }
+        strength = strength_map.get(strength_str, ArgumentStrength.MODERATE)
+
+        # Adjust confidence based on findings
+        confidence = float(result.get("confidence", 0.5))
+        if sanitizers:
+            confidence = min(1.0, confidence + 0.1 * len(sanitizers[:3]))
+        if validations:
+            confidence = min(1.0, confidence + 0.05 * len(validations[:3]))
+
+        return VerificationArgument(
+            role="defender",
+            claim=result.get("claim", "This vulnerability is not exploitable"),
+            evidence=result.get("evidence", []),
+            reasoning=result.get("reasoning", ""),
+            strength=strength,
+            confidence=confidence,
+            counter_arguments=result.get("counter_arguments", []),
+            sanitizers_found=sanitizers,
+            validation_checks=validations,
+            framework_protections=framework_protections,
+            exploitation_barriers=result.get("exploitation_barriers", []),
+            false_positive_reasons=result.get("false_positive_reasons", []),
+            round_number=round_number,
+            is_rebuttal=is_rebuttal,
+        )
+
+    def _create_fallback_argument(
+        self,
+        static_defenses: dict[str, Any],
+        round_number: int = 1,
+        is_rebuttal: bool = False,
+    ) -> VerificationArgument:
+        """Create a fallback argument using static analysis when LLM fails."""
+        has_defenses = bool(
+            static_defenses.get("sanitizers") or
+            static_defenses.get("validations") or
+            static_defenses.get("framework")
+        )
+
+        return VerificationArgument(
+            role="defender",
+            claim="Static analysis found potential defenses",
+            evidence=static_defenses.get("evidence", []),
+            reasoning="LLM response parsing failed, using static analysis results",
+            strength=ArgumentStrength.MODERATE if has_defenses else ArgumentStrength.WEAK,
+            confidence=0.3 if has_defenses else 0.1,
+            counter_arguments=[],
+            sanitizers_found=static_defenses.get("sanitizers", []),
+            validation_checks=static_defenses.get("validations", []),
+            framework_protections=static_defenses.get("framework", []),
+            round_number=round_number,
+            is_rebuttal=is_rebuttal,
+        )
+
+    def _create_error_argument(
+        self,
+        error_message: str,
+        round_number: int = 1,
+        is_rebuttal: bool = False,
+    ) -> VerificationArgument:
+        """Create an error argument when LLM fails."""
+        return VerificationArgument(
+            role="defender",
+            claim="Unable to construct argument due to error",
+            evidence=[],
+            reasoning=error_message,
+            strength=ArgumentStrength.WEAK,
+            confidence=0.0,
+            counter_arguments=[],
+            round_number=round_number,
+            is_rebuttal=is_rebuttal,
+        )
 
     def _static_defense_analysis(
         self,

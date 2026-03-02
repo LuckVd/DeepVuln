@@ -8,72 +8,64 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | 实现 L3.5 对抗验证层 |
-| **状态** | completed |
+| **任务** | 优化对抗验证层：Prompt优化 + 按需多轮对抗 |
+| **状态** | **completed** ✅ |
 | **优先级** | high |
 | **创建日期** | 2026-03-02 |
 | **完成日期** | 2026-03-02 |
 
 ---
 
-## 问题背景
-
-### 问题：漏洞候选缺乏验证，误报率可能较高
-
-**现象**：
-- L3 Agent 发现的漏洞未经验证，仅为 LLM 的判断
-- 可疑代码需要人工审查，缺乏自动化筛选
-- Phase 4 的 LLM 验证是对 Semgrep/CodeQL 发现的验证，不针对 Agent
-
-**解决方案**：
-引入对抗验证层（L3.5），通过三角色对抗分析验证漏洞候选：
-1. **攻击者角色**：构造 PoC，证明漏洞可利用
-2. **防御者角色**：检查防御措施，证明漏洞不可利用
-3. **仲裁者角色**：综合判定，输出最终结论
-
----
-
 ## 完成标准
 
-### P1: 攻击者角色 (Attacker Role)
-- [x] 设计攻击者 Prompt（构造 PoC、分析攻击路径）
-- [x] 实现 `AttackerVerifier` 类
-- [x] 输出攻击论证（payload、前置条件、成功率）
+### P1: Prompt 优化 ✅
 
-### P2: 防御者角色 (Defender Role)
-- [x] 设计防御者 Prompt（检查 sanitizer、数据流阻断）
-- [x] 实现 `DefenderVerifier` 类
-- [x] 输出防御论证（防御措施、误报理由）
+- [x] **Few-Shot 示例**：为攻击者、防御者、仲裁者各添加 2-4 个高质量示例
+- [x] **上下文增强**：传递完整调用链、入口点签名、数据流节点
+- [x] **角色专业化**：攻击者=渗透测试思维，防御者=代码审计思维，仲裁者=安全研究思维
+- [x] **链式思考**：添加 5 步分析步骤引导
+- [x] **置信度校准**：明确定义 0-1 分 5 档置信度
 
-### P3: 仲裁者角色 (Arbiter Role)
-- [x] 设计仲裁者 Prompt（评估双方论据）
-- [x] 实现 `ArbiterVerifier` 类
-- [x] 定义判定结果：CONFIRMED / FALSE_POSITIVE / NEEDS_REVIEW / CONDITIONAL
+### P2: 按需多轮对抗机制 ✅
 
-### P4: 对抗流程集成
-- [x] 实现 `AdversarialVerifier` 主控制器
-- [x] 集成到 L3 扫描流程（Agent 发现后调用）
-- [x] 添加配置项控制是否启用对抗验证
+- [x] **触发条件**：
+  - `verdict == NEEDS_REVIEW`
+  - 或 `|attacker_strength - defender_strength| < 0.2`
+  - 或 `confidence < 0.6`
+- [x] **反驳机制**：
+  - `AttackerVerifier.rebut(defender_argument)` - 攻击者反驳防御者
+  - `DefenderVerifier.rebut(attacker_argument)` - 防御者反驳攻击者
+- [x] **循环控制**：
+  - 最多 3 轮（可配置）
+  - 达到明确判定时提前终止
+- [x] **仲裁者增强**：
+  - 接收所有轮次的辩论历史
+  - 基于完整上下文做最终判断
 
-### P5: 测试验证
-- [ ] 用 OWASP Juice Shop 测试对抗验证效果
-- [ ] 对比启用/禁用对抗验证的误报率
-- [ ] 记录典型对抗对话案例
+### P3: 测试验证 ✅
+
+- [x] 单元测试：模型和配置 (`test_adversarial_models.py`)
+- [x] 单元测试：各角色 Verifier (`test_adversarial_verifiers.py`)
+- [x] 集成测试：多轮对抗流程 (`test_adversarial_multiround.py`)
+- [x] 端到端测试：完整场景 (`test_adversarial_e2e.py`)
 
 ---
 
-## 关键文件
+## 变更文件
 
-| 文件 | 操作 | 说明 |
+| 文件 | 操作 | 行数 |
 |------|------|------|
-| `src/layers/l3_analysis/verification/__init__.py` | 新建 | 模块初始化 |
-| `src/layers/l3_analysis/verification/models.py` | 新建 | 数据模型定义 |
-| `src/layers/l3_analysis/verification/adversarial.py` | 新建 | 对抗验证主控制器 |
-| `src/layers/l3_analysis/verification/attacker.py` | 新建 | 攻击者角色 |
-| `src/layers/l3_analysis/verification/defender.py` | 新建 | 防御者角色 |
-| `src/layers/l3_analysis/verification/arbiter.py` | 新建 | 仲裁者角色 |
-| `src/layers/l3_analysis/prompts/adversarial.py` | 新建 | 三角色 Prompt |
-| `src/cli/main.py` | 修改 | 添加 --adversarial 选项 |
+| `src/layers/l3_analysis/prompts/adversarial.py` | 重写 | 1229 行 |
+| `src/layers/l3_analysis/verification/models.py` | 重写 | 430 行 |
+| `src/layers/l3_analysis/verification/adversarial.py` | 重写 | 672 行 |
+| `src/layers/l3_analysis/verification/attacker.py` | 重写 | 298 行 |
+| `src/layers/l3_analysis/verification/defender.py` | 重写 | 428 行 |
+| `src/layers/l3_analysis/verification/arbiter.py` | 重写 | 477 行 |
+| `tests/unit/test_l3/test_adversarial_models.py` | 新建 | 400+ 行 |
+| `tests/unit/test_l3/test_adversarial_verifiers.py` | 新建 | 600+ 行 |
+| `tests/unit/test_l3/test_adversarial_multiround.py` | 新建 | 500+ 行 |
+| `tests/unit/test_l3/test_adversarial_e2e.py` | 新建 | 500+ 行 |
+| `tests/unit/test_l3/conftest_adversarial.py` | 新建 | 300+ 行 |
 
 ---
 
@@ -81,75 +73,60 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-02 12:30 | 设置目标 |
-| 2026-03-02 13:00 | 完成 P1-P4 实现 |
-| 2026-03-02 13:30 | 完成 CLI 集成，P5 待测试 |
+| 2026-03-02 | 设置目标 |
+| 2026-03-02 | 完成 P1 Prompt 优化 |
+| 2026-03-02 | 完成 P2 多轮对抗机制 |
+| 2026-03-02 | 完成 P3 测试验证 |
+| 2026-03-02 | ✅ 目标完成 |
 
 ---
 
-## 预期效果
+## 关键改进
 
-- 漏洞候选经过对抗验证，降低误报率
-- 产生可解释的验证过程（攻防对话）
-- 为 L5 PoC 验证层提供高质量候选
-- 最终判定结果包含置信度
+### 1. Prompt 优化
 
----
+- **Few-Shot 示例**：每个角色 2-4 个高质量示例，展示好的输出格式
+- **角色专业化**：
+  - 攻击者 = 渗透测试专家思维
+  - 防御者 = 代码审计专家思维
+  - 仲裁者 = 安全研究专家思维
+- **链式思考**：5 步分析流程引导
+- **置信度校准**：0.9-1.0 Definitive / 0.7-0.9 Strong / 0.5-0.7 Moderate / 0.3-0.5 Weak / 0.0-0.3 Speculative
 
-## 架构设计
+### 2. 多轮对抗机制
 
 ```
-L3 Agent 发现漏洞候选
-         ↓
-┌─────────────────────────────────────┐
-│         L3.5 对抗验证层              │
-│                                     │
-│  ┌──────────┐     ┌──────────┐      │
-│  │ 攻击者    │ ←→ │ 防御者    │      │
-│  │ Attacker │     │ Defender │      │
-│  └────┬─────┘     └────┬─────┘      │
-│       │                │            │
-│       └───────┬────────┘            │
-│               ↓                     │
-│       ┌──────────┐                  │
-│       │ 仲裁者    │                  │
-│       │ Arbiter  │                  │
-│       └────┬─────┘                  │
-│            ↓                        │
-│   CONFIRMED / FALSE_POSITIVE /      │
-│   NEEDS_REVIEW / CONDITIONAL        │
-└─────────────────────────────────────┘
-         ↓
-    L5 PoC 验证层（仅 CONFIRMED）
+Round 1: analyze() → evaluate()
+    ↓ (if NEEDS_REVIEW / strength_diff < 0.2 / confidence < 0.6)
+Round 2: rebut() → evaluate()
+    ↓ (if still uncertain)
+Round 3: rebut() → evaluate()
+    ↓ (max rounds reached)
+Return final verdict
 ```
 
----
+### 3. 新增配置
 
-## 判定标准
-
-| 结果 | 条件 |
-|------|------|
-| CONFIRMED | 攻击者成功构造 PoC，防御者无法反驳 |
-| FALSE_POSITIVE | 防御者证明存在有效缓解措施 |
-| NEEDS_REVIEW | 双方论据相当，需人工审查 |
-| CONDITIONAL | 在特定条件下可利用 |
-
----
-
-## 使用方式
-
-```bash
-# 启用对抗验证扫描
-deepvuln scan -p /path/to/project --full --adversarial
-
-# 完整扫描 + LLM 验证 + 对抗验证
-deepvuln scan -p . --full --llm-verify --adversarial
+```python
+AdversarialVerifierConfig:
+  max_rounds: int = 3              # 最大轮次
+  parallel_analysis: bool = True   # 首轮并行
+  sequential_rebuttal: bool = True # 反驳顺序执行
+  trigger_conditions: TriggerConditions  # 触发条件
 ```
 
+### 4. 新增模型
+
+- `DebateRound` - 单轮辩论记录
+- `TriggerConditions` - 触发条件配置
+- `VerificationResult.debate_rounds` - 所有轮次历史
+- `VerificationResult.max_rounds_reached` - 是否达到最大轮数
+
 ---
 
-## 下一步
+## 下一步建议
 
-- [ ] 用 OWASP Juice Shop 实际测试对抗验证效果
-- [ ] 收集典型对抗对话案例
-- [ ] 优化 Prompt 提高准确度
+1. **实际测试**：用真实漏洞样本测试多轮对抗效果
+2. **性能优化**：考虑 LLM 调用缓存、并行优化
+3. **对比评估**：对比单轮 vs 多轮的判断准确度
+4. **阈值调优**：根据实际效果调整触发条件阈值
