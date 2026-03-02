@@ -18,6 +18,14 @@ from src.layers.l3_analysis.prompts.exploitability import (
     parse_exploitability_response,
     EXPLOITABILITY_STATUSES,
 )
+from src.layers.l3_analysis.prompts.adversarial import (
+    ATTACKER_SYSTEM_PROMPT,
+    DEFENDER_SYSTEM_PROMPT,
+    ARBITER_SYSTEM_PROMPT,
+    get_attacker_user_prompt,
+    get_defender_user_prompt,
+    get_arbiter_user_prompt,
+)
 
 __all__ = [
     "SecurityAuditPrompt",
@@ -31,4 +39,11 @@ __all__ = [
     "build_exploitability_prompt",
     "parse_exploitability_response",
     "EXPLOITABILITY_STATUSES",
+    # Adversarial verification prompts
+    "ATTACKER_SYSTEM_PROMPT",
+    "DEFENDER_SYSTEM_PROMPT",
+    "ARBITER_SYSTEM_PROMPT",
+    "get_attacker_user_prompt",
+    "get_defender_user_prompt",
+    "get_arbiter_user_prompt",
 ]

@@ -8,7 +8,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | 增强 Agent 漏洞发现能力 |
+| **任务** | 实现 L3.5 对抗验证层 |
 | **状态** | completed |
 | **优先级** | high |
 | **创建日期** | 2026-03-02 |
@@ -18,47 +18,47 @@
 
 ## 问题背景
 
-### 问题：Agent 漏洞发现能力不足
+### 问题：漏洞候选缺乏验证，误报率可能较高
 
 **现象**：
-- 三次扫描均未发现任何漏洞
-- Prompt 设计过于保守，所有发现被降级为 INFO/LOW
-- 缺乏具体漏洞模式指导
-- 单文件分析，无法追踪跨文件数据流
+- L3 Agent 发现的漏洞未经验证，仅为 LLM 的判断
+- 可疑代码需要人工审查，缺乏自动化筛选
+- Phase 4 的 LLM 验证是对 Semgrep/CodeQL 发现的验证，不针对 Agent
 
 **解决方案**：
-1. 添加漏洞模式库（具体特征 + Sink + Sanitizer）
-2. 引入攻击者视角 Prompt
-3. 添加可疑代码标记机制
-4. 实现两阶段分析模式
+引入对抗验证层（L3.5），通过三角色对抗分析验证漏洞候选：
+1. **攻击者角色**：构造 PoC，证明漏洞可利用
+2. **防御者角色**：检查防御措施，证明漏洞不可利用
+3. **仲裁者角色**：综合判定，输出最终结论
 
 ---
 
 ## 完成标准
 
-### P1: 漏洞模式库 (Vulnerability Patterns)
-- [x] 添加 SQL Injection 模式（patterns, sinks, sanitizers）
-- [x] 添加 XSS 模式
-- [x] 添加 Command Injection 模式
-- [x] 添加 Path Traversal 模式
-- [x] 添加 SSRF 模式
-- [x] 添加 Deserialization 模式
-- [x] 在 Prompt 中引用模式库
+### P1: 攻击者角色 (Attacker Role)
+- [x] 设计攻击者 Prompt（构造 PoC、分析攻击路径）
+- [x] 实现 `AttackerVerifier` 类
+- [x] 输出攻击论证（payload、前置条件、成功率）
 
-### P2: 攻击者视角 Prompt (Attacker Perspective)
-- [x] 添加 ATTACKER_PERSPECTIVE 常量
-- [x] 融入 System Prompt
-- [x] 引导 Agent 从攻击者角度思考
+### P2: 防御者角色 (Defender Role)
+- [x] 设计防御者 Prompt（检查 sanitizer、数据流阻断）
+- [x] 实现 `DefenderVerifier` 类
+- [x] 输出防御论证（防御措施、误报理由）
 
-### P3: 可疑代码标记机制 (Suspicious Code)
-- [x] 修改输出 JSON 格式，添加 `suspicious_code` 字段
-- [x] 修改 `_parse_llm_response` 解析逻辑
-- [x] 在 CLI 报告中展示可疑代码
+### P3: 仲裁者角色 (Arbiter Role)
+- [x] 设计仲裁者 Prompt（评估双方论据）
+- [x] 实现 `ArbiterVerifier` 类
+- [x] 定义判定结果：CONFIRMED / FALSE_POSITIVE / NEEDS_REVIEW / CONDITIONAL
 
-### P4: 验证测试
-- [x] 用已知漏洞项目测试（如 OWASP Juice Shop）
-- [x] 确认 Agent 能发现至少 1 个真实漏洞
-- [x] 对比优化前后的发现数量
+### P4: 对抗流程集成
+- [x] 实现 `AdversarialVerifier` 主控制器
+- [x] 集成到 L3 扫描流程（Agent 发现后调用）
+- [x] 添加配置项控制是否启用对抗验证
+
+### P5: 测试验证
+- [ ] 用 OWASP Juice Shop 测试对抗验证效果
+- [ ] 对比启用/禁用对抗验证的误报率
+- [ ] 记录典型对抗对话案例
 
 ---
 
@@ -66,9 +66,14 @@
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/layers/l3_analysis/prompts/security_audit.py` | 修改 | 添加漏洞模式库和攻击者视角 |
-| `src/layers/l3_analysis/engines/opencode_agent.py` | 修改 | 解析可疑代码输出 |
-| `src/cli/main.py` | 修改 | 展示可疑代码 |
+| `src/layers/l3_analysis/verification/__init__.py` | 新建 | 模块初始化 |
+| `src/layers/l3_analysis/verification/models.py` | 新建 | 数据模型定义 |
+| `src/layers/l3_analysis/verification/adversarial.py` | 新建 | 对抗验证主控制器 |
+| `src/layers/l3_analysis/verification/attacker.py` | 新建 | 攻击者角色 |
+| `src/layers/l3_analysis/verification/defender.py` | 新建 | 防御者角色 |
+| `src/layers/l3_analysis/verification/arbiter.py` | 新建 | 仲裁者角色 |
+| `src/layers/l3_analysis/prompts/adversarial.py` | 新建 | 三角色 Prompt |
+| `src/cli/main.py` | 修改 | 添加 --adversarial 选项 |
 
 ---
 
@@ -76,46 +81,75 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-02 | 设置目标 |
-| 2026-03-02 10:12 | ✅ P1 完成：漏洞模式库 (6 种漏洞类型，含 patterns/sinks/sanitizers) |
-| 2026-03-02 10:12 | ✅ P2 完成：攻击者视角 Prompt 融入 System Prompt |
-| 2026-03-02 10:12 | ✅ P3 部分完成：Agent 解析 suspicious_code 功能实现 |
-| 2026-03-02 11:30 | ✅ P3 完成：CLI 展示可疑代码 (交互式/详细视图/报告导出) |
-| 2026-03-02 12:00 | ✅ P4 完成：OWASP Juice Shop 测试，发现 50+ 确认漏洞 + 78 可疑代码 |
-| 2026-03-02 12:00 | 🐛 修复 Bug：路径过滤逻辑错误导致所有文件被跳过 (target 目录) |
+| 2026-03-02 12:30 | 设置目标 |
+| 2026-03-02 13:00 | 完成 P1-P4 实现 |
+| 2026-03-02 13:30 | 完成 CLI 集成，P5 待测试 |
 
 ---
 
 ## 预期效果
 
-- Agent 能发现更多可疑代码 ✅
-- 报告中显示"需要人工审查"的代码 ✅
-- 漏洞发现数量增加（从 0 到 N）✅ **0 → 50+ 确认漏洞 + 78 可疑代码**
-- 为 L5 验证层提供更多候选 ✅
+- 漏洞候选经过对抗验证，降低误报率
+- 产生可解释的验证过程（攻防对话）
+- 为 L5 PoC 验证层提供高质量候选
+- 最终判定结果包含置信度
 
 ---
 
-## 测试结果 (OWASP Juice Shop)
+## 架构设计
 
-### 优化前
-- Agent 发现：**0** 个漏洞
-- 可疑代码：**0** 个
-
-### 优化后
-- Agent 发现：**50+** 个确认漏洞
-- 可疑代码：**78** 个
-- 漏洞类型覆盖：SQL 注入、XSS、路径遍历、SSRF、弱密码哈希、硬编码密钥等
-
-### 发现的真实漏洞示例
-1. **SQL Injection** - `routes/search.ts:21` - 用户输入直接拼接到 SQL 查询
-2. **Path Traversal** - `rsn/rsnUtil.ts:102` - seePatch 函数路径遍历
-3. **Stored XSS** - `models/product.ts:48` - 产品描述存储型 XSS
-4. **Weak Password Hashing** - `models/user.ts:70` - 使用不安全的哈希库
+```
+L3 Agent 发现漏洞候选
+         ↓
+┌─────────────────────────────────────┐
+│         L3.5 对抗验证层              │
+│                                     │
+│  ┌──────────┐     ┌──────────┐      │
+│  │ 攻击者    │ ←→ │ 防御者    │      │
+│  │ Attacker │     │ Defender │      │
+│  └────┬─────┘     └────┬─────┘      │
+│       │                │            │
+│       └───────┬────────┘            │
+│               ↓                     │
+│       ┌──────────┐                  │
+│       │ 仲裁者    │                  │
+│       │ Arbiter  │                  │
+│       └────┬─────┘                  │
+│            ↓                        │
+│   CONFIRMED / FALSE_POSITIVE /      │
+│   NEEDS_REVIEW / CONDITIONAL        │
+└─────────────────────────────────────┘
+         ↓
+    L5 PoC 验证层（仅 CONFIRMED）
+```
 
 ---
 
-## 后续优化 (P2 优先级)
+## 判定标准
 
-- 跨文件数据流追踪
-- 两阶段分析模式（检测 → 评估）
-- 数据流摘要传递
+| 结果 | 条件 |
+|------|------|
+| CONFIRMED | 攻击者成功构造 PoC，防御者无法反驳 |
+| FALSE_POSITIVE | 防御者证明存在有效缓解措施 |
+| NEEDS_REVIEW | 双方论据相当，需人工审查 |
+| CONDITIONAL | 在特定条件下可利用 |
+
+---
+
+## 使用方式
+
+```bash
+# 启用对抗验证扫描
+deepvuln scan -p /path/to/project --full --adversarial
+
+# 完整扫描 + LLM 验证 + 对抗验证
+deepvuln scan -p . --full --llm-verify --adversarial
+```
+
+---
+
+## 下一步
+
+- [ ] 用 OWASP Juice Shop 实际测试对抗验证效果
+- [ ] 收集典型对抗对话案例
+- [ ] 优化 Prompt 提高准确度

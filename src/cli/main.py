@@ -494,6 +494,7 @@ async def run_full_security_scan(
     llm_verify = options.get("llm_verify", False)
     llm_detect = options.get("llm_detect", False)
     llm_full_detect = options.get("llm_full_detect", False)
+    adversarial = options.get("adversarial", False)
     model = options.get("model")
     include_low = options.get("include_low_severity", False)
     no_deps = options.get("no_deps", False)
@@ -905,6 +906,122 @@ async def run_full_security_scan(
             result["errors"].append(f"Verification error: {e}")
 
     # =========================================================================
+    # Phase 4.5: Adversarial Verification (L3.5)
+    # =========================================================================
+
+    if adversarial and result["verified_findings"] and llm_client:
+        console.print("\n[bold cyan]Phase 4.5: Adversarial Verification (L3.5)[/]")
+        console.print("  [dim]Three-role debate: Attacker vs Defender → Arbiter[/]")
+
+        try:
+            from src.layers.l3_analysis.verification import (
+                AdversarialVerifier,
+                AdversarialVerifierConfig,
+                VerdictType,
+            )
+
+            adversarial_config = AdversarialVerifierConfig(
+                enabled=True,
+                parallel_analysis=True,
+                skip_low_severity=not include_low,
+                skip_info_findings=True,
+            )
+
+            verifier = AdversarialVerifier(
+                llm_client=llm_client,
+                config=adversarial_config,
+            )
+
+            adversarial_results = []
+            total = len(result["verified_findings"])
+
+            # Only verify non-suspicious, medium+ severity findings
+            findings_to_verify = [
+                v for v in result["verified_findings"]
+                if not (v["finding"].metadata or {}).get("is_suspicious", False)
+                and v["finding"].severity.value in ["critical", "high", "medium"]
+            ]
+
+            if findings_to_verify:
+                console.print(f"  Verifying {len(findings_to_verify)} findings (medium+ severity)")
+
+                for i, item in enumerate(findings_to_verify, 1):
+                    finding = item["finding"]
+                    console.print(f"  [{i}/{len(findings_to_verify)}] {finding.title[:40]}...")
+
+                    try:
+                        # Get code context
+                        code_context = finding.location.snippet or finding.description
+                        if finding.location.file:
+                            try:
+                                file_path = source_path / finding.location.file
+                                if file_path.exists():
+                                    code_content = file_path.read_text(encoding="utf-8", errors="ignore")
+                                    lines = code_content.split("\n")
+                                    start_line = max(1, finding.location.line - 5)
+                                    end_line = min(len(lines), (finding.location.end_line or finding.location.line) + 5)
+                                    code_context = "\n".join(lines[start_line - 1:end_line])
+                            except Exception:
+                                pass
+
+                        verify_result = await verifier.verify_finding(
+                            finding=finding,
+                            code_context=code_context,
+                        )
+
+                        adversarial_results.append({
+                            "source": item["source"],
+                            "finding": finding,
+                            "adversarial": verify_result,
+                        })
+
+                    except Exception as e:
+                        console.print(f"    [yellow]Warning: {e}[/]")
+                        adversarial_results.append({
+                            "source": item["source"],
+                            "finding": finding,
+                            "adversarial": None,
+                            "error": str(e),
+                        })
+
+                # Store adversarial results
+                result["adversarial_results"] = adversarial_results
+
+                # Statistics by verdict
+                verdict_counts = {}
+                for r in adversarial_results:
+                    adv = r.get("adversarial")
+                    if adv and adv.verdict:
+                        verdict = adv.verdict.verdict.value
+                    else:
+                        verdict = "error"
+                    verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
+
+                result["statistics"]["by_adversarial_verdict"] = verdict_counts
+
+                # Display summary
+                console.print("\n  [bold]Adversarial Verification Results:[/]")
+                verdict_emoji = {
+                    "confirmed": "🔴",
+                    "false_positive": "🟢",
+                    "needs_review": "⚪",
+                    "conditional": "🟠",
+                }
+                for verdict, count in verdict_counts.items():
+                    emoji = verdict_emoji.get(verdict, "❓")
+                    console.print(f"    {emoji} {verdict.upper()}: {count}")
+
+            else:
+                console.print("  [dim]No eligible findings for adversarial verification[/]")
+
+        except ImportError as e:
+            console.print(f"  [yellow]Warning: Adversarial verification module not available: {e}[/]")
+            result["errors"].append(f"Adversarial verification unavailable: {e}")
+        except Exception as e:
+            console.print(f"  ✗ Adversarial verification error: {e}", markup=False)
+            result["errors"].append(f"Adversarial verification error: {e}")
+
+    # =========================================================================
     # Final Statistics
     # =========================================================================
 
@@ -1248,6 +1365,21 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
         for status, count in stats["by_exploitability"].items():
             emoji = status_emoji.get(status, "⚪")
             console.print(f"  {emoji} {status.upper()}: {count}")
+
+    # Adversarial Verification breakdown
+    if "by_adversarial_verdict" in stats:
+        console.print()
+        verdict_emoji = {
+            "confirmed": "🔴",
+            "false_positive": "🟢",
+            "needs_review": "⚪",
+            "conditional": "🟠",
+            "error": "❌",
+        }
+        console.print("[bold]By Adversarial Verdict (L3.5):[/]")
+        for verdict, count in stats["by_adversarial_verdict"].items():
+            emoji = verdict_emoji.get(verdict, "❓")
+            console.print(f"  {emoji} {verdict.upper()}: {count}")
 
     # Confirmed Findings table
     if confirmed_findings:
@@ -1637,6 +1769,7 @@ def clean() -> None:
 @click.option("--llm-verify", is_flag=True, help="Enable LLM-assisted exploitability verification (Round 4)")
 @click.option("--llm-detect", is_flag=True, help="Enable LLM-assisted attack surface detection")
 @click.option("--llm-full-detect", is_flag=True, help="Enable FULL LLM-driven attack surface detection (no static detectors, any language/framework)")
+@click.option("--adversarial", is_flag=True, help="Enable L3.5 adversarial verification (attacker vs defender debate)")
 @click.option("--batch-size", default=None, type=int, help="Files per LLM batch for entry point detection (deprecated, use --batch-max-chars)")
 @click.option("--batch-max-chars", default=None, type=int, help="Maximum characters per batch for LLM entry point detection (default: from config or 30000)")
 @click.option("--model", default=None, help="LLM model for agent and verification (required for LLM features, read from config if not specified)")
@@ -1651,6 +1784,7 @@ def scan(
     llm_verify: bool,
     llm_detect: bool,
     llm_full_detect: bool,
+    adversarial: bool,
     batch_size: int | None,
     batch_max_chars: int | None,
     model: str,
@@ -1672,6 +1806,9 @@ def scan(
     With --llm-full-detect, LLM performs full attack surface detection
     (no static detectors, supports any language/framework).
 
+    With --adversarial, findings go through L3.5 adversarial verification
+    (attacker vs defender debate with arbiter judgment).
+
     Examples:
         # Quick dependency scan (default)
         deepvuln scan -p /path/to/project
@@ -1690,6 +1827,9 @@ def scan(
 
         # Full scan with pure LLM attack surface detection (any language)
         deepvuln scan -p . --full --llm-full-detect
+
+        # Full scan with adversarial verification (attacker vs defender debate)
+        deepvuln scan -p . --full --adversarial
 
         # Export report
         deepvuln scan -p . --full --export report.txt
@@ -1754,6 +1894,7 @@ def scan(
         "batch_max_chars": resolved_batch_max_chars,
         "model": resolved_model,
         "no_deps": no_deps,
+        "adversarial": adversarial,
     }
 
     if export_path:
