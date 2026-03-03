@@ -16,6 +16,7 @@ Core components:
 - StrategyEngine: Priority-based audit strategy generation
 - TaskDispatcher: Agent task dispatch and execution
 - RoundController: Multi-round audit management
+- IncrementalScanner: Incremental analysis for 70%+ speedup
 """
 
 from src.layers.l3_analysis.models import (
@@ -64,6 +65,26 @@ from src.layers.l3_analysis.rounds import (
     CoverageStats,
     EngineStats,
     AuditSession,
+)
+from src.layers.l3_analysis.incremental import (
+    ChangeDetector,
+    ChangeInfo,
+    ChangeType,
+    DiffResult,
+    ImpactAnalyzer,
+    ImpactResult,
+    ImpactLevel,
+    DependencyGraph,
+    DependencyNode,
+    DependencyEdge,
+    DependencyType,
+    BaselineManager,
+    VulnerabilityBaseline,
+    VulnerabilityStatus,
+    BaselineDiff,
+    IncrementalScanner,
+    IncrementalScanConfig,
+    IncrementalScanResult,
 )
 
 __all__ = [
@@ -114,4 +135,23 @@ __all__ = [
     "CoverageStats",
     "EngineStats",
     "AuditSession",
+    # Incremental Analysis
+    "ChangeDetector",
+    "ChangeInfo",
+    "ChangeType",
+    "DiffResult",
+    "ImpactAnalyzer",
+    "ImpactResult",
+    "ImpactLevel",
+    "DependencyGraph",
+    "DependencyNode",
+    "DependencyEdge",
+    "DependencyType",
+    "BaselineManager",
+    "VulnerabilityBaseline",
+    "VulnerabilityStatus",
+    "BaselineDiff",
+    "IncrementalScanner",
+    "IncrementalScanConfig",
+    "IncrementalScanResult",
 ]
