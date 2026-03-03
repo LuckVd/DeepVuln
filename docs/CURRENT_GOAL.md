@@ -8,7 +8,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | Round 2 真正的 CodeQL 数据流分析：自定义查询生成 + 路径追踪 + SARIF 解析 + Sanitizer 识别 |
+| **任务** | 对抗式验证增强：多轮动态对抗 + 攻防策略进化 + 学习机制 |
 | **状态** | completed |
 | **优先级** | critical |
 | **创建日期** | 2026-03-03 |
@@ -18,41 +18,41 @@
 
 ## 完成标准
 
-### P0: 自定义 CodeQL 查询生成 ✅ 完成
+### P0: 基础对抗框架
 
-- [x] **查询模板系统**：为不同漏洞类型生成 CodeQL 查询
-- [x] **Source/Sink 定义**：基于 Finding 自动定义 TaintTracking source/sink
-- [x] **查询参数化**：支持文件路径、函数名、变量名等参数注入
+- [x] **StrategyLibrary 策略库**：攻击者/防御者策略存储结构
+- [x] **EnhancedAdversarialVerification 协调器**：多轮对抗主控制器
+- [x] **轮次历史记录**：RoundHistory 数据模型
 
-### P1: CodeQL 路径追踪执行 ✅ 完成
+### P1: 攻击者进化机制
 
-- [x] **调用 CodeQL CLI**：执行 `database analyze` 运行自定义查询
-- [x] **TaintTracking 配置**：生成完整的污点追踪配置
-- [x] **路径查询执行**：获取 source → sink 的完整路径
+- [x] **攻击策略库**：已知入口点、绕过技术库、攻击链模板
+- [x] **历史失败学习**：记录失败原因，避免重复
+- [x] **进化算法**：选择、交叉、变异、淘汰
 
-### P2: SARIF 解析增强 ✅ 完成
+### P2: 防御者进化机制
 
-- [x] **codeFlows 解析**：从 SARIF 提取完整数据流路径
-- [x] **threadFlows 处理**：解析多线程流路径
-- [x] **路径节点提取**：提取每个路径节点的位置、变量、表达式
+- [x] **防御策略库**：现有防御、预测攻击库、多层防御建议
+- [x] **攻击预判**：从攻击者成功路径反推防御缺失
+- [x] **多层防护生成**：组合多个防御措施
 
-### P3: Sanitizer 识别 ✅ 完成
+### P3: 多轮对抗与收敛
 
-- [x] **净化函数检测**：识别路径中的 sanitize 调用
-- [x] **净化效果评估**：判断 sanitizer 是否有效阻断污点传播
-- [x] **has_effective_sanitizer 标记**：更新 DataFlowPath 状态
+- [x] **收敛条件判断**：置信度阈值、最大轮次、策略稳定度
+- [x] **仲裁者增强**：基于多轮证据的最终判断
+- [x] **置信度计算**：综合多轮结果的置信度评估
 
-### P4: Round 2 集成 ✅ 完成
+### P4: 学习与规则提取
 
-- [x] **改造 _trace_dataflow**：使用真实 CodeQL 结果替代推断
-- [x] **is_complete 判定**：基于实际路径完整性设置
-- [x] **置信度更新**：根据数据流分析结果调整候选漏洞置信度
+- [x] **learn_from_round**：从每轮对抗中提炼经验
+- [x] **规则生成**：成功验证后自动生成新规则
+- [x] **策略库持久化**：保存有效策略供后续使用
 
-### P5: 测试验证 ✅ 完成
+### P5: 测试验证
 
-- [x] **单元测试**：新增组件的测试覆盖 (59 个新测试)
-- [x] **集成测试**：端到端数据流分析验证
-- [ ] **真实项目测试**：在已知漏洞项目上验证 (需要 CodeQL 环境)
+- [x] **单元测试**：策略库、进化算法、收敛条件
+- [ ] **集成测试**：多轮对抗端到端验证 (需要 LLM)
+- [ ] **效果评估**：对比传统辩论系统的漏洞发现率 (需要 LLM)
 
 ---
 
@@ -62,27 +62,49 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                   Round 2 数据流分析架构                          │
+│                   增强对抗式验证架构                              │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐    │
-│  │  Query       │ ──▶ │  CodeQL      │ ──▶ │  SARIF       │    │
-│  │  Generator   │     │  Executor    │     │  Parser      │    │
-│  │              │     │              │     │              │    │
-│  │ • 模板系统   │     │ • CLI 调用   │     │ • codeFlows  │    │
-│  │ • Source定义 │     │ • 查询执行   │     │ • 路径节点   │    │
-│  │ • Sink定义   │     │ • 结果获取   │     │ • Sanitizer  │    │
-│  └──────────────┘     └──────────────┘     └──────────────┘    │
-│          │                   │                   │              │
-│          └───────────────────┼───────────────────┘              │
+│  ┌──────────────────┐    ┌──────────────────┐                  │
+│  │ StrategyLibrary  │    │ StrategyLibrary  │                  │
+│  │   (Attacker)     │    │   (Defender)     │                  │
+│  │                  │    │                  │                  │
+│  │ • 已知入口点     │    │ • 现有防御       │                  │
+│  │ • 绕过技术库     │    │ • 预测攻击库     │                  │
+│  │ • 攻击链模板     │    │ • 多层防御建议   │                  │
+│  │ • 历史失败记录   │    │                  │                  │
+│  └────────┬─────────┘    └────────┬─────────┘                  │
+│           │                       │                             │
+│           ▼                       ▼                             │
+│  ┌─────────────────────────────────────────────────┐            │
+│  │              EnhancedAdversarialVerification    │            │
+│  │                                                 │            │
+│  │  ┌─────────┐   ┌─────────┐   ┌─────────┐       │            │
+│  │  │ Round 1 │──▶│ Round 2 │──▶│ Round N │       │            │
+│  │  └────┬────┘   └────┬────┘   └────┬────┘       │            │
+│  │       │             │             │             │            │
+│  │       ▼             ▼             ▼             │            │
+│  │  ┌─────────────────────────────────────────┐   │            │
+│  │  │           RoundHistory                   │   │            │
+│  │  │  • 攻击路径 • 防御措施 • 裁决结果        │   │            │
+│  │  └─────────────────────────────────────────┘   │            │
+│  │                      │                          │            │
+│  │                      ▼                          │            │
+│  │  ┌─────────────────────────────────────────┐   │            │
+│  │  │         ConvergenceChecker               │   │            │
+│  │  │  • 置信度 > 90%? • 轮次 >= 5?            │   │            │
+│  │  │  • 无新策略? → 停止对抗                   │   │            │
+│  │  └─────────────────────────────────────────┘   │            │
+│  └─────────────────────────────────────────────────┘            │
 │                              │                                  │
 │                              ▼                                  │
 │                    ┌──────────────────┐                        │
-│                    │  DataFlowPath    │                        │
+│                    │   Final Verdict  │                        │
 │                    │                  │                        │
-│                    │ • 完整路径节点   │                        │
-│                    │ • Sanitizer 列表 │                        │
-│                    │ • is_complete    │                        │
+│                    │ • 确认可利用     │                        │
+│                    │ • 条件性可利用   │                        │
+│                    │ • 误报           │                        │
+│                    │ • 新规则提取     │                        │
 │                    └──────────────────┘                        │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -92,11 +114,11 @@
 
 | 组件 | 路径 | 职责 |
 |------|------|------|
-| QueryGenerator | `l3_analysis/codeql/query_generator.py` | CodeQL 查询模板生成 |
-| CodeQLDataflowExecutor | `l3_analysis/codeql/executor.py` | CodeQL CLI 执行封装 |
-| SARIFParser | `l3_analysis/codeql/sarif_parser.py` | SARIF 输出解析增强 |
-| SanitizerDetector | `l3_analysis/codeql/sanitizer_detector.py` | Sanitizer 检测和评估 |
-| DataflowAnalyzer | `l3_analysis/rounds/dataflow_analyzer.py` | 数据流分析协调器 |
+| StrategyLibrary | `l3_analysis/verification/strategy_library.py` | 攻防策略存储与检索 |
+| AttackerEvolver | `l3_analysis/verification/attacker_evolver.py` | 攻击者策略进化 |
+| DefenderEvolver | `l3_analysis/verification/defender_evolver.py` | 防御者策略进化 |
+| ConvergenceChecker | `l3_analysis/verification/convergence.py` | 收敛条件判断 |
+| EnhancedAdversarialVerification | `l3_analysis/verification/enhanced_adversarial.py` | 多轮对抗协调器 |
 
 ---
 
@@ -104,14 +126,14 @@
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/layers/l3_analysis/codeql/__init__.py` | 新增 | CodeQL 工具模块入口 |
-| `src/layers/l3_analysis/codeql/query_generator.py` | 新增 | CodeQL 查询生成器 |
-| `src/layers/l3_analysis/codeql/executor.py` | 新增 | CodeQL 执行器 |
-| `src/layers/l3_analysis/codeql/sarif_parser.py` | 新增 | SARIF 解析增强 |
-| `src/layers/l3_analysis/codeql/sanitizer_detector.py` | 新增 | Sanitizer 检测器 |
-| `src/layers/l3_analysis/rounds/dataflow_analyzer.py` | 新增 | 数据流分析协调器 |
-| `src/layers/l3_analysis/rounds/round_two.py` | 修改 | 改造 _trace_dataflow |
-| `tests/unit/test_l3/test_codeql_dataflow.py` | 新增 | 数据流分析测试 (59 个测试) |
+| `src/layers/l3_analysis/verification/strategy_library.py` | 新增 | 策略库基础结构 |
+| `src/layers/l3_analysis/verification/attacker_evolver.py` | 新增 | 攻击者进化机制 |
+| `src/layers/l3_analysis/verification/defender_evolver.py` | 新增 | 防御者进化机制 |
+| `src/layers/l3_analysis/verification/convergence.py` | 新增 | 收敛条件判断 |
+| `src/layers/l3_analysis/verification/enhanced_adversarial.py` | 新增 | 增强对抗验证协调器 |
+| `src/layers/l3_analysis/verification/models.py` | 修改 | 添加策略相关模型 |
+| `src/layers/l3_analysis/verification/adversarial.py` | 修改 | 集成增强验证 |
+| `tests/unit/test_l3/test_enhanced_adversarial.py` | 新增 | 增强对抗测试 |
 
 ---
 
@@ -119,15 +141,14 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-03 | 设置目标：Round 2 CodeQL 数据流分析 |
-| 2026-03-03 | 完成 QueryGenerator - 支持多语言查询模板生成 |
-| 2026-03-03 | 完成 SARIFParser - codeFlows 完整路径解析 |
-| 2026-03-03 | 完成 CodeQLDataflowExecutor - CLI 执行封装 |
-| 2026-03-03 | 完成 SanitizerDetector - 多语言 sanitizer 检测 |
-| 2026-03-03 | 完成 DataflowAnalyzer - 协调器整合所有组件 |
-| 2026-03-03 | 改造 Round 2 - 集成真实数据流分析 |
-| 2026-03-03 | 编写单元测试 - 59 个新测试全部通过 |
-| 2026-03-03 | ✅ 目标完成 - 626 个测试全部通过 |
+| 2026-03-03 | 设置目标：对抗式验证增强 |
+| 2026-03-03 | 完成 P0 基础对抗框架 - StrategyLibrary 策略库 |
+| 2026-03-03 | 完成 ConvergenceChecker 收敛条件判断器 |
+| 2026-03-03 | 完成 EnhancedAdversarialVerification 协调器 |
+| 2026-03-03 | 完成攻击者/防御者进化机制集成 |
+| 2026-03-03 | 完成学习机制 - 从成功/失败中提取经验 |
+| 2026-03-03 | 完成规则提取 - 成功验证后自动生成规则 |
+| 2026-03-03 | 编写单元测试 - 45 个新测试，671 个测试全部通过 |
 
 ---
 
@@ -135,18 +156,28 @@
 
 | 指标 | 当前 | 目标 | 提升 |
 |------|------|------|------|
-| 数据流路径完整性 | 仅 2 节点 | 完整路径 | 路径可见性 100% |
-| is_complete 准确率 | 0% (永远 False) | >90% | +90% |
-| Sanitizer 检测 | 无 | 自动识别 | 新增能力 |
-| 漏洞验证准确率 | ~60% | >85% | +25% |
+| 深度漏洞发现 | 基准 | +30-50% | 发现多步绕过漏洞 |
+| 误报率 | ~40% | ~20% | 多轮验证降误报 |
+| 漏洞质量 | ~60% | >70% | 确认可利用漏洞 |
+| 规则自进化 | 无 | 自动生成 | 成功验证→新规则 |
+
+---
+
+## 实施路线
+
+| 阶段 | 内容 | 依赖 |
+|------|------|------|
+| Phase 1 | 基础对抗框架 + 策略库结构 | 现有辩论系统 |
+| Phase 2 | 攻击者/防御者进化机制 | Phase 1 |
+| Phase 3 | 多轮对抗 + 收敛算法 | Phase 2 |
+| Phase 4 | 学习机制 + 规则提取 | Phase 3 |
 
 ---
 
 ## 备注
 
-- 基于 Round 1 Finding 生成针对性的 CodeQL 查询
-- 利用 CodeQL 的 TaintTracking 配置实现真正的数据流追踪
-- 解析 SARIF 中的 codeFlows 获取完整路径节点
-- 识别路径中的 sanitizer 调用并评估有效性
-- 支持 Python、Java、JavaScript、Go 四种语言
-- 当 CodeQL 不可用时自动回退到推断分析
+- 基于现有三方辩论系统（攻击者/防御者/仲裁者）扩展
+- 核心改进：单轮静态辩论 → 多轮动态对抗
+- 攻击者：学习历史失败经验，进化攻击策略
+- 防御者：预判攻击者新路径，主动加固
+- 最大轮次：5轮，置信度阈值：90%
