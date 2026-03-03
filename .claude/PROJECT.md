@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-03-03 | 18135e8 | feat(l3): implement real CodeQL dataflow analysis for Round 2 |
 | 2026-03-03 | 6341810 | perf(scan): implement parallel scanning with LLM concurrency control |
 | 2026-03-01 | 5de94c3 | feat(l3): add CodeQL build system support and enhance LLM error handling |
 | 2026-02-27 | 26be3ae | feat(l1): add batch LLM entry point detection for 15x speedup |

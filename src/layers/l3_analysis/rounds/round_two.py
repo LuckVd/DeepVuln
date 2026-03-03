@@ -2,6 +2,13 @@
 Round Two Executor - Deep Tracking
 
 Second round of multi-round audit: deep analysis of vulnerability candidates.
+
+This round performs:
+1. Data flow analysis using CodeQL (with real dataflow paths)
+2. Deep audit using Agent
+3. Taint propagation tracking with complete paths
+4. Evidence collection and confidence update
+5. Sanitizer detection and evaluation
 """
 
 import uuid
@@ -11,6 +18,14 @@ from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.codeql import CodeQLEngine
+from src.layers.l3_analysis.codeql import (
+    CodeQLDataflowExecutor,
+    DataflowAnalysisConfig,
+    QueryGenerator,
+    SanitizerDetector,
+    SARIFParser,
+    ParsedDataflowPath,
+)
 from src.layers.l3_analysis.models import CodeLocation
 from src.layers.l3_analysis.rounds.dataflow import (
     DataFlowPath,
@@ -82,6 +97,10 @@ class RoundTwoExecutor:
         self._codeql_engine = codeql_engine
         self._agent_executor = agent_executor
         self._database_path = database_path
+
+        # Initialize the real dataflow analyzer
+        self._dataflow_analyzer: Any = None
+        self._analyzer_initialized = False
 
     async def execute(
         self,
@@ -159,80 +178,171 @@ class RoundTwoExecutor:
 
         return round_result
 
+    async def _initialize_dataflow_analyzer(self) -> None:
+        """Initialize the CodeQL dataflow analyzer."""
+        if self._analyzer_initialized:
+            return
+
+        # Determine language from source path
+        language = self._detect_language()
+
+        # Create dataflow analysis config
+        config = DataflowAnalysisConfig(
+            codeql_path="codeql",
+            database_path=self._database_path,
+            source_root=self.source_path,
+            language=language,
+            timeout=300,
+            max_concurrent_queries=3,
+            evaluate_sanitizers=True,
+        )
+
+        # Create the dataflow analyzer
+        self._dataflow_analyzer = CodeQLDataflowExecutor(
+            codeql_path=config.codeql_path,
+            database_path=config.database_path,
+            timeout=config.timeout,
+            source_root=config.source_root,
+        )
+
+        self._analyzer_initialized = True
+        self.logger.info(f"Dataflow analyzer initialized for language: {language}")
+
+    def _detect_language(self) -> str:
+        """Detect programming language from source path."""
+        # Check for common file extensions
+        extensions = {
+            ".py": "python",
+            ".java": "java",
+            ".js": "javascript",
+            ".ts": "typescript",
+            ".go": "go",
+            ".cs": "csharp",
+            ".rb": "ruby",
+        }
+
+        for ext, lang in extensions.items():
+            if list(self.source_path.rglob(f"*{ext}")):
+                return lang
+
+        # Default to python
+        return "python"
+
     async def _run_codeql_analysis(
         self,
         candidates: list[VulnerabilityCandidate],
         round_result: RoundResult,
         coverage: CoverageStats,
     ) -> EngineStats:
-        """Run CodeQL data flow analysis on candidates."""
-        self.logger.info("Phase 1: CodeQL Data Flow Analysis")
+        """
+        Run CodeQL data flow analysis on candidates.
+
+        This method now uses the real CodeQL dataflow analyzer to:
+        1. Generate custom queries for each vulnerability candidate
+        2. Execute the queries against the CodeQL database
+        3. Parse SARIF results to extract complete data flow paths
+        4. Detect and evaluate sanitizers along the paths
+        5. Update candidate confidence based on findings
+        """
+        self.logger.info("Phase 1: CodeQL Data Flow Analysis (Real Implementation)")
 
         stats = EngineStats(
             engine="codeql",
-            enabled=self._codeql_engine is not None,
+            enabled=self._codeql_engine is not None or self._database_path is not None,
             start_time=datetime.now(UTC),
         )
 
-        if not self._codeql_engine:
-            self.logger.info("CodeQL engine not provided, skipping CodeQL analysis")
-            stats.add_warning("CodeQL engine not provided")
-            stats.end_time = datetime.now(UTC)
-            return stats
+        # Try to initialize the real dataflow analyzer
+        if not self._analyzer_initialized and self._database_path:
+            await self._initialize_dataflow_analyzer()
+
+        # Check if we can use the real analyzer
+        use_real_analyzer = (
+            self._dataflow_analyzer is not None and
+            self._database_path is not None and
+            self._database_path.exists()
+        )
+
+        if not use_real_analyzer:
+            self.logger.info("CodeQL database not available, using fallback analysis")
+            stats.add_warning("CodeQL database not available - using inference-based analysis")
+            # Fall back to the original inference-based approach
+            return await self._run_codeql_analysis_fallback(candidates, round_result, coverage, stats)
 
         try:
-            # Check if database exists or needs to be created
-            if not self._database_path or not self._database_path.exists():
-                self.logger.info("Creating CodeQL database...")
-                # Note: Database creation is handled by the engine
-                pass
-
             stats.executed = True
+            self.logger.info(f"Running real CodeQL dataflow analysis on {len(candidates)} candidates")
 
-            # Analyze each candidate
+            # Analyze each candidate with the real dataflow analyzer
             for candidate in candidates:
                 try:
-                    # Create deep analysis result
-                    deep_result = DeepAnalysisResult(
-                        id=f"deep-{uuid.uuid4().hex[:8]}",
-                        candidate_id=candidate.id,
-                        original_confidence=self.CONFIDENCE_MAP.get(
-                            candidate.confidence, "medium"
-                        ),
-                        analysis_started=datetime.now(UTC),
-                    )
+                    # Generate and execute CodeQL query for this candidate
+                    dataflow_result = await self._run_single_dataflow_analysis(candidate)
 
-                    # Run data flow queries based on vulnerability type
-                    dataflow_path = await self._trace_dataflow(candidate)
-                    if dataflow_path:
-                        deep_result.add_dataflow_path(dataflow_path)
+                    if dataflow_result:
+                        # Create deep analysis result
+                        deep_result = DeepAnalysisResult(
+                            id=f"deep-{uuid.uuid4().hex[:8]}",
+                            candidate_id=candidate.id,
+                            original_confidence=self.CONFIDENCE_MAP.get(
+                                candidate.confidence, "medium"
+                            ),
+                            analysis_started=datetime.now(UTC),
+                        )
 
-                    # Store CodeQL findings
-                    deep_result.codeql_findings = {
-                        "has_path": dataflow_path is not None,
-                        "path_complete": dataflow_path.is_complete if dataflow_path else False,
-                    }
+                        # Add all dataflow paths found
+                        for path in dataflow_result.get("paths", []):
+                            deep_result.add_dataflow_path(path)
 
-                    # Add evidence to candidate
-                    candidate.add_evidence("codeql", deep_result.to_prompt_context())
-                    candidate.analyzed_in_rounds.append(2)
+                        # Store CodeQL findings
+                        deep_result.codeql_findings = {
+                            "has_path": dataflow_result.get("total_paths", 0) > 0,
+                            "path_complete": dataflow_result.get("complete_paths", 0) > 0,
+                            "has_effective_sanitizer": dataflow_result.get("has_effective_sanitizer", False),
+                            "query_executed": dataflow_result.get("query_executed", False),
+                            "execution_time_ms": dataflow_result.get("execution_time_ms", 0),
+                        }
 
-                    # Store in metadata
-                    if "deep_results" not in candidate.metadata:
-                        candidate.metadata["deep_results"] = {}
-                    candidate.metadata["deep_results"]["codeql"] = deep_result.model_dump()
+                        # Add evidence to candidate
+                        candidate.add_evidence("codeql", deep_result.to_prompt_context())
+                        candidate.analyzed_in_rounds.append(2)
 
-                    stats.findings_count += 1
+                        # Store in metadata
+                        if "deep_results" not in candidate.metadata:
+                            candidate.metadata["deep_results"] = {}
+                        candidate.metadata["deep_results"]["codeql"] = {
+                            **deep_result.model_dump(),
+                            "dataflow_analysis": dataflow_result,
+                        }
+
+                        # Update candidate confidence based on dataflow analysis
+                        if dataflow_result.get("complete_paths", 0) > 0:
+                            if not dataflow_result.get("has_effective_sanitizer", False):
+                                # Complete path without sanitizer = high confidence
+                                candidate.confidence = ConfidenceLevel.HIGH
+                            else:
+                                # Has sanitizer = lower confidence
+                                candidate.confidence = ConfidenceLevel.LOW
+                        elif dataflow_result.get("total_paths", 0) > 0:
+                            # Partial paths = medium confidence
+                            candidate.confidence = ConfidenceLevel.MEDIUM
+
+                        stats.findings_count += 1
 
                 except Exception as e:
-                    self.logger.warning(f"CodeQL analysis failed for candidate {candidate.id}: {e}")
+                    self.logger.warning(f"CodeQL dataflow analysis failed for candidate {candidate.id}: {e}")
                     stats.add_warning(f"Candidate {candidate.id}: {e}")
 
             stats.candidates_count = len(candidates)
             coverage.analyzed_targets += len(candidates)
 
+            self.logger.info(
+                f"CodeQL dataflow analysis complete: {stats.findings_count} findings, "
+                f"{sum(1 for c in candidates if c.confidence == ConfidenceLevel.HIGH)} high confidence"
+            )
+
         except Exception as e:
-            self.logger.error(f"CodeQL analysis failed: {e}")
+            self.logger.error(f"CodeQL dataflow analysis failed: {e}")
             stats.add_error(str(e))
 
         stats.end_time = datetime.now(UTC)
@@ -243,18 +353,150 @@ class RoundTwoExecutor:
 
         return stats
 
-    async def _trace_dataflow(
+    async def _run_single_dataflow_analysis(
+        self,
+        candidate: VulnerabilityCandidate,
+    ) -> dict[str, Any] | None:
+        """
+        Run CodeQL dataflow analysis for a single vulnerability candidate.
+
+        This method:
+        1. Generates a custom CodeQL query for the candidate
+        2. Executes the query against the CodeQL database
+        3. Parses the SARIF results to extract data flow paths
+        4. Detects sanitizers along the paths
+
+        Args:
+            candidate: Vulnerability candidate to analyze.
+
+        Returns:
+            Dictionary with dataflow analysis results.
+        """
+        if not self._dataflow_analyzer or not candidate.finding:
+            return None
+
+        try:
+            # Generate query configuration
+            query_generator = QueryGenerator(language=self._detect_language())
+            query_config = query_generator.generate_from_finding(
+                finding=candidate.finding,
+                language=self._detect_language(),
+            )
+
+            # Execute the query
+            result = await self._dataflow_analyzer.execute_query(
+                config=query_config,
+                database_path=self._database_path,
+            )
+
+            if not result.success:
+                self.logger.warning(f"Dataflow query execution failed: {result.error_message}")
+                return None
+
+            # Process results
+            return {
+                "query_id": result.query_id,
+                "query_executed": result.query_executed,
+                "total_paths": result.total_paths,
+                "complete_paths": result.complete_paths,
+                "paths_with_sanitizers": result.paths_with_sanitizers,
+                "has_effective_sanitizer": any(
+                    p.has_effective_sanitizer for p in result.paths
+                ) if result.paths else False,
+                "paths": result.paths,
+                "execution_time_ms": result.execution_time_ms,
+            }
+
+        except Exception as e:
+            self.logger.error(f"Single dataflow analysis failed: {e}")
+            return None
+
+    async def _run_codeql_analysis_fallback(
+        self,
+        candidates: list[VulnerabilityCandidate],
+        round_result: RoundResult,
+        coverage: CoverageStats,
+        stats: EngineStats,
+    ) -> EngineStats:
+        """
+        Fallback analysis when CodeQL database is not available.
+
+        Uses inference-based approach to estimate data flow paths.
+        """
+        self.logger.info("Using inference-based fallback analysis")
+
+        stats.executed = True
+
+        # Analyze each candidate with inference
+        for candidate in candidates:
+            try:
+                # Create deep analysis result
+                deep_result = DeepAnalysisResult(
+                    id=f"deep-{uuid.uuid4().hex[:8]}",
+                    candidate_id=candidate.id,
+                    original_confidence=self.CONFIDENCE_MAP.get(
+                        candidate.confidence, "medium"
+                    ),
+                    analysis_started=datetime.now(UTC),
+                )
+
+                # Run inference-based data flow tracing
+                dataflow_path = await self._trace_dataflow_inference(candidate)
+                if dataflow_path:
+                    deep_result.add_dataflow_path(dataflow_path)
+
+                # Store CodeQL findings
+                deep_result.codeql_findings = {
+                    "has_path": dataflow_path is not None,
+                    "path_complete": dataflow_path.is_complete if dataflow_path else False,
+                    "method": "inference_fallback",
+                }
+
+                # Add evidence to candidate
+                candidate.add_evidence("codeql", deep_result.to_prompt_context())
+                candidate.analyzed_in_rounds.append(2)
+
+                # Store in metadata
+                if "deep_results" not in candidate.metadata:
+                    candidate.metadata["deep_results"] = {}
+                candidate.metadata["deep_results"]["codeql"] = deep_result.model_dump()
+
+                stats.findings_count += 1
+
+            except Exception as e:
+                self.logger.warning(f"Fallback analysis failed for candidate {candidate.id}: {e}")
+                stats.add_warning(f"Candidate {candidate.id}: {e}")
+
+        stats.candidates_count = len(candidates)
+        coverage.analyzed_targets += len(candidates)
+
+        stats.end_time = datetime.now(UTC)
+        if stats.start_time:
+            stats.duration_seconds = (
+                stats.end_time - stats.start_time
+            ).total_seconds()
+
+        return stats
+
+    async def _trace_dataflow_inference(
         self,
         candidate: VulnerabilityCandidate,
     ) -> DataFlowPath | None:
         """
-        Trace data flow for a vulnerability candidate.
+        Trace data flow using inference (fallback when CodeQL is not available).
+
+        This method creates an estimated data flow path based on the finding's
+        characteristics. It's used as a fallback when CodeQL database is not
+        available or when CodeQL analysis fails.
+
+        Note: This is NOT a real dataflow analysis - it uses heuristics to
+        estimate the source and sink based on vulnerability type.
 
         Args:
             candidate: The vulnerability candidate to analyze.
 
         Returns:
-            Data flow path if found, None otherwise.
+            Data flow path if can be inferred, None otherwise.
         """
         finding = candidate.finding
 
@@ -277,14 +519,15 @@ class RoundTwoExecutor:
             vulnerability_class=[finding.title] if finding.title else [],
         )
 
-        # Create a basic path (would be enhanced by actual CodeQL analysis)
+        # Create an inferred path (not complete since no real analysis)
         path = DataFlowPath(
             id=f"path-{uuid.uuid4().hex[:8]}",
             candidate_id=candidate.id,
             source=source,
             sink=sink,
-            is_complete=False,  # Would be determined by actual analysis
-            analyzer="codeql",
+            is_complete=False,  # Inferred paths are never complete
+            analyzer="inference",  # Mark as inference-based
+            path_confidence=0.3,  # Low confidence for inferred paths
         )
 
         # Add source and sink as path nodes

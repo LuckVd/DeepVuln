@@ -1,0 +1,57 @@
+# DeepVuln Docker Image (Lite Version)
+# 仅包含核心依赖，适用于网络受限环境
+#
+# 构建命令:
+#   docker build -f Dockerfile.lite -t deepvuln:lite .
+#
+# 注意: 此版本不包含 CodeQL（需要手动安装或使用完整版）
+
+FROM python:3.12-slim
+
+# 设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PYTHONUNBUFFERED=1
+
+# 安装基础工具（精简版不需要 build-essential）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建工作目录
+WORKDIR /app
+
+# 复制依赖文件
+COPY pyproject.toml uv.lock* ./
+
+# 安装 uv 和 Python 依赖
+RUN pip install uv && uv venv /app/.venv && uv sync
+
+# 设置环境变量
+ENV PATH="/app/.venv/bin:${PATH}"
+ENV VIRTUAL_ENV="/app/.venv"
+ENV PYTHONPATH="/app"
+
+# 安装 Semgrep（使用 uv）
+RUN uv pip install semgrep
+
+# 复制项目代码
+COPY . .
+
+# 创建非 root 用户
+RUN useradd -m -s /bin/bash deepvuln \
+    && chown -R deepvuln:deepvuln /app
+
+# 切换到非 root 用户
+USER deepvuln
+
+# 工作目录（挂载目标代码的位置）
+WORKDIR /target
+
+# 入口点（使用绝对路径）
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "src.cli.main"]
+CMD ["--help"]

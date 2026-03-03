@@ -1,0 +1,97 @@
+# DeepVuln Docker Compose 配置
+#
+# 使用方法:
+#   # 使用环境变量
+#   export OPENAI_API_KEY=your-key
+#   docker-compose run --rm deepvuln /target
+#
+#   # 或使用配置文件
+#   docker-compose run --rm -v ./config.local.toml:/app/config.local.toml deepvuln /target
+
+version: "3.8"
+
+services:
+  deepvuln:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: deepvuln:latest
+    container_name: deepvuln
+
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+        reservations:
+          cpus: "1"
+          memory: 2G
+
+    # 环境变量
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - PYTHONUNBUFFERED=1
+
+    # 卷挂载
+    volumes:
+      # 待扫描代码
+      - ${TARGET_PATH:-./target}:/target:ro
+      # 配置文件（可选）
+      - ./config.local.toml:/app/config.local.toml:ro
+      # 缓存目录（加速重复扫描）
+      - deepvuln-cache:/home/deepvuln/.cache
+      # CodeQL 数据库缓存
+      - codeql-databases:/tmp/codeql_dbs
+
+    # 工作目录
+    working_dir: /target
+
+    # 默认命令
+    command: ["--help"]
+
+    # 安全配置
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    cap_drop:
+      - ALL
+
+  # 可选：用于大型项目的扫描服务
+  deepvuln-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: deepvuln:latest
+    container_name: deepvuln-worker
+
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - WORKER_MODE=true
+
+    volumes:
+      - deepvuln-cache:/home/deepvuln/.cache
+      - codeql-databases:/tmp/codeql_dbs
+
+    command: ["--version"]
+    profiles:
+      - worker
+
+volumes:
+  deepvuln-cache:
+    name: deepvuln-cache
+  codeql-databases:
+    name: codeql-databases
+
+# 网络配置
+networks:
+  default:
+    name: deepvuln-network
