@@ -47,6 +47,10 @@ class AdversarialVerifierConfig:
         sequential_rebuttal: bool = True,
         skip_low_severity: bool = False,
         skip_info_findings: bool = True,
+        skip_low_confidence: bool = True,
+        min_confidence_to_verify: float = 0.3,
+        deduplicate_similar: bool = True,
+        similarity_threshold: float = 0.8,
         confidence_threshold: float = 0.7,
         use_heuristic_fallback: bool = True,
         trigger_conditions: TriggerConditions | None = None,
@@ -62,6 +66,10 @@ class AdversarialVerifierConfig:
             sequential_rebuttal: Run rebuttals sequentially (defender sees attacker's rebuttal).
             skip_low_severity: Skip verification for low severity findings.
             skip_info_findings: Skip verification for info-level findings.
+            skip_low_confidence: Skip verification for low initial confidence findings.
+            min_confidence_to_verify: Minimum initial confidence to trigger verification.
+            deduplicate_similar: Skip verification for similar findings (same type).
+            similarity_threshold: Threshold for considering findings similar (0-1).
             confidence_threshold: Minimum confidence to accept verdict.
             use_heuristic_fallback: Use heuristics if LLM fails.
             trigger_conditions: Conditions for triggering additional debate rounds.
@@ -73,6 +81,10 @@ class AdversarialVerifierConfig:
         self.sequential_rebuttal = sequential_rebuttal
         self.skip_low_severity = skip_low_severity
         self.skip_info_findings = skip_info_findings
+        self.skip_low_confidence = skip_low_confidence
+        self.min_confidence_to_verify = min_confidence_to_verify
+        self.deduplicate_similar = deduplicate_similar
+        self.similarity_threshold = similarity_threshold
         self.confidence_threshold = confidence_threshold
         self.use_heuristic_fallback = use_heuristic_fallback
         self.trigger_conditions = trigger_conditions or TriggerConditions()
@@ -122,6 +134,18 @@ class AdversarialVerifier:
             use_heuristic_fallback=self.config.use_heuristic_fallback,
             trigger_conditions=self.config.trigger_conditions,
         )
+
+        # Track verified finding types for deduplication
+        # Key: (finding_type, file_pattern), Value: (finding_id, confidence)
+        self._verified_types: dict[tuple[str, str], tuple[str, float]] = {}
+
+        # Statistics for smart skipping
+        self._skip_stats = {
+            "low_confidence": 0,
+            "duplicate": 0,
+            "low_severity": 0,
+            "info_level": 0,
+        }
 
     async def verify_finding(
         self,
@@ -444,10 +468,14 @@ class AdversarialVerifier:
 
         severity = finding.get("severity", "medium").lower()
 
+        # Skip info-level findings
         if self.config.skip_info_findings and severity == "info":
+            self._skip_stats["info_level"] += 1
             return True
 
+        # Skip low severity findings
         if self.config.skip_low_severity and severity == "low":
+            self._skip_stats["low_severity"] += 1
             return True
 
         # Skip suspicious code findings (low confidence)
@@ -455,7 +483,108 @@ class AdversarialVerifier:
         if is_suspicious:
             return True
 
+        # Skip low initial confidence findings
+        if self.config.skip_low_confidence:
+            initial_confidence = finding.get("confidence", 1.0)
+            if isinstance(initial_confidence, (int, float)):
+                if initial_confidence < self.config.min_confidence_to_verify:
+                    self._skip_stats["low_confidence"] += 1
+                    logger.debug(
+                        f"Skipping finding with low confidence: {initial_confidence:.0%}"
+                    )
+                    return True
+
+        # Check for similar/duplicate findings
+        if self.config.deduplicate_similar:
+            if self._is_duplicate_finding(finding):
+                self._skip_stats["duplicate"] += 1
+                return True
+
         return False
+
+    def _is_duplicate_finding(self, finding: dict[str, Any]) -> bool:
+        """
+        Check if this finding is a duplicate of an already-verified finding.
+
+        Uses finding type and file path pattern for similarity detection.
+
+        Args:
+            finding: The finding to check.
+
+        Returns:
+            True if this is a duplicate finding.
+        """
+        finding_type = finding.get("type", finding.get("rule_id", "unknown"))
+        location = finding.get("location", "")
+        finding_id = finding.get("id", "unknown")
+        confidence = finding.get("confidence", 0.5)
+
+        # Extract file path pattern (directory + base name pattern)
+        file_pattern = self._extract_file_pattern(location)
+
+        # Create key for this finding type
+        key = (finding_type, file_pattern)
+
+        # Check if we've already verified a similar finding
+        if key in self._verified_types:
+            verified_id, verified_confidence = self._verified_types[key]
+            logger.debug(
+                f"Skipping duplicate finding {finding_id}: "
+                f"similar to {verified_id} (type={finding_type}, pattern={file_pattern})"
+            )
+            return True
+
+        # Record this finding type for future deduplication
+        # Only record if confidence is high enough (likely real finding)
+        if confidence >= self.config.similarity_threshold:
+            self._verified_types[key] = (finding_id, confidence)
+
+        return False
+
+    def _extract_file_pattern(self, location: str) -> str:
+        """
+        Extract a file pattern from a location string.
+
+        Used for similarity detection - findings in the same directory
+        with the same type are considered similar.
+
+        Args:
+            location: The location string (e.g., "path/to/file.py:123").
+
+        Returns:
+            A file pattern string for comparison.
+        """
+        if not location:
+            return ""
+
+        # Remove line numbers
+        file_path = location.split(":")[0]
+
+        # Get directory and base name without extension
+        parts = file_path.split("/")
+        if len(parts) > 1:
+            # Use parent directory + file basename
+            return "/".join(parts[-2:])
+        return parts[-1] if parts else ""
+
+    def get_skip_statistics(self) -> dict[str, int]:
+        """
+        Get statistics about skipped findings.
+
+        Returns:
+            Dict with counts of skipped findings by reason.
+        """
+        return self._skip_stats.copy()
+
+    def reset_deduplication_cache(self) -> None:
+        """Reset the deduplication cache for a new verification session."""
+        self._verified_types.clear()
+        self._skip_stats = {
+            "low_confidence": 0,
+            "duplicate": 0,
+            "low_severity": 0,
+            "info_level": 0,
+        }
 
     def _create_skipped_result(
         self,
@@ -464,13 +593,19 @@ class AdversarialVerifier:
     ) -> VerificationResult:
         """Create a result for skipped findings."""
         severity = finding.get("severity", "medium").lower()
+        confidence = finding.get("confidence", 1.0)
 
+        # Determine skip reason
         if severity == "info":
             reason = "Info-level findings are skipped"
-        elif severity == "low":
+        elif severity == "low" and self.config.skip_low_severity:
             reason = "Low severity findings are skipped"
         elif finding.get("metadata", {}).get("is_suspicious"):
             reason = "Suspicious code findings are skipped"
+        elif self.config.skip_low_confidence and confidence < self.config.min_confidence_to_verify:
+            reason = f"Low initial confidence ({confidence:.0%} < {self.config.min_confidence_to_verify:.0%})"
+        elif self.config.deduplicate_similar:
+            reason = "Duplicate of already-verified similar finding"
         else:
             reason = "Verification disabled"
 
@@ -481,8 +616,8 @@ class AdversarialVerifier:
             finding_location=finding.get("location", "unknown"),
             verdict=AdversarialVerdict(
                 verdict=VerdictType.NEEDS_REVIEW,
-                confidence=0.0,
-                summary="Skipped verification",
+                confidence=confidence if isinstance(confidence, float) else 0.0,
+                summary="Skipped verification (smart skip)",
                 reasoning=reason,
                 recommended_action="review" if severity in ["high", "critical"] else "ignore",
                 priority="low",

@@ -43,6 +43,8 @@ class HTTPDetector(ABC):
         Returns:
             True if path should be skipped.
         """
+        # Only skip dependency and cache directories
+        # Note: 'target' is removed as it's commonly used as project root name
         skip_dirs = {
             "node_modules",
             "venv",
@@ -53,7 +55,6 @@ class HTTPDetector(ABC):
             ".git",
             "dist",
             "build",
-            "target",
             "vendor",
             "test",
             "tests",
@@ -964,6 +965,118 @@ class CustomHTTPServerDetector(HTTPDetector):
         return None
 
 
+class ExpressDetector(HTTPDetector):
+    """Detector for Express.js framework (JavaScript/TypeScript)."""
+
+    framework_name = "express"
+    file_patterns = ["*.ts", "*.js", "*.tsx", "*.jsx"]
+
+    # Pattern: app.get('/path', handler) or router.post('/path', handler)
+    # Only match paths starting with / (real HTTP paths)
+    ROUTE_PATTERN = re.compile(
+        r"""(?:app|router)\.(get|post|put|delete|patch|head|options)\s*\(\s*['"`](\/[^'"`]*)['"`]""",
+        re.VERBOSE,
+    )
+
+    # Pattern: app.use('/path', middleware)
+    USE_PATTERN = re.compile(
+        r"""app\.use\s*\(\s*['"`](\/[^'"`]*)['"`]""",
+        re.VERBOSE,
+    )
+
+    # Pattern: @Get('/path'), @Post('/path') decorators (NestJS)
+    NESTJS_DECORATOR_PATTERN = re.compile(
+        r"""@(Get|Post|Put|Delete|Patch|Head|Options|All)\s*\(\s*['"`](\/[^'"`]*)['"`]\s*\)""",
+        re.VERBOSE,
+    )
+
+    def detect(self, content: str, file_path: Path) -> list[EntryPoint]:
+        """Detect Express routes.
+
+        Args:
+            content: Source code content.
+            file_path: Path to the source file.
+
+        Returns:
+            List of detected entry points.
+        """
+        entry_points = []
+
+        # Skip test files
+        if self._should_skip_path(file_path):
+            return entry_points
+
+        # Skip spec/test files
+        if any(x in file_path.name for x in [".spec.", ".test.", "_test.", "_spec."]):
+            return entry_points
+
+        # Detect standard Express routes: app.get('/path', handler)
+        for match in self.ROUTE_PATTERN.finditer(content):
+            method_str = match.group(1)
+            path = match.group(2)
+
+            # Get method enum
+            try:
+                method = HTTPMethod[method_str.upper()]
+            except KeyError:
+                method = HTTPMethod.GET
+
+            # Find line number
+            line_num = content[:match.start()].count("\n") + 1
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=method,
+                path=path,
+                handler="",  # Handler extraction is complex in JS/TS
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+            )
+            entry_points.append(entry)
+
+        # Detect app.use() middleware (treat as ALL methods)
+        for match in self.USE_PATTERN.finditer(content):
+            path = match.group(1)
+            line_num = content[:match.start()].count("\n") + 1
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=HTTPMethod.ALL,
+                path=path,
+                handler="",
+                file=str(file_path),
+                line=line_num,
+                framework=self.framework_name,
+            )
+            entry_points.append(entry)
+
+        # Detect NestJS-style decorators: @Get('/path')
+        for match in self.NESTJS_DECORATOR_PATTERN.finditer(content):
+            method_str = match.group(1)
+            path = match.group(2)
+
+            try:
+                method = HTTPMethod[method_str.upper()]
+            except KeyError:
+                method = HTTPMethod.GET
+
+            line_num = content[:match.start()].count("\n") + 1
+
+            entry = EntryPoint(
+                type=EntryPointType.HTTP,
+                method=method,
+                path=path,
+                handler="",
+                file=str(file_path),
+                line=line_num,
+                framework="nestjs",
+            )
+            entry_points.append(entry)
+
+        return entry_points
+
+
 # Registry of all HTTP detectors
 HTTP_DETECTORS: list[type[HTTPDetector]] = [
     # Framework-specific detectors
@@ -972,6 +1085,7 @@ HTTP_DETECTORS: list[type[HTTPDetector]] = [
     SpringDetector,
     FlaskDetector,
     FastAPIDetector,
+    ExpressDetector,  # Express.js / Node.js
     # Standard library detectors
     GoStdlibDetector,
     JavaStdlibDetector,

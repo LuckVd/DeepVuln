@@ -6,6 +6,7 @@ to find complex vulnerabilities that pattern matching might miss.
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -26,6 +27,9 @@ from src.layers.l3_analysis.models import (
     ScanResult,
     SeverityLevel,
 )
+
+# Default cache directory for CodeQL databases
+DEFAULT_CACHE_DIR = Path("/tmp/codeql_cache")
 
 logger = get_logger(__name__)
 
@@ -120,6 +124,8 @@ class CodeQLEngine(BaseEngine):
         max_memory_mb: int = 8192,  # CodeQL uses more memory
         search_path: list[str] | None = None,
         auto_download_packs: bool = True,
+        cache_dir: Path | str | None = None,
+        enable_cache: bool = True,
     ):
         """
         Initialize the CodeQL engine.
@@ -130,6 +136,8 @@ class CodeQLEngine(BaseEngine):
             max_memory_mb: Maximum memory usage in MB.
             search_path: Additional paths to search for CodeQL packs.
             auto_download_packs: Whether to automatically download missing packs.
+            cache_dir: Directory to cache CodeQL databases (default: /tmp/codeql_cache).
+            enable_cache: Whether to enable database caching.
         """
         super().__init__(timeout=timeout, max_memory_mb=max_memory_mb)
         self.codeql_path = codeql_path
@@ -138,6 +146,13 @@ class CodeQLEngine(BaseEngine):
         self._version: str | None = None
         self._available_packs: dict[str, bool] = {}  # Cache for pack availability
         self._packs_checked: bool = False
+
+        # Cache configuration
+        self.enable_cache = enable_cache
+        if cache_dir:
+            self.cache_dir = Path(cache_dir) if isinstance(cache_dir, str) else cache_dir
+        else:
+            self.cache_dir = DEFAULT_CACHE_DIR
 
     def is_available(self) -> bool:
         """
@@ -191,6 +206,190 @@ class CodeQLEngine(BaseEngine):
         """
         lang_lower = language.lower()
         return CODEQL_LANGUAGE_MAP.get(lang_lower)
+
+    def _compute_source_hash(self, source_path: Path, language: str) -> str:
+        """
+        Compute a hash of the source code for cache key.
+
+        Uses file paths and modification times for quick hashing.
+        For large projects, samples a subset of files for performance.
+
+        Args:
+            source_path: Path to the source code.
+            language: CodeQL language name.
+
+        Returns:
+            Hash string for the source code.
+        """
+        hasher = hashlib.sha256()
+
+        # Get file extensions for this language
+        extension_to_lang = {
+            ".java": "java",
+            ".py": "python",
+            ".go": "go",
+            ".js": "javascript",
+            ".jsx": "javascript",
+            ".ts": "javascript",  # TypeScript uses JavaScript analysis
+            ".tsx": "javascript",
+            ".c": "cpp",
+            ".cpp": "cpp",
+            ".cc": "cpp",
+            ".cxx": "cpp",
+            ".cs": "csharp",
+            ".rb": "ruby",
+            ".swift": "swift",
+        }
+
+        # Get extensions for this language
+        target_extensions = [
+            ext for ext, lang in extension_to_lang.items()
+            if lang == language
+        ]
+
+        if not target_extensions:
+            # Fallback to path hash
+            hasher.update(str(source_path.absolute()).encode())
+            return hasher.hexdigest()[:16]
+
+        # Collect files with their mtimes
+        files_info = []
+        for ext in target_extensions:
+            for file_path in source_path.rglob(f"*{ext}"):
+                # Skip common non-source directories
+                if any(skip in file_path.parts for skip in [
+                    "node_modules", ".git", "__pycache__", "venv", ".venv",
+                    "dist", "build", "target", ".gradle", ".idea", ".vscode",
+                ]):
+                    continue
+                try:
+                    stat = file_path.stat()
+                    # Use relative path and mtime for quick hash
+                    rel_path = file_path.relative_to(source_path)
+                    files_info.append((str(rel_path), stat.st_mtime, stat.st_size))
+                except OSError:
+                    continue
+
+        # Sort for deterministic ordering
+        files_info.sort()
+
+        # Limit to first 1000 files for performance
+        for rel_path, mtime, size in files_info[:1000]:
+            hasher.update(rel_path.encode())
+            hasher.update(str(mtime).encode())
+            hasher.update(str(size).encode())
+
+        # Add total file count for uniqueness
+        hasher.update(str(len(files_info)).encode())
+
+        # Add source path for additional uniqueness
+        hasher.update(str(source_path.absolute()).encode())
+
+        return hasher.hexdigest()[:16]
+
+    def _get_cached_database_path(self, source_path: Path, language: str) -> Path:
+        """
+        Get the cache path for a CodeQL database.
+
+        Args:
+            source_path: Path to the source code.
+            language: CodeQL language name.
+
+        Returns:
+            Path to the cached database directory.
+        """
+        source_hash = self._compute_source_hash(source_path, language)
+        cache_key = f"{language}_{source_hash}"
+        return self.cache_dir / cache_key
+
+    def _check_cached_database(self, cache_path: Path) -> bool:
+        """
+        Check if a valid cached database exists.
+
+        Args:
+            cache_path: Path to the cached database.
+
+        Returns:
+            True if a valid cached database exists.
+        """
+        if not cache_path.exists():
+            return False
+
+        # Check for required CodeQL database files
+        required_files = ["codeql-database.yml", "db-java", "db-python", "db-javascript", "db-go", "db-cpp", "db-csharp", "db-ruby"]
+        db_dirs = [d for d in cache_path.iterdir() if d.is_dir() and d.name.startswith("db-")]
+
+        if not (cache_path / "codeql-database.yml").exists():
+            return False
+
+        if not db_dirs:
+            return False
+
+        logger.info(f"Found cached CodeQL database: {cache_path}")
+        return True
+
+    def _ensure_cache_dir(self) -> None:
+        """Ensure the cache directory exists."""
+        if not self.cache_dir.exists():
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created CodeQL cache directory: {self.cache_dir}")
+
+    def clear_cache(self) -> int:
+        """
+        Clear all cached CodeQL databases.
+
+        Returns:
+            Number of cache entries removed.
+        """
+        if not self.cache_dir.exists():
+            return 0
+
+        count = 0
+        for entry in self.cache_dir.iterdir():
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+                count += 1
+
+        logger.info(f"Cleared {count} cached CodeQL databases")
+        return count
+
+    def get_cache_stats(self) -> dict[str, Any]:
+        """
+        Get statistics about the CodeQL database cache.
+
+        Returns:
+            Dict with cache statistics.
+        """
+        if not self.cache_dir.exists():
+            return {
+                "enabled": self.enable_cache,
+                "cache_dir": str(self.cache_dir),
+                "exists": False,
+                "entries": 0,
+                "total_size_mb": 0,
+            }
+
+        entries = 0
+        total_size = 0
+
+        for entry in self.cache_dir.iterdir():
+            if entry.is_dir():
+                entries += 1
+                # Calculate directory size
+                for root, dirs, files in os.walk(entry):
+                    for f in files:
+                        try:
+                            total_size += os.path.getsize(os.path.join(root, f))
+                        except OSError:
+                            pass
+
+        return {
+            "enabled": self.enable_cache,
+            "cache_dir": str(self.cache_dir),
+            "exists": True,
+            "entries": entries,
+            "total_size_mb": round(total_size / (1024 * 1024), 2),
+        }
 
     async def scan(
         self,
@@ -280,18 +479,43 @@ class CodeQLEngine(BaseEngine):
         # Create scan result
         result = self.create_scan_result(source_path, rules_used)
 
-        # Set up database path
+        # Set up database path with caching support
         cleanup_db = False
+        use_cached_db = False
+        cached_database_path = None
+
         if database_path is None:
-            # Create temporary database directory
-            db_temp = tempfile.mkdtemp(prefix="codeql_db_")
-            database_path = Path(db_temp)
-            cleanup_db = True
+            # Check for cached database if caching is enabled
+            if self.enable_cache:
+                self._ensure_cache_dir()
+                cached_database_path = self._get_cached_database_path(source_path, codeql_lang)
+
+                if self._check_cached_database(cached_database_path):
+                    database_path = cached_database_path
+                    use_cached_db = True
+                    logger.info(
+                        f"Using cached CodeQL database for {codeql_lang}: {database_path}"
+                    )
+
+            # No cache hit, create new database
+            if not use_cached_db:
+                if self.enable_cache:
+                    # Use cache directory for new database
+                    database_path = cached_database_path
+                    self._ensure_cache_dir()
+                    logger.info(
+                        f"Creating new cached CodeQL database for {codeql_lang}: {database_path}"
+                    )
+                else:
+                    # Create temporary database directory
+                    db_temp = tempfile.mkdtemp(prefix="codeql_db_")
+                    database_path = Path(db_temp)
+                    cleanup_db = True
 
         try:
-            # Phase 0: Build project (if required)
+            # Phase 0: Build project (if required and not using cached DB)
             build_diagnostic = None
-            if not skip_build:
+            if not skip_build and not use_cached_db:
                 build_result = await self._execute_build(
                     source_path=source_path,
                     language=codeql_lang,
@@ -307,14 +531,18 @@ class CodeQLEngine(BaseEngine):
                         f"{build_diagnostic.to_dict() if build_diagnostic else 'None'}"
                     )
 
-            # Phase 1: Create database
-            db_success = await self._create_database(
-                source_path=source_path,
-                database_path=database_path,
-                language=codeql_lang,
-                overwrite=overwrite_database,
-                skip_build=skip_build,
-            )
+            # Phase 1: Create database (skip if using cached DB)
+            if use_cached_db:
+                db_success = True
+                logger.info("Skipping database creation - using cached database")
+            else:
+                db_success = await self._create_database(
+                    source_path=source_path,
+                    database_path=database_path,
+                    language=codeql_lang,
+                    overwrite=overwrite_database or self.enable_cache,  # Always overwrite for cache
+                    skip_build=skip_build,
+                )
 
             if not db_success:
                 error_msg = "Failed to create CodeQL database. "
