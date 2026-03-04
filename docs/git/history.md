@@ -4,6 +4,7 @@
 
 | 时间 | Commit | 简介 |
 |------|--------|------|
+| 2026-03-05 01:36 | cfede99 | feat(l3): 全局裁决一致性层，5 条强制规则 + GlobalAdjudicationError + 52 测试 |
 | 2026-03-05 01:07 | 07006d6 | feat(l3): Exploitability 裁决系统，Override 机制 + FinalStatus + 冲突检测，+54 测试 |
 | 2026-03-05 00:27 | 76e3f2f | feat(core): Final Score 计算模型，severity + exploitability + confidence + engine 权重，+58 测试 |
 | 2026-03-04 23:57 | fbcfc62 | feat(core): AST 规则验证器，禁止 literal-only 规则，metavariable + AST 结构检测，+34 测试 |
