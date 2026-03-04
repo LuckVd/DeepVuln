@@ -16,6 +16,11 @@ Rules:
 This is ADJUDICATION logic, not SCORING logic.
 - final_score is preserved for sorting
 - final_status is the adjudication result
+
+P4-03: Global Adjudication Consistency
+- After adjudication, global consistency is enforced
+- Consistency violations raise GlobalAdjudicationError
+- No silent fixes, no auto-merge, explicit errors only
 """
 
 from dataclasses import dataclass, field
@@ -23,6 +28,11 @@ from enum import Enum
 from typing import Any
 
 from src.core.logger.logger import get_logger
+from src.layers.l3_analysis.consistency import (
+    AdjudicationConsistencyChecker,
+    ConsistencyCheckResult,
+    GlobalAdjudicationError,
+)
 
 
 class FinalStatus(str, Enum):
@@ -120,6 +130,10 @@ class AdjudicationSummary:
     conflicts_detected: int = 0
     """Number of conflicts detected (should be 0)."""
 
+    # P4-03: Global consistency check result
+    consistency_check: dict[str, Any] | None = None
+    """Result of global consistency check (P4-03)."""
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for metadata storage."""
         return {
@@ -128,6 +142,7 @@ class AdjudicationSummary:
             "overrides_applied": self.overrides_applied,
             "conflict_detected": self.conflicts_detected > 0,
             "by_status": self.by_status,
+            "consistency_check": self.consistency_check,
         }
 
 
@@ -389,22 +404,31 @@ def validate_no_conflict(finding: Any) -> bool:
 def adjudicate_findings(
     findings: list[Any],
     validate: bool = True,
+    strict_consistency: bool = True,
 ) -> tuple[list[Any], AdjudicationSummary]:
     """
     Apply exploitability override to a batch of findings.
 
     This function:
     1. Applies exploitability override to each finding
-    2. Optionally validates for conflicts
-    3. Returns summary statistics
+    2. Validates for individual conflicts
+    3. Enforces global consistency (P4-03)
+    4. Returns summary statistics
 
     Args:
         findings: List of Finding objects to adjudicate.
         validate: Whether to validate for conflicts (default: True).
+        strict_consistency: If True, raise GlobalAdjudicationError on consistency
+                           violations. If False, return result with conflicts listed.
 
     Returns:
         Tuple of (adjudicated_findings, summary).
+
+    Raises:
+        GlobalAdjudicationError: If strict_consistency=True and global consistency
+                                violations are detected.
     """
+    logger = get_logger(__name__)
     summary = AdjudicationSummary()
     summary.total_findings = len(findings)
 
@@ -425,8 +449,26 @@ def adjudicate_findings(
                 validate_no_conflict(finding)
             except ArchitectureViolationError as e:
                 summary.conflicts_detected += 1
-                logger = get_logger(__name__)
                 logger.error(f"Conflict detected: {e}")
+
+    # P4-03: Global Adjudication Consistency Check
+    # This is the FINAL consistency check before output.
+    # All conflicts are explicitly raised - never silently corrected.
+    consistency_checker = AdjudicationConsistencyChecker(strict=strict_consistency)
+    consistency_result = consistency_checker.validate_findings(findings)
+
+    # Store consistency check result in summary metadata
+    if not hasattr(summary, 'consistency_check'):
+        summary.consistency_check = None  # type: ignore
+    summary.consistency_check = consistency_result.to_dict()  # type: ignore
+
+    if not consistency_result.passed:
+        logger.error(
+            f"Global adjudication consistency check failed: "
+            f"{len(consistency_result.conflicts)} conflicts found"
+        )
+        # In strict mode, GlobalAdjudicationError is already raised by the checker
+        # In non-strict mode, we just log and continue
 
     return findings, summary
 
@@ -505,4 +547,8 @@ __all__ = [
     "requires_action",
     "get_exploitability_value",
     "get_severity_value",
+    # P4-03: Re-export consistency types for convenience
+    "GlobalAdjudicationError",
+    "AdjudicationConsistencyChecker",
+    "ConsistencyCheckResult",
 ]

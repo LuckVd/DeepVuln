@@ -146,6 +146,12 @@ class Finding(BaseModel):
         description="Final adjudication status based on exploitability override",
     )
 
+    # Logical Vulnerability ID (P4-03: for consistency checking)
+    logical_vuln_id: str | None = Field(
+        default=None,
+        description="Logical vulnerability ID for deduplication across engines",
+    )
+
     # Timestamps
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

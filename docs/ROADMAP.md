@@ -196,7 +196,7 @@ DeepVuln/
 |字段|值|
 |---|---|
 |**阶段**|Phase 4 - 裁决统一|
-|**当前进度**|P4-02 Exploitability 主裁决|
-|**下一步**|P4-03 冲突禁止 / P4-04 语义去重|
-|**重点模块**|Adjudication + Strategy Engine + Finding Model|
-|**目标**|建立 Exploitability 主导的最终状态决策系统|
+|**当前进度**|P4-03 全局裁决一致性|
+|**下一步**|P4-04 语义级去重 / P4-05 统一报告状态|
+|**重点模块**|Consistency + Adjudication + Strategy Engine|
+|**目标**|建立强一致裁决模式，禁止 confirmed/not_exploitable 冲突|

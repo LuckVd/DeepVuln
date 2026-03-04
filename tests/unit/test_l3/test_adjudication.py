@@ -24,17 +24,28 @@ class MockFinding:
     def __init__(
         self,
         finding_id="test-001",
+        rule_id="rule-001",
         severity="high",
         exploitability=None,
         final_score=0.8,
         metadata=None,
     ):
         self.id = finding_id
+        self.rule_id = rule_id
         self.severity = severity
         self.exploitability = exploitability
         self.final_score = final_score
         self.final_status = None
         self.metadata = metadata or {}
+        self.location = MockLocation()
+
+
+class MockLocation:
+    """Mock Location object for testing."""
+
+    def __init__(self, file="test.py", line=10):
+        self.file = file
+        self.line = line
 
 
 class TestFinalStatus:
@@ -272,10 +283,11 @@ class TestAdjudicateFindings:
 
     def test_batch_adjudication(self):
         """Test adjudicating multiple findings."""
+        # Use different rule_ids to avoid consistency conflicts
         findings = [
-            MockFinding(finding_id="f1", severity="critical", exploitability="exploitable"),
-            MockFinding(finding_id="f2", severity="high", exploitability="not_exploitable"),
-            MockFinding(finding_id="f3", severity="medium", exploitability="possible"),
+            MockFinding(finding_id="f1", rule_id="rule-a", severity="critical", exploitability="exploitable"),
+            MockFinding(finding_id="f2", rule_id="rule-b", severity="high", exploitability="not_exploitable"),
+            MockFinding(finding_id="f3", rule_id="rule-c", severity="medium", exploitability="possible"),
         ]
 
         result, summary = adjudicate_findings(findings)
@@ -284,12 +296,16 @@ class TestAdjudicateFindings:
         assert summary.by_status["exploitable"] == 1
         assert summary.by_status["not_exploitable"] == 1
         assert summary.by_status["conditional"] == 1
+        # P4-03: Consistency check should pass
+        assert summary.consistency_check is not None
+        assert summary.consistency_check["passed"] is True
 
     def test_overrides_counted(self):
         """Test that overrides are counted."""
+        # Use different rule_ids to avoid consistency conflicts
         findings = [
-            MockFinding(finding_id="f1", severity="critical", exploitability="not_exploitable"),
-            MockFinding(finding_id="f2", severity="high", exploitability="unlikely"),
+            MockFinding(finding_id="f1", rule_id="rule-x", severity="critical", exploitability="not_exploitable"),
+            MockFinding(finding_id="f2", rule_id="rule-y", severity="high", exploitability="unlikely"),
         ]
 
         result, summary = adjudicate_findings(findings)
@@ -306,7 +322,7 @@ class TestAdjudicateFindings:
         # This test verifies that the conflict detection mechanism exists
         # In normal operation, apply_exploitability_override prevents conflicts
         findings = [
-            MockFinding(finding_id="f1", severity="high", exploitability="not_exploitable"),
+            MockFinding(finding_id="f1", rule_id="rule-z", severity="high", exploitability="not_exploitable"),
         ]
 
         result, summary = adjudicate_findings(findings, validate=True)

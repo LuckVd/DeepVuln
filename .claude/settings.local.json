@@ -42,7 +42,8 @@
       "Bash(flake8:*)",
       "Bash(docs/git/logs/2026-03-02-2110-8f78799.md << 'EOF'\n# 8f78799\n\n## 基本信息\n\n| 字段 | 值 |\n|------|-----|\n| **时间** | 2026-03-02 21:10 |\n| **Commit** | 8f78799 |\n| **Message** | feat\\(l3\\): optimize adversarial verification with multi-round debate |\n\n## 简介\n\n对抗验证层优化：Prompt 优化（Few-Shot、角色专业化、链式思考、置信度校准）+ 多轮对抗机制（按需触发、反驳逻辑、最多 3 轮）+ 65 个单元/集成/端到端测试\n\n## 变更文件\n\n| 文件 | 操作 |\n|------|------|\n| `src/layers/l3_analysis/prompts/adversarial.py` | 重写 |\n| `src/layers/l3_analysis/verification/models.py` | 重写 |\n| `src/layers/l3_analysis/verification/adversarial.py` | 重写 |\n| `src/layers/l3_analysis/verification/attacker.py` | 重写 |\n| `src/layers/l3_analysis/verification/defender.py` | 重写 |\n| `src/layers/l3_analysis/verification/arbiter.py` | 重写 |\n| `tests/unit/test_l3/test_adversarial_models.py` | 新增 |\n| `tests/unit/test_l3/test_adversarial_verifiers.py` | 新增 |\n| `tests/unit/test_l3/test_adversarial_multiround.py` | 新增 |\n| `tests/unit/test_l3/test_adversarial_e2e.py` | 新增 |\n| `tests/unit/test_l3/conftest_adversarial.py` | 新增 |\n| `docs/CURRENT_GOAL.md` | 修改 |\n\n## 功能变更\n\n| 功能 | 操作 | 说明 |\n|------|------|------|\n| Prompt 优化 | 增强 | Few-Shot 示例 + 角色专业化 + 链式思考 + 置信度校准 |\n| 多轮对抗 | 新增 | 按需触发辩论，最多 3 轮 |\n| 反驳机制 | 新增 | attacker.rebut\\(\\) + defender.rebut\\(\\) |\n| 触发条件 | 新增 | NEEDS_REVIEW / strength_diff < 0.2 / confidence < 0.6 |\n| 测试覆盖 | 新增 | 65 个单元/集成/端到端测试 |\n\n## 关联目标\n\n- 目标：优化对抗验证层：Prompt优化 + 按需多轮对抗\n- 状态：completed\nEOF)",
       "Bash(uv:*)",
-      "Bash(deepvuln scan:*)"
+      "Bash(deepvuln scan:*)",
+      "Bash(git reset:*)"
     ]
   }
 }
