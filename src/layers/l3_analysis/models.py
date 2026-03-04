@@ -122,6 +122,18 @@ class Finding(BaseModel):
         description="Engine-specific metadata",
     )
 
+    # Final Score (P4-01: unified scoring for prioritization)
+    final_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.5,  # Max with engine weight 1.2
+        description="Unified final score for prioritization (0.0-1.5)",
+    )
+    score_detail: dict[str, Any] | None = Field(
+        default=None,
+        description="Detailed breakdown of final_score calculation",
+    )
+
     # Timestamps
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

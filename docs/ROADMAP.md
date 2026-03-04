@@ -195,8 +195,8 @@ DeepVuln/
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 3 - 精度重构 ✅|
-|**当前进度**|Phase 3 全部任务已完成|
-|**下一步**|Phase 4 裁决统一|
-|**重点模块**|Rule Gating + File Filtering + Finding Budget + Fail-Safe + AST Validation|
-|**目标**|三级裁剪 + 容错机制 + AST 强制，90%+ 噪声消除|
+|**阶段**|Phase 4 - 裁决统一|
+|**当前进度**|P4-01 Final Score 计算模型|
+|**下一步**|P4-02 Exploitability 主裁决|
+|**重点模块**|Final Score + Strategy Engine + Finding Model|
+|**目标**|统一评分基础，为 Exploitability 主裁决铺路|
