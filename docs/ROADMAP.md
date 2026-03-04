@@ -91,7 +91,7 @@ DeepVuln/
 |P3-02|主语言识别（基于 LOC）|P3-01|done|
 |P3-03|项目类型识别（web/api/cli/library）|P3-01|done|
 |P3-04|Rule Gating Engine 实现|P3-02|done|
-|P3-05|Semgrep 文件级过滤（include/exclude/lang）|P3-04|todo|
+|P3-05|Semgrep 文件级过滤（include/exclude/lang）|P3-04|done|
 |P3-06|禁止 literal 规则（AST 强制）|P3-05|todo|
 |P3-07|Finding Budget 误报熔断机制|P3-04|done|
 |P3-08|CodeQL 失败降级策略|P2-02|todo|
@@ -196,7 +196,7 @@ DeepVuln/
 |字段|值|
 |---|---|
 |**阶段**|Phase 3 - 精度重构|
-|**当前进度**|Phase 2 已完成|
-|**下一步**|P3-01 TechStackDetector 重构|
-|**重点模块**|Rule Gating Engine|
-|**目标**|消除规则爆炸、统一裁决|
+|**当前进度**|Phase 3 核心任务已完成|
+|**下一步**|P3-06 禁止 literal 规则 / P3-08 CodeQL 降级策略|
+|**重点模块**|Rule Gating + File Filtering + Finding Budget|
+|**目标**|三级裁剪实现 90%+ 噪声消除|

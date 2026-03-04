@@ -7,6 +7,7 @@ detecting vulnerabilities, and enforcing code patterns.
 Enhanced with:
 - Rule Gating for 77-91% noise reduction
 - Finding Budget for meltdown prevention
+- File Filtering for scan surface control
 """
 
 import json
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from src.core.finding_budget import FindingBudget, FindingBudgetResult
+from src.core.file_filtering import FileFilteringEngine, FileFilteringResult
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
 from src.layers.l3_analysis.models import (
@@ -159,24 +161,26 @@ class SemgrepEngine(BaseEngine):
         attack_surface: Any | None = None,
         use_rule_gating: bool = True,
         use_finding_budget: bool = True,
+        use_file_filtering: bool = True,
         **options,
     ) -> ScanResult:
         """
-        Execute a Semgrep scan with optional rule gating and finding budget.
+        Execute a Semgrep scan with rule gating, file filtering, and finding budget.
 
         Args:
             source_path: Path to the source code to scan.
             rules: List of custom rule file/directory paths.
             rule_sets: List of official rule set names (e.g., ["security", "java"]).
-            languages: Restrict scan to these languages.
+            languages: Restrict scan to these languages (overrides auto-detection).
             severity_filter: Only return findings at these severity levels.
-            exclude_patterns: Glob patterns to exclude.
+            exclude_patterns: Glob patterns to exclude (added to auto-generated).
             include_patterns: Glob patterns to include.
             use_auto_config: Let Semgrep auto-detect rules (equivalent to --config auto).
-            tech_stack: TechStack object for rule gating.
-            attack_surface: AttackSurfaceReport object for rule gating.
+            tech_stack: TechStack object for rule gating and file filtering.
+            attack_surface: AttackSurfaceReport object for rule gating and file filtering.
             use_rule_gating: Whether to apply rule gating (default: True).
             use_finding_budget: Whether to apply finding budget limits (default: True).
+            use_file_filtering: Whether to apply file filtering (default: True).
             **options: Additional options.
 
         Returns:
@@ -209,16 +213,58 @@ class SemgrepEngine(BaseEngine):
             except Exception as e:
                 self.logger.warning(f"Rule gating failed, continuing without: {e}")
 
+        # Apply file filtering if enabled
+        filtering_result = None
+        if use_file_filtering and (tech_stack or attack_surface):
+            try:
+                from src.core.file_filtering import FileFilteringEngine
+
+                filter_engine = FileFilteringEngine(
+                    tech_stack=tech_stack,
+                    attack_surface=attack_surface,
+                )
+                filtering_result = filter_engine.build()
+
+                self.logger.info(
+                    f"File filtering applied: "
+                    f"exclude_dirs={len(filtering_result.exclude_dirs)}, "
+                    f"exclude_patterns={len(filtering_result.exclude_patterns)}, "
+                    f"lang_flags={filtering_result.lang_flags}"
+                )
+            except Exception as e:
+                self.logger.warning(f"File filtering failed, continuing without: {e}")
+
+        # Merge user patterns with auto-generated patterns
+        final_exclude_patterns = list(exclude_patterns) if exclude_patterns else []
+        final_include_patterns = list(include_patterns) if include_patterns else []
+        final_languages = list(languages) if languages else None
+
+        if filtering_result:
+            # Merge exclude patterns (user + auto)
+            for pattern in filtering_result.exclude_patterns:
+                if pattern not in final_exclude_patterns:
+                    final_exclude_patterns.append(pattern)
+
+            # Merge include patterns (user + auto)
+            for pattern in filtering_result.include_patterns:
+                if pattern not in final_include_patterns:
+                    final_include_patterns.append(pattern)
+
+            # Use auto-detected languages if not explicitly provided
+            if not final_languages and filtering_result.lang_flags:
+                final_languages = filtering_result.lang_flags
+
         # Build the semgrep command
         cmd = await self._build_scan_command(
             source_path=source_path,
             rules=rules,
             rule_sets=rule_sets,
-            languages=languages,
-            exclude_patterns=exclude_patterns,
-            include_patterns=include_patterns,
+            languages=final_languages,
+            exclude_patterns=final_exclude_patterns,
+            include_patterns=final_include_patterns,
             use_auto_config=use_auto_config,
             excluded_rule_ids=excluded_rule_ids,
+            filtering_result=filtering_result,
         )
 
         # Track rules used
@@ -234,6 +280,10 @@ class SemgrepEngine(BaseEngine):
         # Store gating info in metadata
         if gating_result:
             result.metadata["rule_gating"] = gating_result.to_dict()
+
+        # Store file filtering info in metadata
+        if filtering_result:
+            result.metadata["file_filtering"] = filtering_result.to_dict()
 
         try:
             # Run semgrep
@@ -325,6 +375,7 @@ class SemgrepEngine(BaseEngine):
         include_patterns: list[str] | None,
         use_auto_config: bool,
         excluded_rule_ids: list[str] | None = None,
+        filtering_result: Any | None = None,
     ) -> list[str]:
         """
         Build the semgrep command line.
@@ -338,6 +389,7 @@ class SemgrepEngine(BaseEngine):
             include_patterns: Include patterns.
             use_auto_config: Use auto config.
             excluded_rule_ids: Rule IDs to exclude from rule gating.
+            filtering_result: FileFilteringResult with exclude_dirs.
 
         Returns:
             Command as list of strings.
@@ -396,6 +448,11 @@ class SemgrepEngine(BaseEngine):
         if include_patterns:
             for pattern in include_patterns:
                 cmd.extend(["--include", pattern])
+
+        # Add exclude directories from file filtering
+        if filtering_result:
+            for dir_name in filtering_result.exclude_dirs:
+                cmd.extend(["--exclude", dir_name])
 
         # Add excluded rule IDs from rule gating
         if excluded_rule_ids:

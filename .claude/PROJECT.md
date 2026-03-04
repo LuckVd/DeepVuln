@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-03-04 | aa76692 | feat(core): implement File Filtering Engine for scan surface control |
 | 2026-03-04 | 725d493 | feat(core): implement Finding Budget circuit breaker for meltdown prevention |
 | 2026-03-04 | e86b096 | feat(core): implement Rule Gating Engine for 77-91% noise reduction |
 | 2026-03-04 | 665d1e3 | refactor(l1): implement precision TechStackDetector with full scan and project profiling |
