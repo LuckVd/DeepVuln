@@ -270,7 +270,7 @@ class AutoSecurityScanner:
         tech_stack = self.tech_detector.detect(source_path)
 
         return {
-            "languages": [lang.value for lang in tech_stack.languages],
+            "languages": [lang.value for lang in tech_stack.get_language_list()],
             "frameworks": [
                 {
                     "name": fw.name,

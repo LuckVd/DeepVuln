@@ -1,11 +1,27 @@
 """Tech stack detector module for identifying project technologies."""
 
 from src.layers.l1_intelligence.tech_stack_detector.detector import (
-    TechStack,
     TechStackDetector,
+)
+from src.layers.l1_intelligence.tech_stack_detector.models import (
+    Database,
+    Framework,
+    Language,
+    LanguageInfo,
+    Middleware,
+    ProjectType,
+    TechStack,
 )
 
 __all__ = [
-    "TechStack",
+    # Main detector
     "TechStackDetector",
+    # Data models
+    "TechStack",
+    "Language",
+    "LanguageInfo",
+    "Framework",
+    "Database",
+    "Middleware",
+    "ProjectType",
 ]

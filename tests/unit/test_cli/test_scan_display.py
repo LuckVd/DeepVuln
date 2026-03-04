@@ -21,6 +21,7 @@ from src.layers.l1_intelligence.security_analyzer.analyzer import (
 from src.layers.l1_intelligence.tech_stack_detector.detector import (
     Framework,
     Language,
+    LanguageInfo,
     TechStack,
 )
 from src.layers.l1_intelligence.threat_intel.core.data_models import (
@@ -150,7 +151,10 @@ class TestShowTechStack:
     def test_show_tech_stack_full(self):
         """Test showing full tech stack."""
         tech_stack = TechStack(
-            languages=[Language.PYTHON, Language.JAVASCRIPT],
+            languages=[
+                LanguageInfo(language=Language.PYTHON, file_count=10, line_count=1000, role="primary"),
+                LanguageInfo(language=Language.JAVASCRIPT, file_count=5, line_count=200, role="secondary"),
+            ],
             frameworks=[
                 Framework(name="django", category="web", confidence=0.9),
             ],
@@ -250,7 +254,7 @@ class TestExportReportText:
         """Test exporting report with tech stack."""
         report = SecurityReport(source_path="/test/path")
         report.tech_stack = TechStack(
-            languages=[Language.PYTHON],
+            languages=[LanguageInfo(language=Language.PYTHON, file_count=10, line_count=1000, role="primary")],
             frameworks=[Framework(name="django", category="web", confidence=0.9)],
         )
 

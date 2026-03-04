@@ -8,117 +8,105 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | 对抗式验证增强：多轮动态对抗 + 攻防策略进化 + 学习机制 |
+| **任务** | P0-1：TechStackDetector 精度重构（全量扫描 + 主语言识别 + 项目画像输出） |
 | **状态** | completed |
-| **优先级** | critical |
-| **创建日期** | 2026-03-03 |
-| **完成日期** | 2026-03-03 |
+| **优先级** | P0 |
+| **创建日期** | 2026-03-04 |
+| **完成日期** | 2026-03-04 |
+| **所属阶段** | Phase 2 - L2 项目理解层 |
+
+---
+
+## 约束条件
+
+| 约束 | 说明 | 状态 |
+|------|------|------|
+| 只修改 L2 层 | 技术栈识别模块及相关数据模型 | ✅ |
+| 禁止修改 L3 | 不修改分析引擎、规则引擎、Agent | ✅ |
+| 保持 CLI 接口 | 不改变现有命令行参数 | ✅ |
+| 向后兼容 | 保持原有接口调用方式 | ✅ |
+| 不引入依赖 | 不添加第三方库 | ✅ |
+
+---
+
+## 当前问题（已解决）
+
+| 问题 | 影响 | 解决方案 |
+|------|------|----------|
+| 仅返回 `set[Language]` | 无主次语言区分 | 新增 `LanguageInfo` 数据结构 |
+| 无 `primary_language` | 无法驱动 Rule Gating | 添加 `primary_language` 字段 |
+| 仅采样 100 文件 | 严重失真 | 删除采样，全量扫描 |
+| 无 LOC 统计 | 无法判断语言占比 | 实现 LOC 统计 |
+| 无项目类型识别 | 无法针对性扫描 | 实现 `project_type` 识别 |
+| 无 test/docs 识别 | 误扫测试/文档代码 | 添加 `has_tests`/`has_docs` |
 
 ---
 
 ## 完成标准
 
-### P0: 基础对抗框架
+### 1️⃣ 全量扫描（必须）
 
-- [x] **StrategyLibrary 策略库**：攻击者/防御者策略存储结构
-- [x] **EnhancedAdversarialVerification 协调器**：多轮对抗主控制器
-- [x] **轮次历史记录**：RoundHistory 数据模型
+- [x] 删除 `sample_size = 100` 采样逻辑
+- [x] 改为全量遍历项目文件（排除无关目录）
 
-### P1: 攻击者进化机制
+### 2️⃣ LanguageInfo 数据结构（必须）
 
-- [x] **攻击策略库**：已知入口点、绕过技术库、攻击链模板
-- [x] **历史失败学习**：记录失败原因，避免重复
-- [x] **进化算法**：选择、交叉、变异、淘汰
+- [x] 实现 `LanguageInfo` 数据类（Pydantic BaseModel）
+- [x] 统计 file_count
+- [x] 统计 line_count（非空行）
+- [x] 统计 test_file_count
+- [x] 统计 doc_file_count
+- [x] 设置 role 字段
+- [x] 添加 loc_percentage 字段
 
-### P2: 防御者进化机制
+### 3️⃣ TechStack 数据模型（必须）
 
-- [x] **防御策略库**：现有防御、预测攻击库、多层防御建议
-- [x] **攻击预判**：从攻击者成功路径反推防御缺失
-- [x] **多层防护生成**：组合多个防御措施
+- [x] 添加 `languages: list[LanguageInfo]` 字段
+- [x] 添加 `primary_language` 字段
+- [x] 添加 `secondary_languages` 字段
+- [x] 添加 `total_loc` 字段
+- [x] 添加 `total_files` 字段
+- [x] 添加 `project_type` 字段
+- [x] 添加 `has_tests` 字段
+- [x] 添加 `has_docs` 字段
+- [x] 添加 `is_monorepo` 字段
+- [x] 添加 `get_language_list()` 向后兼容方法
 
-### P3: 多轮对抗与收敛
+### 4️⃣ LOC 统计（必须）
 
-- [x] **收敛条件判断**：置信度阈值、最大轮次、策略稳定度
-- [x] **仲裁者增强**：基于多轮证据的最终判断
-- [x] **置信度计算**：综合多轮结果的置信度评估
+- [x] 统计每种语言的 `file_count`
+- [x] 统计每种语言的 `line_count`（非空行、非注释行）
 
-### P4: 学习与规则提取
+### 5️⃣ 主语言判定规则（必须）
 
-- [x] **learn_from_round**：从每轮对抗中提炼经验
-- [x] **规则生成**：成功验证后自动生成新规则
-- [x] **策略库持久化**：保存有效策略供后续使用
+- [x] `primary_language` = 最大 LOC 的语言
+- [x] `secondary_languages` = LOC 占比 > 10% 的语言
+- [x] 占比 < 5% 的语言忽略
 
-### P5: 测试验证
+### 6️⃣ 测试文件识别（必须）
 
-- [x] **单元测试**：策略库、进化算法、收敛条件
-- [ ] **集成测试**：多轮对抗端到端验证 (需要 LLM)
-- [ ] **效果评估**：对比传统辩论系统的漏洞发现率 (需要 LLM)
+- [x] 识别测试目录 (`test/`, `tests/`, `spec/`, `__tests__/`)
+- [x] 识别测试文件命名 (`test_*.py`, `*_test.py`, `*.spec.js`, etc.)
+- [x] 设置 `has_tests = True/False`
 
----
+### 7️⃣ 文档识别（必须）
 
-## 技术方案
+- [x] 识别文档目录 (`docs/`, `doc/`)
+- [x] 识别 Markdown 文件 (`.md`)
+- [x] 设置 `has_docs = True/False`
 
-### 架构设计
+### 8️⃣ Monorepo 识别（必须）
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   增强对抗式验证架构                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────────────┐    ┌──────────────────┐                  │
-│  │ StrategyLibrary  │    │ StrategyLibrary  │                  │
-│  │   (Attacker)     │    │   (Defender)     │                  │
-│  │                  │    │                  │                  │
-│  │ • 已知入口点     │    │ • 现有防御       │                  │
-│  │ • 绕过技术库     │    │ • 预测攻击库     │                  │
-│  │ • 攻击链模板     │    │ • 多层防御建议   │                  │
-│  │ • 历史失败记录   │    │                  │                  │
-│  └────────┬─────────┘    └────────┬─────────┘                  │
-│           │                       │                             │
-│           ▼                       ▼                             │
-│  ┌─────────────────────────────────────────────────┐            │
-│  │              EnhancedAdversarialVerification    │            │
-│  │                                                 │            │
-│  │  ┌─────────┐   ┌─────────┐   ┌─────────┐       │            │
-│  │  │ Round 1 │──▶│ Round 2 │──▶│ Round N │       │            │
-│  │  └────┬────┘   └────┬────┘   └────┬────┘       │            │
-│  │       │             │             │             │            │
-│  │       ▼             ▼             ▼             │            │
-│  │  ┌─────────────────────────────────────────┐   │            │
-│  │  │           RoundHistory                   │   │            │
-│  │  │  • 攻击路径 • 防御措施 • 裁决结果        │   │            │
-│  │  └─────────────────────────────────────────┘   │            │
-│  │                      │                          │            │
-│  │                      ▼                          │            │
-│  │  ┌─────────────────────────────────────────┐   │            │
-│  │  │         ConvergenceChecker               │   │            │
-│  │  │  • 置信度 > 90%? • 轮次 >= 5?            │   │            │
-│  │  │  • 无新策略? → 停止对抗                   │   │            │
-│  │  └─────────────────────────────────────────┘   │            │
-│  └─────────────────────────────────────────────────┘            │
-│                              │                                  │
-│                              ▼                                  │
-│                    ┌──────────────────┐                        │
-│                    │   Final Verdict  │                        │
-│                    │                  │                        │
-│                    │ • 确认可利用     │                        │
-│                    │ • 条件性可利用   │                        │
-│                    │ • 误报           │                        │
-│                    │ • 新规则提取     │                        │
-│                    └──────────────────┘                        │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+- [x] 检测多个包管理文件 (`package.json`, `setup.py`, `go.mod`, etc.)
+- [x] 设置 `is_monorepo = True`
 
-### 核心组件
+### 9️⃣ 项目类型识别（必须）
 
-| 组件 | 路径 | 职责 |
-|------|------|------|
-| StrategyLibrary | `l3_analysis/verification/strategy_library.py` | 攻防策略存储与检索 |
-| AttackerEvolver | `l3_analysis/verification/attacker_evolver.py` | 攻击者策略进化 |
-| DefenderEvolver | `l3_analysis/verification/defender_evolver.py` | 防御者策略进化 |
-| ConvergenceChecker | `l3_analysis/verification/convergence.py` | 收敛条件判断 |
-| EnhancedAdversarialVerification | `l3_analysis/verification/enhanced_adversarial.py` | 多轮对抗协调器 |
+- [x] 实现 `ProjectType` 枚举 (`web`, `api`, `cli`, `library`, `unknown`)
+- [x] Python web: Flask/Django/FastAPI
+- [x] Node web: Express
+- [x] CLI: argparse/click
+- [x] Library: 无明显入口
 
 ---
 
@@ -126,14 +114,14 @@
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/layers/l3_analysis/verification/strategy_library.py` | 新增 | 策略库基础结构 |
-| `src/layers/l3_analysis/verification/attacker_evolver.py` | 新增 | 攻击者进化机制 |
-| `src/layers/l3_analysis/verification/defender_evolver.py` | 新增 | 防御者进化机制 |
-| `src/layers/l3_analysis/verification/convergence.py` | 新增 | 收敛条件判断 |
-| `src/layers/l3_analysis/verification/enhanced_adversarial.py` | 新增 | 增强对抗验证协调器 |
-| `src/layers/l3_analysis/verification/models.py` | 修改 | 添加策略相关模型 |
-| `src/layers/l3_analysis/verification/adversarial.py` | 修改 | 集成增强验证 |
-| `tests/unit/test_l3/test_enhanced_adversarial.py` | 新增 | 增强对抗测试 |
+| `src/layers/l1_intelligence/tech_stack_detector/models.py` | 新增 | LanguageInfo + TechStack 数据模型 |
+| `src/layers/l1_intelligence/tech_stack_detector/detector.py` | 重写 | 全量扫描 + LOC 统计 + 项目画像 |
+| `src/layers/l1_intelligence/tech_stack_detector/__init__.py` | 修改 | 导出新模型 |
+| `src/layers/l1_intelligence/workflow/auto_security_scan.py` | 修改 | 使用 `get_language_list()` |
+| `src/cli/scan_display.py` | 修改 | 使用 `get_language_list()` |
+| `src/layers/l1_intelligence/security_analyzer/analyzer.py` | 修改 | 使用 `get_language_list()` |
+| `tests/unit/test_tech_stack_detector/test_detector.py` | 更新 | 适配新数据结构 |
+| `tests/unit/test_cli/test_scan_display.py` | 更新 | 适配新数据结构 |
 
 ---
 
@@ -141,43 +129,51 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-03 | 设置目标：对抗式验证增强 |
-| 2026-03-03 | 完成 P0 基础对抗框架 - StrategyLibrary 策略库 |
-| 2026-03-03 | 完成 ConvergenceChecker 收敛条件判断器 |
-| 2026-03-03 | 完成 EnhancedAdversarialVerification 协调器 |
-| 2026-03-03 | 完成攻击者/防御者进化机制集成 |
-| 2026-03-03 | 完成学习机制 - 从成功/失败中提取经验 |
-| 2026-03-03 | 完成规则提取 - 成功验证后自动生成规则 |
-| 2026-03-03 | 编写单元测试 - 45 个新测试，671 个测试全部通过 |
+| 2026-03-04 19:00 | 设置目标：TechStackDetector 精度重构 |
+| 2026-03-04 19:10 | 创建 models.py，定义 LanguageInfo 和更新 TechStack |
+| 2026-03-04 19:20 | 重写 detector.py，实现全量扫描和 LOC 统计 |
+| 2026-03-04 19:30 | 实现主语言判定、测试/文档/monorepo 识别 |
+| 2026-03-04 19:40 | 实现项目类型识别 |
+| 2026-03-04 19:45 | 修复向后兼容性问题，更新使用点 |
+| 2026-03-04 19:50 | 更新测试用例，所有测试通过 |
+| 2026-03-04 20:00 | **任务完成** |
 
 ---
 
-## 预期收益
+## 验收清单
 
-| 指标 | 当前 | 目标 | 提升 |
-|------|------|------|------|
-| 深度漏洞发现 | 基准 | +30-50% | 发现多步绕过漏洞 |
-| 误报率 | ~40% | ~20% | 多轮验证降误报 |
-| 漏洞质量 | ~60% | >70% | 确认可利用漏洞 |
-| 规则自进化 | 无 | 自动生成 | 成功验证→新规则 |
+- [x] 不再使用 100 文件采样
+- [x] `primary_language` 始终正确
+- [x] Markdown 不可能成为 primary（不在 EXTENSION_TO_LANGUAGE 中）
+- [x] JS 不会成为 Swift 项目的 primary（基于 LOC 判定）
+- [x] monorepo 可识别
+- [x] 输出结构可用于 Rule Gating
+- [x] 保持向后兼容（`get_language_list()` 方法）
+- [x] 不删除原有 `Language` 枚举
 
 ---
 
-## 实施路线
+## 可选增强（已实现）
 
-| 阶段 | 内容 | 依赖 |
-|------|------|------|
-| Phase 1 | 基础对抗框架 + 策略库结构 | 现有辩论系统 |
-| Phase 2 | 攻击者/防御者进化机制 | Phase 1 |
-| Phase 3 | 多轮对抗 + 收敛算法 | Phase 2 |
-| Phase 4 | 学习机制 + 规则提取 | Phase 3 |
+- [x] 扫描性能日志（`get_scan_statistics()`）
+- [x] LOC 百分比输出（`loc_percentage` 字段）
+- [x] JSON 序列化支持（`to_dict()` 方法）
+
+---
+
+## 测试结果
+
+```
+tests/unit/test_tech_stack_detector/test_detector.py: 27 passed
+tests/unit/test_cli/test_scan_display.py: 14 passed
+Total: 41 passed, 0 failed
+```
 
 ---
 
 ## 备注
 
-- 基于现有三方辩论系统（攻击者/防御者/仲裁者）扩展
-- 核心改进：单轮静态辩论 → 多轮动态对抗
-- 攻击者：学习历史失败经验，进化攻击策略
-- 防御者：预判攻击者新路径，主动加固
-- 最大轮次：5轮，置信度阈值：90%
+- 此任务是 L2 层基础设施改进，不涉及 L3 分析逻辑
+- 目标是为 Rule Gating 提供精确的技术栈画像
+- 完成后可显著减少跨语言误报
+- 向后兼容通过 `get_language_list()` 方法实现

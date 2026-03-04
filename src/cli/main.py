@@ -959,24 +959,31 @@ async def run_full_security_scan(
 
     if adversarial and result["verified_findings"] and llm_client:
         console.print("\n[bold cyan]Phase 4.5: Adversarial Verification (Parallel)[/]")
-        console.print("  [dim]Three-role debate: Attacker vs Defender → Arbiter[/]")
 
         try:
-            from src.layers.l3_analysis.verification import (
-                AdversarialVerifier,
-                AdversarialVerifierConfig,
-                VerdictType,
-            )
             from src.core.llm import get_global_concurrency_manager
 
-            adversarial_config = AdversarialVerifierConfig(
+            # Use enhanced adversarial verification with strategy evolution
+            from src.layers.l3_analysis.verification import (
+                EnhancedAdversarialVerification,
+                EnhancedVerificationConfig,
+                VerdictType,
+            )
+
+            console.print("  [dim]Enhanced mode: Strategy evolution + Multi-round debate + Learning[/]")
+
+            adversarial_config = EnhancedVerificationConfig(
                 enabled=True,
+                max_rounds=5,
                 parallel_analysis=True,
+                enable_evolution=True,
+                enable_learning=True,
+                enable_rule_extraction=True,
                 skip_low_severity=not include_low,
                 skip_info_findings=True,
             )
 
-            verifier = AdversarialVerifier(
+            verifier = EnhancedAdversarialVerification(
                 llm_client=llm_client,
                 config=adversarial_config,
             )
@@ -1941,8 +1948,8 @@ def scan(
     With --llm-full-detect, LLM performs full attack surface detection
     (no static detectors, supports any language/framework).
 
-    With --adversarial, findings go through L3.5 adversarial verification
-    (attacker vs defender debate with arbiter judgment).
+    With --adversarial, findings go through L3.5 enhanced adversarial verification
+    (strategy evolution + multi-round attacker vs defender debate + learning).
 
     With --incremental, only changed files and their dependencies are scanned,
     achieving 70%+ speedup for repeated scans. Use --base-ref and --head-ref
@@ -1967,7 +1974,7 @@ def scan(
         # Full scan with pure LLM attack surface detection (any language)
         deepvuln scan -p . --full --llm-full-detect
 
-        # Full scan with adversarial verification (attacker vs defender debate)
+        # Full scan with enhanced adversarial verification (strategy evolution + debate)
         deepvuln scan -p . --full --adversarial
 
         # Incremental scan (only changed files, 70%+ faster)

@@ -276,8 +276,9 @@ def show_tech_stack(tech_stack: TechStack) -> None:
     console.print(Panel("[bold]Detected Technology Stack[/]", border_style="cyan"))
 
     # Languages
-    if tech_stack.languages:
-        lang_str = ", ".join(f"[cyan]{lang.value}[/]" for lang in tech_stack.languages)
+    language_list = tech_stack.get_language_list()
+    if language_list:
+        lang_str = ", ".join(f"[cyan]{lang.value}[/]" for lang in language_list)
         console.print(f"[bold]Languages:[/] {lang_str}")
 
     # Frameworks
@@ -551,8 +552,9 @@ def export_report_text(report: SecurityReport) -> str:
             "Technology Stack",
             "-" * 60,
         ])
-        if report.tech_stack.languages:
-            lines.append(f"Languages: {', '.join(lang.value for lang in report.tech_stack.languages)}")
+        language_list = report.tech_stack.get_language_list()
+        if language_list:
+            lines.append(f"Languages: {', '.join(lang.value for lang in language_list)}")
         if report.tech_stack.frameworks:
             lines.append("Frameworks:")
             for fw in report.tech_stack.frameworks:

@@ -85,7 +85,8 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
-| 2026-03-03 | fbdc8df | feat(l3): implement enhanced adversarial verification with strategy evolution |
+| 2026-03-04 | 665d1e3 | refactor(l1): implement precision TechStackDetector with full scan and project profiling |
+| 2026-03-03 | 2a0ebd4 | feat(l3): implement enhanced adversarial verification with strategy evolution |
 | 2026-03-03 | 873a998 | feat(l3): implement real CodeQL dataflow analysis for Round 2 |
 | 2026-03-03 | 6341810 | perf(scan): implement parallel scanning with LLM concurrency control |
 | 2026-03-01 | 5de94c3 | feat(l3): add CodeQL build system support and enhance LLM error handling |

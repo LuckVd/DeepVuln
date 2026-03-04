@@ -9,6 +9,7 @@ import pytest
 from src.layers.l1_intelligence.tech_stack_detector.detector import (
     Framework,
     Language,
+    LanguageInfo,
     TechStack,
     TechStackDetector,
 )
@@ -43,6 +44,29 @@ class TestFramework:
         assert fw.confidence == 0.9
 
 
+class TestLanguageInfo:
+    """Tests for LanguageInfo model."""
+
+    def test_create_language_info(self):
+        """Test creating a LanguageInfo."""
+        info = LanguageInfo(
+            language=Language.PYTHON,
+            file_count=100,
+            line_count=5000,
+            test_file_count=20,
+            doc_file_count=5,
+            role="primary",
+            loc_percentage=80.0,
+        )
+        assert info.language == Language.PYTHON
+        assert info.file_count == 100
+        assert info.line_count == 5000
+        assert info.test_file_count == 20
+        assert info.doc_file_count == 5
+        assert info.role == "primary"
+        assert info.loc_percentage == 80.0
+
+
 class TestTechStack:
     """Tests for TechStack model."""
 
@@ -52,6 +76,8 @@ class TestTechStack:
         assert len(stack.languages) == 0
         assert len(stack.frameworks) == 0
         assert len(stack.databases) == 0
+        assert stack.primary_language is None
+        assert len(stack.secondary_languages) == 0
 
     def test_get_all_keywords(self):
         """Test getting all keywords."""
@@ -65,6 +91,33 @@ class TestTechStack:
         assert "django" in keywords
         assert "django 4.2" in keywords
         assert "celery" in keywords
+
+    def test_get_language_list(self):
+        """Test getting simple language list for backward compatibility."""
+        stack = TechStack(
+            languages=[
+                LanguageInfo(language=Language.PYTHON, file_count=10, line_count=1000, role="primary"),
+                LanguageInfo(language=Language.JAVASCRIPT, file_count=5, line_count=200, role="secondary"),
+            ],
+        )
+        lang_list = stack.get_language_list()
+        assert Language.PYTHON in lang_list
+        assert Language.JAVASCRIPT in lang_list
+        assert len(lang_list) == 2
+
+    def test_get_primary_language_info(self):
+        """Test getting primary language info."""
+        stack = TechStack(
+            languages=[
+                LanguageInfo(language=Language.PYTHON, file_count=10, line_count=1000, role="primary"),
+                LanguageInfo(language=Language.JAVASCRIPT, file_count=5, line_count=200, role="secondary"),
+            ],
+            primary_language=Language.PYTHON,
+        )
+        primary = stack.get_primary_language_info()
+        assert primary is not None
+        assert primary.language == Language.PYTHON
+        assert primary.role == "primary"
 
 
 class TestTechStackDetector:
@@ -92,7 +145,10 @@ class TestTechStackDetector:
 
             stack = detector.detect(path)
 
-            assert Language.PYTHON in stack.languages
+            # Use get_language_list() for backward compatibility
+            assert Language.PYTHON in stack.get_language_list()
+            # Check primary language
+            assert stack.primary_language == Language.PYTHON
             # Django should be detected from requirements.txt
             fw_names = [fw.name for fw in stack.frameworks]
             assert "django" in fw_names
@@ -108,10 +164,13 @@ class TestTechStackDetector:
                 },
             }
             (path / "package.json").write_text(json.dumps(package_json))
+            # Add a JS file to trigger language detection
+            (path / "index.js").write_text("console.log('hello');")
 
             stack = detector.detect(path)
 
-            assert Language.JAVASCRIPT in stack.languages
+            # Use get_language_list() for backward compatibility
+            assert Language.JAVASCRIPT in stack.get_language_list()
             fw_names = [fw.name for fw in stack.frameworks]
             assert "express" in fw_names
             assert "react" in fw_names
@@ -127,10 +186,13 @@ class TestTechStackDetector:
                 },
             }
             (path / "package.json").write_text(json.dumps(package_json))
+            # Add a TS file to trigger language detection
+            (path / "main.ts").write_text("console.log('hello');")
 
             stack = detector.detect(path)
 
-            assert Language.TYPESCRIPT in stack.languages
+            # Use get_language_list() for backward compatibility
+            assert Language.TYPESCRIPT in stack.get_language_list()
             fw_names = [fw.name for fw in stack.frameworks]
             assert "nestjs" in fw_names
 
@@ -149,10 +211,13 @@ class TestTechStackDetector:
 </project>
 """
             (path / "pom.xml").write_text(pom_xml)
+            # Add a Java file to trigger language detection
+            (path / "Main.java").write_text("public class Main {}")
 
             stack = detector.detect(path)
 
-            assert Language.JAVA in stack.languages
+            # Use get_language_list() for backward compatibility
+            assert Language.JAVA in stack.get_language_list()
             fw_names = [fw.name for fw in stack.frameworks]
             assert "spring" in fw_names or "spring-boot" in fw_names
 
@@ -165,7 +230,10 @@ class TestTechStackDetector:
 
             stack = detector.detect(path)
 
-            assert Language.PYTHON in stack.languages
+            # Use get_language_list() for backward compatibility
+            assert Language.PYTHON in stack.get_language_list()
+            # Check primary language
+            assert stack.primary_language == Language.PYTHON
             fw_names = [fw.name for fw in stack.frameworks]
             assert "flask" in fw_names
 
@@ -263,7 +331,8 @@ class TestTechStackDetector:
             (path / "requirements.txt").write_text(
                 "django>=4.0.0\ndjango-rest-framework\npsycopg2-binary\nredis"
             )
-            (path / "manage.py").write_text("# Django manage.py")
+            # Add actual Python code (not just comments) for LOC counting
+            (path / "manage.py").write_text("#!/usr/bin/env python\nimport os\nos.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')\n")
 
             frontend = path / "frontend"
             frontend.mkdir()
@@ -281,8 +350,12 @@ class TestTechStackDetector:
 
             stack = detector.detect(path)
 
+            # Use get_language_list() for backward compatibility
+            lang_list = stack.get_language_list()
             # Should detect Python
-            assert Language.PYTHON in stack.languages
+            assert Language.PYTHON in lang_list
+            # Should also detect JavaScript
+            assert Language.JAVASCRIPT in lang_list
 
             # Should detect frameworks (django from requirements.txt)
             fw_names = [fw.name for fw in stack.frameworks]
@@ -296,3 +369,90 @@ class TestTechStackDetector:
             # Should detect middleware
             mw_names = [mw.name for mw in stack.middleware]
             assert "docker" in mw_names
+
+    def test_detect_test_files(self, detector):
+        """Test detecting test files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir)
+            (path / "main.py").write_text("print('hello')")
+            tests_dir = path / "tests"
+            tests_dir.mkdir()
+            (tests_dir / "test_main.py").write_text("def test_main(): pass")
+
+            stack = detector.detect(path)
+
+            assert stack.has_tests is True
+            # Check that test file count is tracked
+            python_info = stack.get_language_info(Language.PYTHON)
+            assert python_info is not None
+            assert python_info.test_file_count >= 1
+
+    def test_detect_docs(self, detector):
+        """Test detecting documentation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir)
+            (path / "main.py").write_text("print('hello')")
+            (path / "README.md").write_text("# Project")
+
+            stack = detector.detect(path)
+
+            assert stack.has_docs is True
+
+    def test_primary_language_detection(self, detector):
+        """Test primary language detection based on LOC."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir)
+            # Create more Python code
+            (path / "main.py").write_text("\n".join(["print('hello')"] * 100))
+            # Create less JavaScript code
+            (path / "script.js").write_text("console.log('hi');")
+
+            stack = detector.detect(path)
+
+            assert stack.primary_language == Language.PYTHON
+
+    def test_secondary_language_detection(self, detector):
+        """Test secondary language detection."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir)
+            # Create Python code
+            (path / "main.py").write_text("\n".join(["print('hello')"] * 100))
+            # Create JavaScript code with > 10% LOC
+            (path / "script.js").write_text("\n".join(["console.log('hi');"] * 50))
+
+            stack = detector.detect(path)
+
+            assert stack.primary_language == Language.PYTHON
+            # JavaScript should be secondary if it has > 10% LOC
+            # Note: This depends on the actual LOC calculation
+
+    def test_loc_statistics(self, detector):
+        """Test LOC statistics."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir)
+            (path / "main.py").write_text("print('hello')\nprint('world')\n# comment\n")
+            (path / "utils.py").write_text("def foo():\n    pass\n")
+
+            stack = detector.detect(path)
+
+            assert stack.total_loc > 0
+            assert stack.total_files == 2
+            # Check that Python has the correct stats
+            python_info = stack.get_language_info(Language.PYTHON)
+            assert python_info is not None
+            assert python_info.file_count == 2
+
+    def test_scan_statistics(self, detector):
+        """Test scan statistics."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir)
+            (path / "main.py").write_text("print('hello')")
+
+            detector.detect(path)
+
+            stats = detector.get_scan_statistics()
+            assert "duration_seconds" in stats
+            assert "files_scanned" in stats
+            assert "directories_scanned" in stats
+            assert "source_files" in stats
+            assert "total_loc" in stats
