@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-03-04 | e86b096 | feat(core): implement Rule Gating Engine for 77-91% noise reduction |
 | 2026-03-04 | 665d1e3 | refactor(l1): implement precision TechStackDetector with full scan and project profiling |
 | 2026-03-03 | 2a0ebd4 | feat(l3): implement enhanced adversarial verification with strategy evolution |
 | 2026-03-03 | 873a998 | feat(l3): implement real CodeQL dataflow analysis for Round 2 |

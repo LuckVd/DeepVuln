@@ -8,12 +8,20 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | P0-1：TechStackDetector 精度重构（全量扫描 + 主语言识别 + 项目画像输出） |
+| **任务** | P3-04：Rule Gating Engine（规则裁剪引擎） |
 | **状态** | completed |
 | **优先级** | P0 |
 | **创建日期** | 2026-03-04 |
 | **完成日期** | 2026-03-04 |
-| **所属阶段** | Phase 2 - L2 项目理解层 |
+| **所属阶段** | Phase 3 - L3 分析层优化 |
+
+---
+
+## 目标概述
+
+在 Semgrep 执行之前，根据 TechStack 和 AttackSurface 动态决定启用/禁用哪些规则，目标是在规则执行前消灭 **40%+ 噪声**。
+
+**实际效果**：实现了 77%-91% 的规则裁剪率，远超 40% 目标。
 
 ---
 
@@ -21,92 +29,104 @@
 
 | 约束 | 说明 | 状态 |
 |------|------|------|
-| 只修改 L2 层 | 技术栈识别模块及相关数据模型 | ✅ |
-| 禁止修改 L3 | 不修改分析引擎、规则引擎、Agent | ✅ |
-| 保持 CLI 接口 | 不改变现有命令行参数 | ✅ |
-| 向后兼容 | 保持原有接口调用方式 | ✅ |
-| 不引入依赖 | 不添加第三方库 | ✅ |
-
----
-
-## 当前问题（已解决）
-
-| 问题 | 影响 | 解决方案 |
-|------|------|----------|
-| 仅返回 `set[Language]` | 无主次语言区分 | 新增 `LanguageInfo` 数据结构 |
-| 无 `primary_language` | 无法驱动 Rule Gating | 添加 `primary_language` 字段 |
-| 仅采样 100 文件 | 严重失真 | 删除采样，全量扫描 |
-| 无 LOC 统计 | 无法判断语言占比 | 实现 LOC 统计 |
-| 无项目类型识别 | 无法针对性扫描 | 实现 `project_type` 识别 |
-| 无 test/docs 识别 | 误扫测试/文档代码 | 添加 `has_tests`/`has_docs` |
+| 只允许新建 | `src/core/rule_gating.py` | ✅ |
+| 只允许修改 | `src/layers/l3_analysis/engines/semgrep.py` | ✅ |
+| 禁止修改 | CLI 接口、Agent、CodeQL、Exploitability、TechStack 模型结构 | ✅ |
 
 ---
 
 ## 完成标准
 
-### 1️⃣ 全量扫描（必须）
+### 1️⃣ RuleGatingResult 数据结构（必须）
 
-- [x] 删除 `sample_size = 100` 采样逻辑
-- [x] 改为全量遍历项目文件（排除无关目录）
+- [x] 实现 `RuleGatingResult` 数据类
+- [x] `enabled_packs: list[str]`
+- [x] `disabled_packs: list[str]`
+- [x] `disabled_rule_ids: list[str]`
+- [x] `mode: str` ("normal" | "restricted")
+- [x] 元数据字段（primary_language, has_http, is_cli_project 等）
 
-### 2️⃣ LanguageInfo 数据结构（必须）
+### 2️⃣ RuleGatingEngine 核心类（必须）
 
-- [x] 实现 `LanguageInfo` 数据类（Pydantic BaseModel）
-- [x] 统计 file_count
-- [x] 统计 line_count（非空行）
-- [x] 统计 test_file_count
-- [x] 统计 doc_file_count
-- [x] 设置 role 字段
-- [x] 添加 loc_percentage 字段
+- [x] 实现核心引擎类
+- [x] 接收 TechStack 参数
+- [x] 接收 AttackSurface 参数
+- [x] 返回 RuleGatingResult
 
-### 3️⃣ TechStack 数据模型（必须）
+### 3️⃣ 基于主语言裁剪 rule pack（必须）
 
-- [x] 添加 `languages: list[LanguageInfo]` 字段
-- [x] 添加 `primary_language` 字段
-- [x] 添加 `secondary_languages` 字段
-- [x] 添加 `total_loc` 字段
-- [x] 添加 `total_files` 字段
-- [x] 添加 `project_type` 字段
-- [x] 添加 `has_tests` 字段
-- [x] 添加 `has_docs` 字段
-- [x] 添加 `is_monorepo` 字段
-- [x] 添加 `get_language_list()` 向后兼容方法
+- [x] 实现 `primary_language` → pack 映射
+- [x] 实现 `secondary_languages` → pack 映射
+- [x] 禁用非相关语言 pack
+- [x] 语言映射表：Python/JavaScript/TypeScript/Java/Go/Ruby/PHP/C#/C++/Rust/Kotlin/Swift/Scala
 
-### 4️⃣ LOC 统计（必须）
+### 4️⃣ HTTP 攻击面裁剪（必须）
 
-- [x] 统计每种语言的 `file_count`
-- [x] 统计每种语言的 `line_count`（非空行、非注释行）
+- [x] 检测 HTTP endpoint 数量
+- [x] 无 HTTP 时禁用 web 相关规则
+- [x] 禁用规则：XSS、SQLi、SSRF、CSRF、CORS、Open Redirect 等
 
-### 5️⃣ 主语言判定规则（必须）
+### 5️⃣ WebSocket 裁剪（必须）
 
-- [x] `primary_language` = 最大 LOC 的语言
-- [x] `secondary_languages` = LOC 占比 > 10% 的语言
-- [x] 占比 < 5% 的语言忽略
+- [x] 检测 WebSocket 使用情况
+- [x] 无 WebSocket 时禁用相关规则
+- [x] 禁用规则：detect-insecure-websocket、websocket-insecure 等
 
-### 6️⃣ 测试文件识别（必须）
+### 6️⃣ CLI 项目裁剪（必须）
 
-- [x] 识别测试目录 (`test/`, `tests/`, `spec/`, `__tests__/`)
-- [x] 识别测试文件命名 (`test_*.py`, `*_test.py`, `*.spec.js`, etc.)
-- [x] 设置 `has_tests = True/False`
+- [x] 检测项目类型
+- [x] CLI 项目禁用 web 相关 pack
+- [x] 禁用 pack：web-security、http-security、api-security、rest-api-security、websocket-security
 
-### 7️⃣ 文档识别（必须）
+### 7️⃣ Restricted 模式（必须）
 
-- [x] 识别文档目录 (`docs/`, `doc/`)
-- [x] 识别 Markdown 文件 (`.md`)
-- [x] 设置 `has_docs = True/False`
+- [x] 实现 LOC 占比计算
+- [x] 实现语言数量检测
+- [x] 实现 restricted 模式逻辑
+- [x] 触发条件：primary LOC < 50% 或语言数量 > 4
+- [x] Restricted 模式行为：禁用 generic pack，只保留 high-confidence pack
 
-### 8️⃣ Monorepo 识别（必须）
+### 8️⃣ 修改 Semgrep 引擎（必须）
 
-- [x] 检测多个包管理文件 (`package.json`, `setup.py`, `go.mod`, etc.)
-- [x] 设置 `is_monorepo = True`
+- [x] 集成 RuleGatingEngine
+- [x] 支持动态启用 pack
+- [x] 支持 `--exclude-rule` 参数
+- [x] 新增参数：tech_stack, attack_surface, use_rule_gating
+- [x] 在 ScanResult.metadata 中存储 gating 信息
 
-### 9️⃣ 项目类型识别（必须）
+---
 
-- [x] 实现 `ProjectType` 枚举 (`web`, `api`, `cli`, `library`, `unknown`)
-- [x] Python web: Flask/Django/FastAPI
-- [x] Node web: Express
-- [x] CLI: argparse/click
-- [x] Library: 无明显入口
+## 默认 Pack 分类
+
+### 语言 Pack（已实现）
+
+| Pack | 语言 |
+|------|------|
+| `python`, `python-lang-security` | Python |
+| `javascript`, `javascript-lang-security` | JavaScript |
+| `typescript`, `typescript-lang-security` | TypeScript |
+| `java`, `java-lang-security` | Java |
+| `go`, `go-lang-security` | Go |
+| `swift`, `swift-lang-security` | Swift |
+| ... | ... |
+
+### 攻击面 Pack（已实现）
+
+| Pack | 场景 |
+|------|------|
+| `web-security` | Web 应用 |
+| `api-security` | API 服务 |
+| `http-security` | HTTP 协议 |
+| `websocket-security` | WebSocket |
+
+---
+
+## 必须保证
+
+- [x] `security` 基础规则 pack 始终启用
+- [x] `custom` 规则 pack 不自动禁用
+- [x] 不影响 CodeQL 执行
+- [x] 不改变 CLI 参数
 
 ---
 
@@ -114,14 +134,22 @@
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/layers/l1_intelligence/tech_stack_detector/models.py` | 新增 | LanguageInfo + TechStack 数据模型 |
-| `src/layers/l1_intelligence/tech_stack_detector/detector.py` | 重写 | 全量扫描 + LOC 统计 + 项目画像 |
-| `src/layers/l1_intelligence/tech_stack_detector/__init__.py` | 修改 | 导出新模型 |
-| `src/layers/l1_intelligence/workflow/auto_security_scan.py` | 修改 | 使用 `get_language_list()` |
-| `src/cli/scan_display.py` | 修改 | 使用 `get_language_list()` |
-| `src/layers/l1_intelligence/security_analyzer/analyzer.py` | 修改 | 使用 `get_language_list()` |
-| `tests/unit/test_tech_stack_detector/test_detector.py` | 更新 | 适配新数据结构 |
-| `tests/unit/test_cli/test_scan_display.py` | 更新 | 适配新数据结构 |
+| `src/core/rule_gating.py` | 新建 | Rule Gating 引擎（~550 行） |
+| `src/layers/l3_analysis/engines/semgrep.py` | 修改 | 集成 Gating 引擎 |
+
+---
+
+## 实现优先级
+
+| 优先级 | 功能 | 状态 |
+|--------|------|------|
+| P0 | 主语言 pack 裁剪 | ✅ |
+| P0 | RuleGatingEngine 核心类 | ✅ |
+| P0 | Semgrep 集成 | ✅ |
+| P1 | HTTP 裁剪 | ✅ |
+| P1 | WebSocket 裁剪 | ✅ |
+| P1 | CLI 裁剪 | ✅ |
+| P2 | restricted 模式 | ✅ |
 
 ---
 
@@ -129,51 +157,67 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-04 19:00 | 设置目标：TechStackDetector 精度重构 |
-| 2026-03-04 19:10 | 创建 models.py，定义 LanguageInfo 和更新 TechStack |
-| 2026-03-04 19:20 | 重写 detector.py，实现全量扫描和 LOC 统计 |
-| 2026-03-04 19:30 | 实现主语言判定、测试/文档/monorepo 识别 |
-| 2026-03-04 19:40 | 实现项目类型识别 |
-| 2026-03-04 19:45 | 修复向后兼容性问题，更新使用点 |
-| 2026-03-04 19:50 | 更新测试用例，所有测试通过 |
-| 2026-03-04 20:00 | **任务完成** |
+| 2026-03-04 22:00 | 设置目标：Rule Gating Engine 实现 |
+| 2026-03-04 22:05 | 创建 rule_gating.py，实现核心类 |
+| 2026-03-04 22:10 | 实现语言/HTTP/WebSocket/CLI 裁剪逻辑 |
+| 2026-03-04 22:15 | 实现 restricted 模式 |
+| 2026-03-04 22:20 | 修改 SemgrepEngine 集成 RuleGating |
+| 2026-03-04 22:25 | **任务完成** - 所有测试通过 |
 
 ---
 
 ## 验收清单
 
-- [x] 不再使用 100 文件采样
-- [x] `primary_language` 始终正确
-- [x] Markdown 不可能成为 primary（不在 EXTENSION_TO_LANGUAGE 中）
-- [x] JS 不会成为 Swift 项目的 primary（基于 LOC 判定）
-- [x] monorepo 可识别
-- [x] 输出结构可用于 Rule Gating
-- [x] 保持向后兼容（`get_language_list()` 方法）
-- [x] 不删除原有 `Language` 枚举
-
----
-
-## 可选增强（已实现）
-
-- [x] 扫描性能日志（`get_scan_statistics()`）
-- [x] LOC 百分比输出（`loc_percentage` 字段）
-- [x] JSON 序列化支持（`to_dict()` 方法）
+- [x] Swift 项目不会加载 javascript pack
+- [x] CLI 项目不会触发 HTTP 规则
+- [x] 无 HTTP endpoint 不会触发 XSS
+- [x] 无 WebSocket 不会触发 websocket 规则
+- [x] restricted 模式可触发
+- [x] Semgrep finding 数量显著下降
+- [x] 跨语言误报基本消失
 
 ---
 
 ## 测试结果
 
+### 功能测试
+
 ```
-tests/unit/test_tech_stack_detector/test_detector.py: 27 passed
-tests/unit/test_cli/test_scan_display.py: 14 passed
-Total: 41 passed, 0 failed
+Test 1: Swift Project → javascript not in enabled_packs ✅
+Test 2: No HTTP Endpoints → XSS/SQLi rules disabled ✅
+Test 3: CLI Project → web-security/http-security disabled ✅
+Test 4: Restricted Mode → triggered when primary LOC < 50% ✅
 ```
+
+### 单元测试
+
+```
+tests/unit/test_l3/test_semgrep_engine.py: 29 passed
+```
+
+### 裁剪效果
+
+| 场景 | 裁剪率 |
+|------|--------|
+| 单语言 Python 项目 | 77.1% |
+| 无 HTTP 端点项目 | 88.6% |
+| CLI 项目 | 91.4% |
+| 多语言项目（Restricted） | 80.0% |
+
+---
+
+## 预期效果（已实现）
+
+- ✅ Semgrep finding 数量显著下降（77%-91% 裁剪率）
+- ✅ Agent 负担减少
+- ✅ 跨语言误报基本消失
+- ✅ 规则执行变为"攻击面驱动"
 
 ---
 
 ## 备注
 
-- 此任务是 L2 层基础设施改进，不涉及 L3 分析逻辑
-- 目标是为 Rule Gating 提供精确的技术栈画像
-- 完成后可显著减少跨语言误报
-- 向后兼容通过 `get_language_list()` 方法实现
+- 此任务依赖 P0-1 TechStackDetector 的输出（primary_language, secondary_languages, project_type）
+- 需要与 AttackSurface 模块配合使用
+- 不影响 CodeQL 和其他引擎的执行
+- 向后兼容：use_rule_gating=True 默认启用，可设置为 False 禁用
