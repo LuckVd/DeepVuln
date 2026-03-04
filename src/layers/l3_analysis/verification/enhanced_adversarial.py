@@ -63,6 +63,11 @@ class EnhancedVerificationConfig:
         defender_library: StrategyLibrary | None = None,
         # Limits
         max_tokens_per_finding: int = 50000,
+        # Filtering (for compatibility with base config)
+        skip_low_severity: bool = False,
+        skip_info_findings: bool = True,
+        skip_low_confidence: bool = True,
+        min_confidence_to_verify: float = 0.3,
     ):
         """
         Initialize enhanced verification config.
@@ -82,6 +87,10 @@ class EnhancedVerificationConfig:
             attacker_library: Pre-configured attacker strategy library.
             defender_library: Pre-configured defender strategy library.
             max_tokens_per_finding: Maximum tokens per finding.
+            skip_low_severity: Skip verification for low severity findings.
+            skip_info_findings: Skip verification for info-level findings.
+            skip_low_confidence: Skip verification for low confidence findings.
+            min_confidence_to_verify: Minimum confidence to trigger verification.
         """
         self.enabled = enabled
         self.max_rounds = max_rounds
@@ -95,6 +104,10 @@ class EnhancedVerificationConfig:
         self.strength_diff_threshold = strength_diff_threshold
         self.strategy_stability_rounds = strategy_stability_rounds
         self.max_tokens_per_finding = max_tokens_per_finding
+        self.skip_low_severity = skip_low_severity
+        self.skip_info_findings = skip_info_findings
+        self.skip_low_confidence = skip_low_confidence
+        self.min_confidence_to_verify = min_confidence_to_verify
 
         # Initialize strategy libraries
         self.attacker_library = attacker_library or create_attacker_library()
@@ -365,7 +378,7 @@ class EnhancedAdversarialVerification:
             if self.config.enable_learning:
                 self._learn_from_round(
                     finding=finding,
-                    round_data=debade_round,
+                    round_data=debate_round,
                     attack_strategy=attack_strategies[0] if attack_strategies else None,
                     defense_strategy=defense_strategies[0] if defense_strategies else None,
                 )

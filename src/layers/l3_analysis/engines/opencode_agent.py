@@ -95,7 +95,7 @@ class OpenCodeAgent(BaseEngine):
         model: str | None = None,
         max_file_size: int = 100000,  # 100KB max per file
         max_files: int = 50,
-        max_concurrent: int = 3,
+        max_concurrent: int = 2,
         timeout: int = 600,
         **llm_options,
     ):

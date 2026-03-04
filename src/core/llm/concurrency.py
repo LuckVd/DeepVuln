@@ -36,7 +36,7 @@ class LLMProvider(Enum):
 DEFAULT_CONCURRENCY_LIMITS: dict[LLMProvider, int] = {
     LLMProvider.OPENAI: 10,       # OpenAI allows higher rates
     LLMProvider.AZURE: 5,         # Azure typically has lower limits
-    LLMProvider.GLM: 3,           # GLM has strict rate limits, reduced from 5 to avoid 429 errors
+    LLMProvider.GLM: 2,           # GLM has strict rate limits, reduced from 3 to avoid 429 errors
     LLMProvider.ANTHROPIC: 8,     # Anthropic moderate limits
     LLMProvider.LOCAL: 20,        # Local models no API limits
     LLMProvider.UNKNOWN: 5,       # Default conservative limit

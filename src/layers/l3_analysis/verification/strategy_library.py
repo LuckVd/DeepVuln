@@ -177,6 +177,18 @@ class AttackStrategy(BaseModel):
         )
         return self.fitness_score
 
+    def record_use(self, success: bool) -> None:
+        """Record a strategy usage and its outcome.
+
+        Args:
+            success: Whether the attack strategy succeeded.
+        """
+        self.usage_count += 1
+        if success:
+            self.success_count += 1
+        # Recalculate fitness after each use
+        self.calculate_fitness()
+
 
 class DefenseMechanism(BaseModel):
     """A defense mechanism."""
@@ -304,6 +316,18 @@ class DefenseStrategy(BaseModel):
             0.2 * defense_depth
         )
         return self.fitness_score
+
+    def record_use(self, success: bool) -> None:
+        """Record a strategy usage and its outcome.
+
+        Args:
+            success: Whether the defense strategy succeeded (blocked the attack).
+        """
+        self.usage_count += 1
+        if success:
+            self.block_count += 1
+        # Recalculate fitness after each use
+        self.calculate_fitness()
 
 
 class FailureRecord(BaseModel):

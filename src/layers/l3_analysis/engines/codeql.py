@@ -1121,24 +1121,22 @@ class CodeQLEngine(BaseEngine):
                 for query in queries:
                     cmd.append(query)
             else:
-                # Resolve the query path - use specific subdirectories to avoid problematic queries
-                resolved_queries = await self._resolve_query_path(language, query_suite)
-                if resolved_queries:
-                    # Instead of using all Security queries, use specific safe subdirectories
-                    security_path = Path(resolved_queries)
-                    safe_query_dirs = [
-                        "CWE-022",      # Path Injection
-                        "CWE-078",      # Command Injection
-                        "CWE-079",      # XSS
-                        "CWE-089",      # SQL Injection
-                        "CWE-094",      # Code Injection
-                        "CWE-611",      # XXE
-                        "CWE-502",      # Unsafe Deserialization
-                    ]
-                    for qdir in safe_query_dirs:
-                        qpath = security_path / qdir
-                        if qpath.exists():
-                            cmd.append(str(qpath))
+                # Use CodeQL pack notation with search path
+                # Format: codeql/<lang>-queries:<suite> (e.g., codeql/javascript-queries:Security)
+                pack_name = DEFAULT_QUERY_PACKS.get(language)
+                if pack_name:
+                    # Extract suite name from query_suite (e.g., "javascript-security-extended" -> "Security")
+                    # Or use the full suite name if it's a standard suite
+                    if "-security-extended" in query_suite or "-security-and-quality" in query_suite:
+                        # Use codeql-suites subdirectory
+                        resolved_suite = await self._resolve_query_path(language, query_suite)
+                        if resolved_suite:
+                            cmd.append(resolved_suite)
+                        else:
+                            # Fallback to pack:suite notation
+                            cmd.append(f"{pack_name}:{SECURITY_QUERY_DIR}")
+                    else:
+                        cmd.append(f"{pack_name}:{query_suite}")
                 else:
                     cmd.append(query_suite)
 
@@ -1146,6 +1144,11 @@ class CodeQLEngine(BaseEngine):
             if self.search_path:
                 for path in self.search_path:
                     cmd.extend(["--search-path", path])
+            else:
+                # Add default search path for query packs
+                pack_base = Path.home() / ".codeql" / "packages"
+                if pack_base.exists():
+                    cmd.extend(["--search-path", str(pack_base)])
 
             # Add additional options
             cmd.extend([
@@ -1334,14 +1337,14 @@ class CodeQLEngine(BaseEngine):
 
     async def _resolve_query_path(self, language: str, query_suite: str) -> str | None:
         """
-        Resolve the path to query files.
+        Resolve the path to query suite file.
 
         Args:
             language: CodeQL language name.
-            query_suite: Query suite name.
+            query_suite: Query suite name (e.g., "javascript-security-extended").
 
         Returns:
-            Resolved query path, or None if not found.
+            Resolved query suite path, or None if not found.
         """
         import os
 
@@ -1359,7 +1362,15 @@ class CodeQLEngine(BaseEngine):
             # Look for versioned directory - prefer older compatible versions
             versions = sorted(pack_dir.glob("*/"), reverse=False)
             if versions:
-                security_dir = versions[0] / SECURITY_QUERY_DIR
+                pack_version_dir = versions[0]
+                # First, try to find the query suite file in codeql-suites directory
+                suites_dir = pack_version_dir / "codeql-suites"
+                if suites_dir.exists():
+                    suite_file = suites_dir / f"{query_suite}.qls"
+                    if suite_file.exists():
+                        return str(suite_file)
+                # Fallback to Security directory for individual queries
+                security_dir = pack_version_dir / SECURITY_QUERY_DIR
                 if security_dir.exists():
                     return str(security_dir)
 
