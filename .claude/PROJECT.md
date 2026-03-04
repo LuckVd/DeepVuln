@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-03-05 | 07006d6 | feat(l3): implement Exploitability-based adjudication system for Phase 4 |
 | 2026-03-05 | 2a0ebd4 | feat(core): implement unified final_score calculation model for Phase 4 |
 | 2026-03-05 | fbcfc62 | feat(core): implement AST rule validation to eliminate literal-only rules |
 | 2026-03-04 | f436444 | feat(core): implement CodeQL fail-safe degradation for production stability |

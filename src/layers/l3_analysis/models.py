@@ -134,6 +134,18 @@ class Finding(BaseModel):
         description="Detailed breakdown of final_score calculation",
     )
 
+    # Exploitability (P4-02: for adjudication override)
+    exploitability: str | None = Field(
+        default=None,
+        description="Exploitability assessment (exploitable/likely/possible/unlikely/not_exploitable)",
+    )
+
+    # Final Status (P4-02: adjudication result)
+    final_status: str | None = Field(
+        default=None,
+        description="Final adjudication status based on exploitability override",
+    )
+
     # Timestamps
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
