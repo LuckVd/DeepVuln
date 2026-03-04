@@ -90,10 +90,10 @@ DeepVuln/
 |P3-01|TechStackDetector 全量扫描改造|P1-06|done|
 |P3-02|主语言识别（基于 LOC）|P3-01|done|
 |P3-03|项目类型识别（web/api/cli/library）|P3-01|done|
-|P3-04|Rule Gating Engine 实现|P3-02|**→ 当前目标**|
+|P3-04|Rule Gating Engine 实现|P3-02|done|
 |P3-05|Semgrep 文件级过滤（include/exclude/lang）|P3-04|todo|
 |P3-06|禁止 literal 规则（AST 强制）|P3-05|todo|
-|P3-07|Finding Budget 误报抑制机制|P3-04|todo|
+|P3-07|Finding Budget 误报熔断机制|P3-04|done|
 |P3-08|CodeQL 失败降级策略|P2-02|todo|
 
 ---

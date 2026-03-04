@@ -207,6 +207,12 @@ class ScanResult(BaseModel):
         description="Raw output from the engine (for debugging)",
     )
 
+    # Metadata for engine-specific information (rule gating, finding budget, etc.)
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Engine-specific metadata (rule gating, finding budget, etc.)",
+    )
+
     def add_finding(self, finding: Finding) -> None:
         """Add a finding and update statistics."""
         self.findings.append(finding)

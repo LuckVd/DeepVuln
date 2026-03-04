@@ -4,7 +4,9 @@ Semgrep Engine - Semgrep integration for fast pattern matching.
 Semgrep is a fast, customizable static analysis tool for finding bugs,
 detecting vulnerabilities, and enforcing code patterns.
 
-Enhanced with Rule Gating for 40%+ noise reduction.
+Enhanced with:
+- Rule Gating for 77-91% noise reduction
+- Finding Budget for meltdown prevention
 """
 
 import json
@@ -13,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from src.core.finding_budget import FindingBudget, FindingBudgetResult
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
 from src.layers.l3_analysis.models import (
@@ -58,13 +61,16 @@ OFFICIAL_RULE_SETS = {
 
 class SemgrepEngine(BaseEngine):
     """
-    Semgrep static analysis engine with Rule Gating support.
+    Semgrep static analysis engine with Rule Gating and Finding Budget support.
 
     Provides fast pattern matching for known vulnerability patterns
     using Semgrep's powerful pattern syntax.
 
-    Enhanced with intelligent rule gating to reduce false positives
-    by 40%+ through TechStack and AttackSurface analysis.
+    Enhanced with:
+    - Intelligent rule gating to reduce false positives by 77-91%
+      through TechStack and AttackSurface analysis
+    - Finding Budget circuit breaker to prevent finding explosions
+      from overwhelming downstream Agent processing
     """
 
     name = "semgrep"
@@ -152,10 +158,11 @@ class SemgrepEngine(BaseEngine):
         tech_stack: Any | None = None,
         attack_surface: Any | None = None,
         use_rule_gating: bool = True,
+        use_finding_budget: bool = True,
         **options,
     ) -> ScanResult:
         """
-        Execute a Semgrep scan with optional rule gating.
+        Execute a Semgrep scan with optional rule gating and finding budget.
 
         Args:
             source_path: Path to the source code to scan.
@@ -169,6 +176,7 @@ class SemgrepEngine(BaseEngine):
             tech_stack: TechStack object for rule gating.
             attack_surface: AttackSurfaceReport object for rule gating.
             use_rule_gating: Whether to apply rule gating (default: True).
+            use_finding_budget: Whether to apply finding budget limits (default: True).
             **options: Additional options.
 
         Returns:
@@ -258,8 +266,34 @@ class SemgrepEngine(BaseEngine):
                     if f.severity in severity_filter
                 ]
 
+            # Apply Finding Budget to prevent meltdown
+            if use_finding_budget:
+                budget_result = self._apply_finding_budget(findings)
+
+                # Store budget info in metadata
+                result.metadata["finding_budget"] = budget_result.to_dict()
+
+                # Use filtered findings
+                final_findings = budget_result.filtered_findings
+
+                if budget_result.dropped_count > 0:
+                    self.logger.info(
+                        f"Finding budget applied: mode={budget_result.budget_mode}, "
+                        f"original={budget_result.original_count}, "
+                        f"filtered={len(final_findings)}, "
+                        f"dropped={budget_result.dropped_count}"
+                    )
+            else:
+                final_findings = findings
+                result.metadata["finding_budget"] = {
+                    "budget_mode": "disabled",
+                    "dropped_count": 0,
+                    "triggered_rules": [],
+                    "triggered_files": [],
+                }
+
             # Add findings to result
-            for finding in findings:
+            for finding in final_findings:
                 result.add_finding(finding)
 
             return self.finalize_scan_result(
@@ -577,6 +611,23 @@ class SemgrepEngine(BaseEngine):
             "low": 0.5,
         }
         return confidence_map.get(confidence, 0.8)
+
+    def _apply_finding_budget(self, findings: list[Finding]) -> FindingBudgetResult:
+        """
+        Apply finding budget limits to prevent meltdown.
+
+        This enforces hard limits on findings per rule, per file, and
+        per project to prevent explosion of findings from overwhelming
+        the Agent.
+
+        Args:
+            findings: List of Finding objects from Semgrep.
+
+        Returns:
+            FindingBudgetResult with filtered findings and metadata.
+        """
+        budget = FindingBudget()
+        return budget.apply(findings)
 
 
 # Register the engine
