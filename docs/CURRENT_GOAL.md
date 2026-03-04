@@ -8,7 +8,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | P3-05：Semgrep 文件级过滤（include/exclude/lang） |
+| **任务** | P3-08：CodeQL 失败降级策略（Fail-Safe Degradation） |
 | **状态** | completed |
 | **优先级** | P1 |
 | **创建日期** | 2026-03-04 |
@@ -19,9 +19,9 @@
 
 ## 目标概述
 
-在 Semgrep 执行前，根据 TechStack、AttackSurface、has_tests、has_docs、is_monorepo 动态生成 `--include`、`--exclude`、`--exclude-dir`、`--lang` 参数，实现真正的扫描面控制。
+当 CodeQL 出现数据库构建失败、编译失败、CLI 报错、超时、无支持语言、内存溢出、子进程异常等情况时，自动降级为 Semgrep + Agent 方案，而不是中断扫描流程。
 
-**核心目标**：Markdown 永不被扫描、非主语言不进入扫描、无关目录永久排除。
+**核心目标**：CodeQL 可失败但系统稳定，主流程永不中断。
 
 ---
 
@@ -29,159 +29,135 @@
 
 | 约束 | 说明 |
 |------|------|
-| 只允许新建 | `src/core/file_filtering.py` |
-| 只允许修改 | `src/layers/l3_analysis/engines/semgrep.py` |
-| 禁止修改 | Rule Gating、Finding Budget、CLI 接口、Agent、CodeQL、TechStack 数据模型 |
+| 只允许新建 | `src/core/codeql_health.py` |
+| 只允许修改 | `src/layers/l3_analysis/engines/codeql.py` |
+| 禁止修改 | Rule Gating、File Filtering、Finding Budget、CLI、Agent、Semgrep、TechStack |
 
 ---
 
 ## 完成标准
 
-### 1️⃣ FileFilteringResult 数据结构（必须）
+### 1️⃣ CodeQLStatus 枚举（必须）
 
 ```python
-class FileFilteringResult:
-    include_patterns: list[str]   # --include 参数
-    exclude_patterns: list[str]   # --exclude 参数
-    exclude_dirs: list[str]       # --exclude-dir 参数
-    lang_flags: list[str]         # --lang 参数
+class CodeQLStatus(str, Enum):
+    SUCCESS = "success"
+    BUILD_FAILED = "build_failed"
+    QUERY_FAILED = "query_failed"
+    TIMEOUT = "timeout"
+    UNSUPPORTED_LANGUAGE = "unsupported_language"
+    RESOURCE_ERROR = "resource_error"
+    SUBPROCESS_ERROR = "subprocess_error"
+    NOT_INSTALLED = "not_installed"
+    DATABASE_ERROR = "database_error"
 ```
 
-- [x] 实现 `FileFilteringResult` 数据类
-- [x] `include_patterns` 字段
-- [x] `exclude_patterns` 字段
-- [x] `exclude_dirs` 字段
-- [x] `lang_flags` 字段
+- [x] 实现 `CodeQLStatus` 枚举
+- [x] 定义所有状态类型
 
-### 2️⃣ 永久排除目录（必须）
+### 2️⃣ CodeQLHealthResult 数据结构（必须）
 
 ```python
-DEFAULT_EXCLUDE_DIRS = [
-    ".git", ".svn", ".hg",
-    "node_modules", "dist", "build", "target",
-    "__pycache__", ".venv", "venv", ".mypy_cache",
-]
+@dataclass
+class CodeQLHealthResult:
+    status: CodeQLStatus
+    message: str
+    duration: float
+    fallback_triggered: bool
+    error_details: dict | None
 ```
 
-- [x] 实现永久排除目录列表
-- [x] 传递给 `--exclude` 参数
+- [x] 实现 `CodeQLHealthResult` 数据类
+- [x] `status` 字段
+- [x] `message` 字段
+- [x] `duration` 字段
+- [x] `fallback_triggered` 字段
 
-### 3️⃣ Markdown 与文档排除（必须）
+### 3️⃣ 构建失败容错（必须）
 
-**必须排除**：
-- `*.md`
-- `docs/`
-- `*.rst`
+**捕获异常**：
+- `subprocess.CalledProcessError` → BUILD_FAILED
+- `subprocess.TimeoutExpired` → TIMEOUT
+- `MemoryError` → RESOURCE_ERROR
+- `OSError` → SUBPROCESS_ERROR
 
-- [x] Markdown 文件永远不被扫描
-- [x] docs 目录排除
-- [x] RST 文件排除
+- [x] 数据库构建异常捕获
+- [x] 返回健康状态而非抛异常
+- [x] 记录错误详情
 
-### 4️⃣ 主语言过滤（必须）
+### 4️⃣ 查询执行失败容错（必须）
 
-**规则**：
-- 根据 `primary_language` 设置 `--lang` 参数
-- 如果有 `secondary_languages`，添加多个 `--lang`
-- 禁止无关语言进入扫描
+**捕获异常**：
+- `subprocess.CalledProcessError` → QUERY_FAILED
+- `subprocess.TimeoutExpired` → TIMEOUT
+- `json.JSONDecodeError` → QUERY_FAILED
 
-- [x] 根据 TechStack.languages 生成 lang_flags
-- [x] 支持多语言项目
-- [x] Monorepo 不使用单一语言限制
+- [x] 查询执行异常捕获
+- [x] SARIF 解析异常捕获
+- [x] 返回健康状态而非抛异常
 
-### 5️⃣ CLI 项目过滤（必须）
+### 5️⃣ 超时控制（必须）
 
-**如果 `project_type == "cli"`**：
-- 不 include web 文件
-- 不 include `templates/`
-- 不 include `static/`
+| 操作 | 默认超时 |
+|------|----------|
+| 数据库构建 | 1800s (30min) |
+| 查询执行 | 600s (10min) |
+| 单个查询 | 300s (5min) |
 
-- [x] 检测 CLI 项目类型
-- [x] 排除 web 相关目录
+- [x] 数据库构建超时控制
+- [x] 查询执行超时控制
+- [x] 超时自动降级
 
-### 6️⃣ 无 HTTP 攻击面过滤（必须）
+### 6️⃣ 语言支持判断（必须）
 
-**如果 `attack_surface.http_endpoints == 0`**：
-- 排除 `routes/`
-- 排除 `controllers/`
-- 排除 `api/`
+- [x] 语言支持检测
+- [x] 不支持时跳过执行
+- [x] 记录 UNSUPPORTED_LANGUAGE 状态
 
-- [x] 检测 HTTP 攻击面
-- [x] 排除 web 相关目录（目录级，非规则级）
+### 7️⃣ 降级行为（必须）
 
-### 7️⃣ Tests 过滤策略（必须）
+- [x] 失败时返回空结果
+- [x] success=False
+- [x] metadata 记录健康状态
+- [x] 不抛异常
 
-**默认**：不扫描 `tests/`
+### 8️⃣ 健康状态记录（必须）
 
-**例外**：`has_tests=True` 且 `project_type=library` 时扫描
+- [x] 存储执行状态
+- [x] 存储耗时
+- [x] 存储错误信息
+- [x] 存储 fallback 标志
 
-- [x] 默认排除 tests 目录
-- [x] library 项目例外处理
+### 9️⃣ 禁止行为（必须保证）
 
-### 8️⃣ Monorepo 支持（必须）
-
-**如果 `is_monorepo=True`**：
-- 不使用 `--lang` 单一限制
-- 仍使用 include 目录过滤
-
-- [x] 检测 Monorepo
-- [x] 不限制语言
-
-### 9️⃣ Semgrep 集成（必须）
-
-```python
-filter_engine = FileFilteringEngine(tech_stack, attack_surface)
-filter_result = filter_engine.build()
-
-for d in filter_result.exclude_dirs:
-    cmd.extend(["--exclude-dir", d])
-for p in filter_result.exclude_patterns:
-    cmd.extend(["--exclude", p])
-for l in filter_result.lang_flags:
-    cmd.extend(["--lang", l])
-```
-
-- [x] 在 SemgrepEngine 中集成 FileFilteringEngine
-- [x] 传递所有过滤参数
-
-### 🔟 Metadata 记录（必须）
-
-在 `ScanResult.metadata` 中加入：
-
-```json
-{
-  "file_filtering": {
-    "excluded_dirs": ["node_modules", "build"],
-    "excluded_patterns": ["*.md", "*.rst"],
-    "lang_used": ["python", "javascript"]
-  }
-}
-```
-
-- [x] 存储排除目录
-- [x] 存储排除模式
-- [x] 存储使用的语言
+- [x] ❌ 不允许 raise 未捕获异常
+- [x] ❌ 不允许终止主流程
+- [x] ❌ 不允许影响 Semgrep 执行
+- [x] ❌ 不允许影响 Agent 执行
+- [x] ❌ 不允许返回 None
 
 ---
 
-## 三层过滤架构
+## 三层容错架构
 
-| 层级 | 功能 | 参数 |
+| 层级 | 场景 | 行为 |
 |------|------|------|
-| 目录级 | 排除无关目录 | `--exclude` |
-| 文件类型级 | 排除文档/配置 | `--exclude` |
-| 语言级 | 限制扫描语言 | `--lang` |
+| 构建层 | 数据库构建失败 | 降级 + 记录 |
+| 查询层 | 查询执行失败 | 降级 + 记录 |
+| 资源层 | 超时/内存溢出 | 降级 + 记录 |
 
 ---
 
-## 必须保证
+## 错误类型映射
 
-- [x] 不改变 CLI 参数
-- [x] 不改变 Rule Gating
-- [x] 不影响 Finding Budget
-- [x] 不改变返回结果结构
-- [x] 不影响 CodeQL
-- [x] 不改写 TechStack 逻辑
-- [x] 不动态删除规则 pack（属于 Rule Gating）
+| 异常类型 | 状态 | 降级 |
+|----------|------|------|
+| `CalledProcessError` (build) | BUILD_FAILED | ✅ |
+| `CalledProcessError` (query) | QUERY_FAILED | ✅ |
+| `TimeoutExpired` | TIMEOUT | ✅ |
+| `MemoryError` | RESOURCE_ERROR | ✅ |
+| `OSError` | SUBPROCESS_ERROR | ✅ |
+| 语言不支持 | UNSUPPORTED_LANGUAGE | ✅ |
 
 ---
 
@@ -189,8 +165,8 @@ for l in filter_result.lang_flags:
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/core/file_filtering.py` | 新建 | 文件过滤引擎 |
-| `src/layers/l3_analysis/engines/semgrep.py` | 修改 | 集成过滤引擎 |
+| `src/core/codeql_health.py` | 新建 | CodeQL 健康管理模块 |
+| `src/layers/l3_analysis/engines/codeql.py` | 修改 | 集成 Fail-Safe 包装 |
 
 ---
 
@@ -198,24 +174,22 @@ for l in filter_result.lang_flags:
 
 | 优先级 | 功能 |
 |--------|------|
-| P0 | 目录排除 |
-| P0 | Markdown 排除 |
-| P0 | 语言过滤 |
-| P1 | CLI 目录过滤 |
-| P1 | HTTP 攻击面目录过滤 |
-| P1 | Monorepo 处理 |
-| P2 | Metadata 记录 |
+| P0 | 异常捕获包装 |
+| P0 | 超时控制 |
+| P0 | 健康状态记录 |
+| P1 | UNSUPPORTED_LANGUAGE 判断 |
+| P1 | metadata 集成 |
+| P2 | 详细错误信息 |
 
 ---
 
 ## 实现顺序
 
-1. ✅ 目录排除
-2. ✅ Markdown 排除
-3. ✅ 语言过滤
-4. ✅ CLI 目录过滤
-5. ✅ HTTP 攻击面目录过滤
-6. ✅ Monorepo 处理
+1. ✅ 创建 CodeQLStatus 和 CodeQLHealthResult
+2. ✅ 实现异常捕获包装器
+3. ✅ 添加超时控制
+4. ✅ 实现语言支持判断
+5. ✅ 集成 metadata 记录
 
 ---
 
@@ -223,9 +197,9 @@ for l in filter_result.lang_flags:
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-04 | 设置目标：Semgrep 文件级过滤 |
-| 2026-03-04 | 实现 FileFilteringResult 和 FileFilteringEngine |
-| 2026-03-04 | 集成到 SemgrepEngine |
+| 2026-03-04 | 设置目标：CodeQL 失败降级策略 |
+| 2026-03-04 | 创建 CodeQLHealthManager 和 CodeQLHealthResult |
+| 2026-03-04 | 集成到 CodeQLEngine.scan() |
 | 2026-03-04 | 所有测试通过（1358 passed） |
 | 2026-03-04 | 任务完成 |
 
@@ -233,46 +207,46 @@ for l in filter_result.lang_flags:
 
 ## 验收清单
 
-- [x] Markdown 永远不被扫描
-- [x] node_modules 永远不被扫描
-- [x] build/dist 永远不被扫描
-- [x] 非主语言文件不会进入扫描
-- [x] CLI 项目不扫描 web 目录
-- [x] tests 默认不扫描
-- [x] Monorepo 不报错
-- [x] metadata 正确记录过滤信息
+- [x] CodeQL 构建失败不会中断扫描
+- [x] CodeQL 查询失败不会中断扫描
+- [x] 超时自动降级
+- [x] 语言不支持时跳过执行
+- [x] metadata 正确记录健康状态
+- [x] Semgrep + Agent 始终可执行
+- [x] 主流程不会抛异常
+- [x] 返回值始终是 ScanResult
 
 ---
 
 ## 预期效果
 
 实现后系统会：
-- **Markdown 扫描 = 0** - 文档文件永久排除
-- **无关目录排除** - node_modules/build 等永不扫描
-- **语言精准匹配** - 只扫描项目实际使用的语言
-- **攻击面驱动** - 无 HTTP 时不扫描 web 目录
-- **与 Rule Gating 配合** - 实现完整的三级裁剪
+- **永不中断** - CodeQL 失败不影响整体扫描
+- **优雅降级** - 自动切换到 Semgrep + Agent
+- **状态可追溯** - 完整记录失败原因
+- **超时可控** - 避免无限等待
+- **资源安全** - 内存溢出时自动降级
 
 ---
 
 ## Phase 3 完成状态
 
-当 P3-05 完成后：
+当 P3-08 完成后：
 
 | 功能 | 状态 |
 |------|------|
 | 规则裁剪 (Rule Gating) | ✅ |
 | 文件裁剪 (File Filtering) | ✅ |
 | 结果熔断 (Finding Budget) | ✅ |
+| CodeQL 降级 (Fail-Safe) | ✅ |
 
-**Phase 3 核心任务已全部完成！**
+**Phase 3 全部任务完成！**
 
 ---
 
 ## 备注
 
-- 此任务与 P3-04 Rule Gating、P3-07 Finding Budget 配合使用
-- Rule Gating：规则级裁剪
-- File Filtering：文件级裁剪
-- Finding Budget：结果级熔断
-- 三者结合实现 90%+ 噪声消除
+- 此任务确保 CodeQL 的不稳定性不会影响整体系统
+- 与 Rule Gating、File Filtering、Finding Budget 配合使用
+- Fail-Safe 机制是生产环境可用的关键保障
+- 降级后 Semgrep + Agent 仍可提供完整的安全扫描能力

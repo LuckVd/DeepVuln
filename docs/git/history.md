@@ -4,6 +4,7 @@
 
 | 时间 | Commit | 简介 |
 |------|--------|------|
+| 2026-03-05 00:00 | f436444 | feat(core): CodeQL Fail-Safe 降级策略，异常捕获 + 超时控制 + 健康状态，永不中断 |
 | 2026-03-04 23:30 | aa76692 | feat(core): File Filtering Engine，三层过滤：目录排除/文件类型/语言限制，Markdown=0 |
 | 2026-03-04 23:00 | 725d493 | feat(core): Finding Budget 熔断机制，单规则50/单文件80/总计1000 上限，meltdown 防护 |
 | 2026-03-04 22:30 | e86b096 | feat(core): Rule Gating Engine，77-91% 规则裁剪，攻击面驱动规则选择，+29 测试 |

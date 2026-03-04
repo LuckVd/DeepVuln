@@ -94,7 +94,7 @@ DeepVuln/
 |P3-05|Semgrep 文件级过滤（include/exclude/lang）|P3-04|done|
 |P3-06|禁止 literal 规则（AST 强制）|P3-05|todo|
 |P3-07|Finding Budget 误报熔断机制|P3-04|done|
-|P3-08|CodeQL 失败降级策略|P2-02|todo|
+|P3-08|CodeQL 失败降级策略|P2-02|done|
 
 ---
 
@@ -196,7 +196,7 @@ DeepVuln/
 |字段|值|
 |---|---|
 |**阶段**|Phase 3 - 精度重构|
-|**当前进度**|Phase 3 核心任务已完成|
-|**下一步**|P3-06 禁止 literal 规则 / P3-08 CodeQL 降级策略|
-|**重点模块**|Rule Gating + File Filtering + Finding Budget|
-|**目标**|三级裁剪实现 90%+ 噪声消除|
+|**当前进度**|Phase 3 核心任务已全部完成|
+|**下一步**|P3-06 禁止 literal 规则 / Phase 4 裁决统一|
+|**重点模块**|Rule Gating + File Filtering + Finding Budget + Fail-Safe|
+|**目标**|三级裁剪 + 容错机制，90%+ 噪声消除|

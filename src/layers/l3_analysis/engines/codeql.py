@@ -3,6 +3,8 @@ CodeQL Engine - GitHub CodeQL integration for deep dataflow analysis.
 
 CodeQL is a powerful code analysis engine that enables deep dataflow analysis
 to find complex vulnerabilities that pattern matching might miss.
+
+Enhanced with Fail-Safe Degradation for production stability.
 """
 
 import asyncio
@@ -10,7 +12,9 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import tempfile
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +22,14 @@ from typing import Any
 
 from rich.markup import escape
 
+from src.core.codeql_health import (
+    DEFAULT_ANALYZE_TIMEOUT,
+    DEFAULT_BUILD_TIMEOUT,
+    CODEQL_SUPPORTED_LANGUAGES,
+    CodeQLHealthManager,
+    CodeQLHealthResult,
+    CodeQLStatus,
+)
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
 from src.layers.l3_analysis.models import (
@@ -96,10 +108,16 @@ TAG_TO_TYPE: dict[str, FindingType] = {
 
 class CodeQLEngine(BaseEngine):
     """
-    CodeQL static analysis engine.
+    CodeQL static analysis engine with Fail-Safe Degradation.
 
     Provides deep dataflow analysis using GitHub's CodeQL engine.
     Requires CodeQL CLI to be installed separately.
+
+    Enhanced with fail-safe mechanisms:
+    - Automatic fallback on build/analysis failures
+    - Timeout control for all operations
+    - Language support validation
+    - Health status tracking in metadata
     """
 
     name = "codeql"
@@ -126,6 +144,8 @@ class CodeQLEngine(BaseEngine):
         auto_download_packs: bool = True,
         cache_dir: Path | str | None = None,
         enable_cache: bool = True,
+        build_timeout: int = DEFAULT_BUILD_TIMEOUT,
+        analyze_timeout: int = DEFAULT_ANALYZE_TIMEOUT,
     ):
         """
         Initialize the CodeQL engine.
@@ -138,6 +158,8 @@ class CodeQLEngine(BaseEngine):
             auto_download_packs: Whether to automatically download missing packs.
             cache_dir: Directory to cache CodeQL databases (default: /tmp/codeql_cache).
             enable_cache: Whether to enable database caching.
+            build_timeout: Timeout for database creation (default: 30 min).
+            analyze_timeout: Timeout for analysis (default: 10 min).
         """
         super().__init__(timeout=timeout, max_memory_mb=max_memory_mb)
         self.codeql_path = codeql_path
@@ -153,6 +175,13 @@ class CodeQLEngine(BaseEngine):
             self.cache_dir = Path(cache_dir) if isinstance(cache_dir, str) else cache_dir
         else:
             self.cache_dir = DEFAULT_CACHE_DIR
+
+        # Timeout configuration
+        self.build_timeout = build_timeout
+        self.analyze_timeout = analyze_timeout
+
+        # Health manager for fail-safe operations
+        self.health_manager = CodeQLHealthManager()
 
     def is_available(self) -> bool:
         """
@@ -406,11 +435,14 @@ class CodeQLEngine(BaseEngine):
         **options,
     ) -> ScanResult:
         """
-        Execute a CodeQL scan.
+        Execute a CodeQL scan with fail-safe degradation.
 
         The scan consists of two phases:
         1. Create a CodeQL database from the source code
         2. Analyze the database with specified queries
+
+        Fail-Safe: If any phase fails, returns an empty result with
+        health status metadata. Never raises exceptions.
 
         Args:
             source_path: Path to the source code to scan.
@@ -426,19 +458,39 @@ class CodeQLEngine(BaseEngine):
             **options: Additional options.
 
         Returns:
-            ScanResult containing all findings.
+            ScanResult containing all findings (or empty if failed).
         """
+        scan_start_time = time.time()
+        health_result: CodeQLHealthResult | None = None
+
         # Validate source path
-        self.validate_source_path(source_path)
+        try:
+            self.validate_source_path(source_path)
+        except Exception as e:
+            result = self.create_scan_result(source_path, [])
+            health_result = CodeQLHealthResult(
+                status=CodeQLStatus.SUBPROCESS_ERROR,
+                message=f"Invalid source path: {e}",
+                fallback_triggered=True,
+                operation="validation",
+            )
+            result.metadata["codeql_health"] = health_result.to_dict()
+            return self.finalize_scan_result(
+                result,
+                success=False,
+                error_message=health_result.message,
+            )
 
         # Check if CodeQL is available
         if not self.is_available():
             result = self.create_scan_result(source_path, [])
+            health_result = self.health_manager.create_not_installed_result()
+            result.metadata["codeql_health"] = health_result.to_dict()
+            logger.warning(f"CodeQL not available: {health_result.message}")
             return self.finalize_scan_result(
                 result,
                 success=False,
-                error_message="CodeQL CLI is not installed or not in PATH. "
-                "Install from: https://github.com/github/codeql-cli-binaries/releases",
+                error_message=health_result.message,
             )
 
         # Detect language if not specified
@@ -447,21 +499,46 @@ class CodeQLEngine(BaseEngine):
 
         if not language:
             result = self.create_scan_result(source_path, [])
+            health_result = CodeQLHealthResult(
+                status=CodeQLStatus.UNSUPPORTED_LANGUAGE,
+                message="Could not detect programming language",
+                fallback_triggered=True,
+                operation="language_detection",
+            )
+            result.metadata["codeql_health"] = health_result.to_dict()
             return self.finalize_scan_result(
                 result,
                 success=False,
-                error_message="Could not detect programming language. "
-                "Please specify --language option.",
+                error_message=health_result.message + ". Please specify --language option.",
+            )
+
+        # Check language support using health manager
+        if not self.health_manager.is_language_supported(language):
+            result = self.create_scan_result(source_path, [])
+            health_result = self.health_manager.create_unsupported_language_result(language)
+            result.metadata["codeql_health"] = health_result.to_dict()
+            logger.info(f"Language '{language}' not supported by CodeQL: {health_result.message}")
+            return self.finalize_scan_result(
+                result,
+                success=False,
+                error_message=health_result.message,
             )
 
         # Normalize language
         codeql_lang = self.normalize_language(language)
         if not codeql_lang:
             result = self.create_scan_result(source_path, [])
+            health_result = CodeQLHealthResult(
+                status=CodeQLStatus.UNSUPPORTED_LANGUAGE,
+                message=f"Language '{language}' is not supported by CodeQL",
+                fallback_triggered=True,
+                operation="language_normalization",
+            )
+            result.metadata["codeql_health"] = health_result.to_dict()
             return self.finalize_scan_result(
                 result,
                 success=False,
-                error_message=f"Language '{language}' is not supported by CodeQL.",
+                error_message=health_result.message,
             )
 
         # Track rules used
@@ -516,33 +593,116 @@ class CodeQLEngine(BaseEngine):
             # Phase 0: Build project (if required and not using cached DB)
             build_diagnostic = None
             if not skip_build and not use_cached_db:
-                build_result = await self._execute_build(
-                    source_path=source_path,
-                    language=codeql_lang,
-                    build_command=build_command,
-                    llm_client=llm_client,
-                )
-                if build_result and not build_result.get("success", True):
-                    build_diagnostic = build_result.get("diagnostic")
-                    # Log build failure but continue with database creation
-                    # CodeQL might still work with partial build
-                    logger.warning(
-                        f"Build completed with issues. Build diagnostic: "
-                        f"{build_diagnostic.to_dict() if build_diagnostic else 'None'}"
+                try:
+                    build_result = await asyncio.wait_for(
+                        self._execute_build(
+                            source_path=source_path,
+                            language=codeql_lang,
+                            build_command=build_command,
+                            llm_client=llm_client,
+                        ),
+                        timeout=self.build_timeout,
+                    )
+                    if build_result and not build_result.get("success", True):
+                        build_diagnostic = build_result.get("diagnostic")
+                        # Log build failure but continue with database creation
+                        # CodeQL might still work with partial build
+                        logger.warning(
+                            f"Build completed with issues. Build diagnostic: "
+                            f"{build_diagnostic.to_dict() if build_diagnostic else 'None'}"
+                        )
+                except asyncio.TimeoutError:
+                    build_duration = time.time() - scan_start_time
+                    health_result = self.health_manager.create_timeout_result(
+                        operation="build",
+                        duration=build_duration,
+                        timeout_seconds=self.build_timeout,
+                    )
+                    result.metadata["codeql_health"] = health_result.to_dict()
+                    logger.warning(f"CodeQL build timeout after {self.build_timeout}s")
+                    return self.finalize_scan_result(
+                        result,
+                        success=False,
+                        error_message=health_result.message,
+                    )
+                except MemoryError:
+                    health_result = CodeQLHealthResult(
+                        status=CodeQLStatus.RESOURCE_ERROR,
+                        message="Memory exhausted during build",
+                        duration=time.time() - scan_start_time,
+                        fallback_triggered=True,
+                        operation="build",
+                    )
+                    result.metadata["codeql_health"] = health_result.to_dict()
+                    logger.error("CodeQL build failed: memory exhausted")
+                    return self.finalize_scan_result(
+                        result,
+                        success=False,
+                        error_message=health_result.message,
+                    )
+                except OSError as e:
+                    health_result = CodeQLHealthResult(
+                        status=CodeQLStatus.SUBPROCESS_ERROR,
+                        message=f"Subprocess error during build: {e}",
+                        duration=time.time() - scan_start_time,
+                        fallback_triggered=True,
+                        error_details={"error_type": type(e).__name__},
+                        operation="build",
+                    )
+                    result.metadata["codeql_health"] = health_result.to_dict()
+                    logger.error(f"CodeQL build subprocess error: {e}")
+                    return self.finalize_scan_result(
+                        result,
+                        success=False,
+                        error_message=health_result.message,
                     )
 
             # Phase 1: Create database (skip if using cached DB)
+            db_start_time = time.time()
             if use_cached_db:
                 db_success = True
                 logger.info("Skipping database creation - using cached database")
             else:
-                db_success = await self._create_database(
-                    source_path=source_path,
-                    database_path=database_path,
-                    language=codeql_lang,
-                    overwrite=overwrite_database or self.enable_cache,  # Always overwrite for cache
-                    skip_build=skip_build,
-                )
+                try:
+                    db_success = await asyncio.wait_for(
+                        self._create_database(
+                            source_path=source_path,
+                            database_path=database_path,
+                            language=codeql_lang,
+                            overwrite=overwrite_database or self.enable_cache,
+                            skip_build=skip_build,
+                        ),
+                        timeout=self.build_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    db_duration = time.time() - db_start_time
+                    health_result = self.health_manager.create_timeout_result(
+                        operation="database_create",
+                        duration=db_duration,
+                        timeout_seconds=self.build_timeout,
+                    )
+                    result.metadata["codeql_health"] = health_result.to_dict()
+                    logger.warning(f"CodeQL database creation timeout after {self.build_timeout}s")
+                    return self.finalize_scan_result(
+                        result,
+                        success=False,
+                        error_message=health_result.message,
+                    )
+                except MemoryError:
+                    health_result = CodeQLHealthResult(
+                        status=CodeQLStatus.RESOURCE_ERROR,
+                        message="Memory exhausted during database creation",
+                        duration=time.time() - db_start_time,
+                        fallback_triggered=True,
+                        operation="database_create",
+                    )
+                    result.metadata["codeql_health"] = health_result.to_dict()
+                    logger.error("CodeQL database creation failed: memory exhausted")
+                    return self.finalize_scan_result(
+                        result,
+                        success=False,
+                        error_message=health_result.message,
+                    )
 
             if not db_success:
                 error_msg = "Failed to create CodeQL database. "
@@ -552,6 +712,16 @@ class CodeQLEngine(BaseEngine):
                         error_msg += f"Suggestions: {'; '.join(build_diagnostic.suggestions[:3])}"
                 else:
                     error_msg += "Check if the project can be built successfully."
+
+                health_result = CodeQLHealthResult(
+                    status=CodeQLStatus.BUILD_FAILED,
+                    message=error_msg,
+                    duration=time.time() - scan_start_time,
+                    fallback_triggered=True,
+                    operation="database_create",
+                )
+                result.metadata["codeql_health"] = health_result.to_dict()
+                logger.warning(f"CodeQL database creation failed: {error_msg}")
                 return self.finalize_scan_result(
                     result,
                     success=False,
@@ -559,18 +729,77 @@ class CodeQLEngine(BaseEngine):
                 )
 
             # Phase 2: Analyze database
-            sarif_output = await self._analyze_database(
-                database_path=database_path,
-                queries=queries,
-                query_suite=query_suite or (DEFAULT_QUERY_SUITES.get(codeql_lang, ["security"])[0]),
-                language=codeql_lang,
-            )
-
-            if sarif_output is None:
+            analyze_start_time = time.time()
+            try:
+                sarif_output = await asyncio.wait_for(
+                    self._analyze_database(
+                        database_path=database_path,
+                        queries=queries,
+                        query_suite=query_suite or (DEFAULT_QUERY_SUITES.get(codeql_lang, ["security"])[0]),
+                        language=codeql_lang,
+                    ),
+                    timeout=self.analyze_timeout,
+                )
+            except asyncio.TimeoutError:
+                analyze_duration = time.time() - analyze_start_time
+                health_result = self.health_manager.create_timeout_result(
+                    operation="analyze",
+                    duration=analyze_duration,
+                    timeout_seconds=self.analyze_timeout,
+                )
+                result.metadata["codeql_health"] = health_result.to_dict()
+                logger.warning(f"CodeQL analysis timeout after {self.analyze_timeout}s")
                 return self.finalize_scan_result(
                     result,
                     success=False,
-                    error_message="Failed to analyze CodeQL database.",
+                    error_message=health_result.message,
+                )
+            except MemoryError:
+                health_result = CodeQLHealthResult(
+                    status=CodeQLStatus.RESOURCE_ERROR,
+                    message="Memory exhausted during analysis",
+                    duration=time.time() - analyze_start_time,
+                    fallback_triggered=True,
+                    operation="analyze",
+                )
+                result.metadata["codeql_health"] = health_result.to_dict()
+                logger.error("CodeQL analysis failed: memory exhausted")
+                return self.finalize_scan_result(
+                    result,
+                    success=False,
+                    error_message=health_result.message,
+                )
+            except json.JSONDecodeError as e:
+                health_result = CodeQLHealthResult(
+                    status=CodeQLStatus.QUERY_FAILED,
+                    message=f"Failed to parse SARIF output: {e}",
+                    duration=time.time() - analyze_start_time,
+                    fallback_triggered=True,
+                    error_details={"error_type": "JSONDecodeError"},
+                    operation="analyze",
+                )
+                result.metadata["codeql_health"] = health_result.to_dict()
+                logger.error(f"CodeQL SARIF parsing failed: {e}")
+                return self.finalize_scan_result(
+                    result,
+                    success=False,
+                    error_message=health_result.message,
+                )
+
+            if sarif_output is None:
+                health_result = CodeQLHealthResult(
+                    status=CodeQLStatus.QUERY_FAILED,
+                    message="Failed to analyze CodeQL database",
+                    duration=time.time() - analyze_start_time,
+                    fallback_triggered=True,
+                    operation="analyze",
+                )
+                result.metadata["codeql_health"] = health_result.to_dict()
+                logger.warning("CodeQL analysis returned no output")
+                return self.finalize_scan_result(
+                    result,
+                    success=False,
+                    error_message=health_result.message,
                 )
 
             # Parse SARIF results
@@ -587,27 +816,50 @@ class CodeQLEngine(BaseEngine):
             for finding in findings:
                 result.add_finding(finding)
 
+            # Create success health result
+            total_duration = time.time() - scan_start_time
+            health_result = self.health_manager.create_success_result(
+                operation="scan",
+                duration=total_duration,
+                message=f"CodeQL scan completed successfully. Found {len(findings)} findings.",
+            )
+            result.metadata["codeql_health"] = health_result.to_dict()
+
+            logger.info(
+                f"CodeQL scan completed: {len(findings)} findings in {total_duration:.1f}s"
+            )
+
             return self.finalize_scan_result(
                 result,
                 success=True,
                 raw_output=sarif_output,
             )
 
-        except TimeoutError as e:
-            return self.finalize_scan_result(
-                result,
-                success=False,
-                error_message=str(e),
-            )
         except Exception as e:
+            # Catch-all for any unexpected errors - NEVER raise
+            total_duration = time.time() - scan_start_time
+            health_result = CodeQLHealthResult(
+                status=CodeQLStatus.SUBPROCESS_ERROR,
+                message=f"Unexpected error during scan: {e}",
+                duration=total_duration,
+                fallback_triggered=True,
+                error_details={"error_type": type(e).__name__, "error_message": str(e)},
+                operation="scan",
+            )
+            result.metadata["codeql_health"] = health_result.to_dict()
+            logger.error(f"CodeQL scan unexpected error: {type(e).__name__}: {e}")
             return self.finalize_scan_result(
                 result,
                 success=False,
-                error_message=f"Scan failed: {e}",
+                error_message=health_result.message,
             )
         finally:
             # Cleanup temporary database
             if cleanup_db and database_path and database_path.exists():
+                try:
+                    shutil.rmtree(database_path, ignore_errors=True)
+                except Exception as e:
+                    logger.debug(f"Failed to cleanup database: {e}")
                 shutil.rmtree(database_path, ignore_errors=True)
 
     async def scan_multi_language(
