@@ -8,16 +8,23 @@ Enhanced with:
 - Rule Gating for 77-91% noise reduction
 - Finding Budget for meltdown prevention
 - File Filtering for scan surface control
+- AST Validation for literal rule elimination
 """
 
 import json
 import uuid
+import yaml
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from src.core.finding_budget import FindingBudget, FindingBudgetResult
 from src.core.file_filtering import FileFilteringEngine, FileFilteringResult
+from src.core.rule_ast_validator import (
+    RuleASTValidator,
+    RuleValidationStatus,
+    ASTValidationSummary,
+)
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
 from src.layers.l3_analysis.models import (
@@ -162,6 +169,7 @@ class SemgrepEngine(BaseEngine):
         use_rule_gating: bool = True,
         use_finding_budget: bool = True,
         use_file_filtering: bool = True,
+        use_ast_validation: bool = True,
         **options,
     ) -> ScanResult:
         """
@@ -181,6 +189,7 @@ class SemgrepEngine(BaseEngine):
             use_rule_gating: Whether to apply rule gating (default: True).
             use_finding_budget: Whether to apply finding budget limits (default: True).
             use_file_filtering: Whether to apply file filtering (default: True).
+            use_ast_validation: Whether to validate rules for AST matching (default: True).
             **options: Additional options.
 
         Returns:
@@ -234,6 +243,23 @@ class SemgrepEngine(BaseEngine):
             except Exception as e:
                 self.logger.warning(f"File filtering failed, continuing without: {e}")
 
+        # Apply AST validation if enabled
+        ast_validation_result = None
+        if use_ast_validation and rules:
+            try:
+                ast_validation_result = self._validate_rules_ast(rules)
+                if ast_validation_result.rejected_count > 0:
+                    # Add rejected rule IDs to excluded list
+                    excluded_rule_ids.extend(ast_validation_result.disabled_literal_rules)
+                    self.logger.info(
+                        f"AST validation applied: "
+                        f"valid={ast_validation_result.validated_count}, "
+                        f"rejected={ast_validation_result.rejected_count}, "
+                        f"rejection_rate={ast_validation_result.rejection_rate}"
+                    )
+            except Exception as e:
+                self.logger.warning(f"AST validation failed, continuing without: {e}")
+
         # Merge user patterns with auto-generated patterns
         final_exclude_patterns = list(exclude_patterns) if exclude_patterns else []
         final_include_patterns = list(include_patterns) if include_patterns else []
@@ -284,6 +310,10 @@ class SemgrepEngine(BaseEngine):
         # Store file filtering info in metadata
         if filtering_result:
             result.metadata["file_filtering"] = filtering_result.to_dict()
+
+        # Store AST validation info in metadata
+        if ast_validation_result:
+            result.metadata["ast_validation"] = ast_validation_result.to_dict()
 
         try:
             # Run semgrep
@@ -685,6 +715,104 @@ class SemgrepEngine(BaseEngine):
         """
         budget = FindingBudget()
         return budget.apply(findings)
+
+    def _validate_rules_ast(
+        self,
+        rule_paths: list[str],
+    ) -> ASTValidationSummary:
+        """
+        Validate rules for AST semantic matching.
+
+        This method loads rule files, parses them, and validates that
+        they have AST-level semantic matching capabilities. Rules that
+        only perform literal string matching are rejected.
+
+        Args:
+            rule_paths: List of paths to rule files or directories.
+
+        Returns:
+            ASTValidationSummary with validation results.
+        """
+        validator = RuleASTValidator()
+        all_rules = []
+
+        # Load rules from all paths
+        for path_str in rule_paths:
+            path = Path(path_str)
+            try:
+                if path.is_file():
+                    rules = self._load_rule_file(path)
+                    all_rules.extend(rules)
+                elif path.is_dir():
+                    rules = self._load_rule_directory(path)
+                    all_rules.extend(rules)
+            except Exception as e:
+                self.logger.debug(f"Could not load rules from {path_str}: {e}")
+
+        # Validate and filter rules
+        if not all_rules:
+            return ASTValidationSummary()
+
+        _, summary = validator.validate_rules(all_rules)
+        return summary
+
+    def _load_rule_file(self, path: Path) -> list[dict[str, Any]]:
+        """
+        Load rules from a single YAML file.
+
+        Args:
+            path: Path to the rule file.
+
+        Returns:
+            List of rule dictionaries.
+        """
+        rules = []
+        try:
+            with open(path, encoding="utf-8") as f:
+                content = yaml.safe_load(f)
+
+            if content is None:
+                return rules
+
+            # Handle both single rule and rules array
+            if isinstance(content, dict):
+                if "rules" in content:
+                    rules.extend(content["rules"])
+                elif "id" in content:
+                    rules.append(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        if "rules" in item:
+                            rules.extend(item["rules"])
+                        elif "id" in item:
+                            rules.append(item)
+
+        except Exception as e:
+            self.logger.debug(f"Error loading rule file {path}: {e}")
+
+        return rules
+
+    def _load_rule_directory(self, path: Path) -> list[dict[str, Any]]:
+        """
+        Load rules from a directory.
+
+        Args:
+            path: Path to the rule directory.
+
+        Returns:
+            List of rule dictionaries.
+        """
+        rules = []
+        try:
+            for yaml_file in path.rglob("*.yaml"):
+                rules.extend(self._load_rule_file(yaml_file))
+            for yaml_file in path.rglob("*.yml"):
+                rules.extend(self._load_rule_file(yaml_file))
+        except Exception as e:
+            self.logger.debug(f"Error loading rules from directory {path}: {e}")
+
+        return rules
 
 
 # Register the engine
