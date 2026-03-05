@@ -3,13 +3,15 @@
 import pytest
 
 from src.layers.l3_analysis.consistency import (
-    StatusLevel,
+    SEVERITY_LEVELS,
     STATUS_LEVELS,
-    GlobalAdjudicationError,
+    AdjudicationConsistencyChecker,
     ConflictInfo,
     ConsistencyCheckResult,
+    GlobalAdjudicationError,
+    SeverityLevel,
+    StatusLevel,
     generate_logical_vuln_id,
-    AdjudicationConsistencyChecker,
     validate_consistency,
 )
 
@@ -24,6 +26,7 @@ class MockFinding:
         source="semgrep",
         exploitability=None,
         final_status=None,
+        severity=None,
         location=None,
         metadata=None,
         logical_vuln_id=None,
@@ -33,6 +36,7 @@ class MockFinding:
         self.source = source
         self.exploitability = exploitability
         self.final_status = final_status
+        self.severity = severity
         self.logical_vuln_id = logical_vuln_id
         self.location = location or MockLocation()
         self.metadata = metadata or {}
@@ -68,6 +72,33 @@ class TestStatusLevel:
         assert STATUS_LEVELS["not_exploitable"] == 0
         assert STATUS_LEVELS["exploitable"] == 3
         assert STATUS_LEVELS["conditional"] == 2
+
+
+class TestSeverityLevel:
+    """Test SeverityLevel enum."""
+
+    def test_info_level(self):
+        """Test INFO is lowest."""
+        assert SeverityLevel.INFO == 0
+
+    def test_critical_level(self):
+        """Test CRITICAL is highest."""
+        assert SeverityLevel.CRITICAL == 4
+
+    def test_level_ordering(self):
+        """Test severity levels are ordered correctly."""
+        assert SeverityLevel.INFO < SeverityLevel.LOW
+        assert SeverityLevel.LOW < SeverityLevel.MEDIUM
+        assert SeverityLevel.MEDIUM < SeverityLevel.HIGH
+        assert SeverityLevel.HIGH < SeverityLevel.CRITICAL
+
+    def test_severity_levels_dict(self):
+        """Test SEVERITY_LEVELS mapping."""
+        assert SEVERITY_LEVELS["info"] == 0
+        assert SEVERITY_LEVELS["low"] == 1
+        assert SEVERITY_LEVELS["medium"] == 2
+        assert SEVERITY_LEVELS["high"] == 3
+        assert SEVERITY_LEVELS["critical"] == 4
 
 
 class TestGlobalAdjudicationError:
@@ -143,7 +174,21 @@ class TestConsistencyCheckResult:
         assert d["checked"] is True
         assert d["passed"] is True
         assert d["findings_checked"] == 10
-        assert d["conflicts_found"] == 0
+        assert d["violations"] == 0
+        assert d["warnings"] == 0
+        assert d["fixed"] == 0
+
+    def test_to_dict_with_warnings(self):
+        """Test converting to dictionary with warnings."""
+        result = ConsistencyCheckResult(
+            passed=True,
+            findings_checked=10,
+            warnings=["warning1", "warning2"],
+            fixed_count=3,
+        )
+        d = result.to_dict()
+        assert d["warnings"] == 2
+        assert d["fixed"] == 3
 
 
 class TestGenerateLogicalVulnId:
@@ -600,7 +645,7 @@ class TestMetadataIntegration:
         assert "checked" in d
         assert "passed" in d
         assert "findings_checked" in d
-        assert "conflicts_found" in d
+        assert "violations" in d
         assert "error" in d
 
     def test_conflict_to_dict_metadata(self):
@@ -640,3 +685,276 @@ class TestStatusAliases:
         checker = AdjudicationConsistencyChecker()
         result = checker.validate_findings([finding])
         assert result.passed is True
+
+
+class TestRule2SeverityTooLowForExploitable:
+    """Test RULE_2: EXPLOITABLE finding must have severity >= MEDIUM."""
+
+    def test_exploitable_with_low_severity_fails(self):
+        """Test EXPLOITABLE with LOW severity fails."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="exploitable",
+            severity="low",
+        )
+        checker = AdjudicationConsistencyChecker(strict=False)
+        result = checker.validate_findings([finding])
+        assert result.passed is False
+        assert any(c.conflict_type == "RULE_2_SEVERITY_TOO_LOW_FOR_EXPLOITABLE"
+                   for c in result.conflicts)
+
+    def test_exploitable_with_info_severity_fails(self):
+        """Test EXPLOITABLE with INFO severity fails."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="exploitable",
+            severity="info",
+        )
+        checker = AdjudicationConsistencyChecker(strict=False)
+        result = checker.validate_findings([finding])
+        assert result.passed is False
+        assert any(c.conflict_type == "RULE_2_SEVERITY_TOO_LOW_FOR_EXPLOITABLE"
+                   for c in result.conflicts)
+
+    def test_exploitable_with_medium_severity_passes(self):
+        """Test EXPLOITABLE with MEDIUM severity passes."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="exploitable",
+            severity="medium",
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert result.passed is True
+
+    def test_exploitable_with_high_severity_passes(self):
+        """Test EXPLOITABLE with HIGH severity passes."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="exploitable",
+            severity="high",
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert result.passed is True
+
+    def test_exploitable_with_critical_severity_passes(self):
+        """Test EXPLOITABLE with CRITICAL severity passes."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="exploitable",
+            severity="critical",
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert result.passed is True
+
+    def test_exploitable_with_no_severity_passes(self):
+        """Test EXPLOITABLE without severity passes (no check)."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="exploitable",
+            severity=None,
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert result.passed is True
+
+    def test_strict_mode_raises_on_low_severity(self):
+        """Test strict mode raises exception on LOW severity."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="exploitable",
+            severity="low",
+        )
+        checker = AdjudicationConsistencyChecker(strict=True)
+        with pytest.raises(GlobalAdjudicationError):
+            checker.validate_findings([finding])
+
+
+class TestRule5SeverityStatusWarning:
+    """Test RULE_5: HIGH/CRITICAL severity with INFORMATIONAL status generates warning."""
+
+    def test_high_severity_informational_status_warning(self):
+        """Test HIGH severity with INFORMATIONAL status generates warning."""
+        finding = MockFinding(
+            finding_id="f1",
+            rule_id="rule-001",
+            final_status="informational",
+            severity="high",
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert result.passed is True  # Warning doesn't fail
+        assert len(result.warnings) == 1
+        assert "RULE_5_SEVERITY_STATUS_INCONSISTENCY" in result.warnings[0]
+
+    def test_critical_severity_informational_status_warning(self):
+        """Test CRITICAL severity with INFORMATIONAL status generates warning."""
+        finding = MockFinding(
+            finding_id="f1",
+            rule_id="rule-001",
+            final_status="informational",
+            severity="critical",
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert result.passed is True
+        assert len(result.warnings) == 1
+        assert "RULE_5_SEVERITY_STATUS_INCONSISTENCY" in result.warnings[0]
+
+    def test_medium_severity_informational_status_no_warning(self):
+        """Test MEDIUM severity with INFORMATIONAL status no warning."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="informational",
+            severity="medium",
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert result.passed is True
+        assert len(result.warnings) == 0
+
+    def test_low_severity_informational_status_no_warning(self):
+        """Test LOW severity with INFORMATIONAL status no warning."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="informational",
+            severity="low",
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert result.passed is True
+        assert len(result.warnings) == 0
+
+    def test_high_severity_exploitable_status_no_warning(self):
+        """Test HIGH severity with EXPLOITABLE status no warning."""
+        finding = MockFinding(
+            finding_id="f1",
+            final_status="exploitable",
+            severity="high",
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert result.passed is True
+        assert len(result.warnings) == 0
+
+    def test_multiple_warnings_collected(self):
+        """Test multiple warnings are collected."""
+        findings = [
+            MockFinding(
+                finding_id="f1",
+                rule_id="rule-001",
+                final_status="informational",
+                severity="high",
+            ),
+            MockFinding(
+                finding_id="f2",
+                rule_id="rule-002",
+                final_status="informational",
+                severity="critical",
+            ),
+        ]
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings(findings)
+        assert result.passed is True
+        assert len(result.warnings) == 2
+
+    def test_warning_includes_finding_id_and_rule_id(self):
+        """Test warning message includes finding_id and rule_id."""
+        finding = MockFinding(
+            finding_id="f1",
+            rule_id="rule-001",
+            final_status="informational",
+            severity="high",
+        )
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings([finding])
+        assert "f1" in result.warnings[0]
+        assert "rule-001" in result.warnings[0]
+
+
+class TestConsistencyCheckResultWarnings:
+    """Test ConsistencyCheckResult warnings field."""
+
+    def test_warnings_default_empty(self):
+        """Test warnings default to empty list."""
+        result = ConsistencyCheckResult(passed=True)
+        assert result.warnings == []
+
+    def test_fixed_count_default_zero(self):
+        """Test fixed_count defaults to 0."""
+        result = ConsistencyCheckResult(passed=True)
+        assert result.fixed_count == 0
+
+    def test_warnings_can_be_set(self):
+        """Test warnings can be set."""
+        result = ConsistencyCheckResult(
+            passed=True,
+            warnings=["warning1", "warning2"],
+        )
+        assert len(result.warnings) == 2
+
+    def test_fixed_count_can_be_set(self):
+        """Test fixed_count can be set."""
+        result = ConsistencyCheckResult(
+            passed=True,
+            fixed_count=5,
+        )
+        assert result.fixed_count == 5
+
+
+class TestCombinedRules:
+    """Test combined rule scenarios."""
+
+    def test_exploitable_low_severity_and_high_info_warning(self):
+        """Test both RULE_2 violation and RULE_5 warning in same batch."""
+        findings = [
+            MockFinding(
+                finding_id="f1",
+                rule_id="r1",
+                final_status="exploitable",
+                severity="low",  # RULE_2 violation
+            ),
+            MockFinding(
+                finding_id="f2",
+                rule_id="r2",
+                final_status="informational",
+                severity="high",  # RULE_5 warning
+            ),
+        ]
+        checker = AdjudicationConsistencyChecker(strict=False)
+        result = checker.validate_findings(findings)
+        assert result.passed is False  # RULE_2 violation fails
+        assert len(result.conflicts) >= 1
+        assert len(result.warnings) >= 1
+
+    def test_all_rules_pass_with_warnings(self):
+        """Test all rules pass but warnings generated."""
+        findings = [
+            MockFinding(
+                finding_id="f1",
+                rule_id="r1",
+                exploitability="exploitable",
+                final_status="exploitable",
+                severity="high",
+            ),
+            MockFinding(
+                finding_id="f2",
+                rule_id="r2",
+                exploitability="conditional",
+                final_status="conditional",
+                severity="medium",
+            ),
+            MockFinding(
+                finding_id="f3",
+                rule_id="r3",
+                final_status="informational",
+                severity="critical",  # RULE_5 warning
+            ),
+        ]
+        checker = AdjudicationConsistencyChecker()
+        result = checker.validate_findings(findings)
+        assert result.passed is True
+        assert len(result.warnings) == 1
+        assert result.findings_checked == 3

@@ -7,6 +7,8 @@ This module implements the Global Adjudication Consistency Layer that ensures:
 3. Multi-engine results cannot contradict each other
 4. No confirmed + not_exploitable coexistence
 5. No status regression violating adjudication rules
+6. EXPLOITABLE finding must have severity >= MEDIUM (RULE_2)
+7. HIGH/CRITICAL severity with INFORMATIONAL status generates warning (RULE_5)
 
 Core Principle: Strong Consistency - No Silent Fixes, No Auto-Merge, Explicit Errors Only
 
@@ -45,6 +47,30 @@ STATUS_LEVELS: dict[str, int] = {
     # Aliases
     "safe": StatusLevel.NOT_EXPLOITABLE,
     "confirmed": StatusLevel.EXPLOITABLE,
+}
+
+
+class SeverityLevel(IntEnum):
+    """
+    Severity hierarchy level for consistency checking.
+
+    Higher values = more severe.
+    """
+
+    INFO = 0
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
+    CRITICAL = 4
+
+
+# Mapping from severity string to level
+SEVERITY_LEVELS: dict[str, int] = {
+    "info": SeverityLevel.INFO,
+    "low": SeverityLevel.LOW,
+    "medium": SeverityLevel.MEDIUM,
+    "high": SeverityLevel.HIGH,
+    "critical": SeverityLevel.CRITICAL,
 }
 
 
@@ -97,7 +123,13 @@ class ConsistencyCheckResult:
     """Number of findings checked."""
 
     conflicts: list[ConflictInfo] = field(default_factory=list)
-    """List of detected conflicts."""
+    """List of detected conflicts (violations)."""
+
+    warnings: list[str] = field(default_factory=list)
+    """List of non-fatal warnings (RULE_5)."""
+
+    fixed_count: int = 0
+    """Number of findings that were auto-fixed."""
 
     error: str | None = None
     """Error message if check failed."""
@@ -108,7 +140,9 @@ class ConsistencyCheckResult:
             "checked": True,
             "passed": self.passed,
             "findings_checked": self.findings_checked,
-            "conflicts_found": len(self.conflicts),
+            "violations": len(self.conflicts),
+            "warnings": len(self.warnings),
+            "fixed": self.fixed_count,
             "error": self.error,
         }
 
@@ -162,12 +196,14 @@ class AdjudicationConsistencyChecker:
     """
     Global adjudication consistency checker.
 
-    Enforces 5 mandatory rules:
+    Enforces 7 mandatory rules:
     1. Exploitability must match final_status
     2. Same logical_vuln_id cannot have EXPLOITABLE + NOT_EXPLOITABLE
     3. Cross-engine status conflicts are not allowed
     4. Status regression is not allowed
     5. final_status cannot be None
+    6. EXPLOITABLE finding must have severity >= MEDIUM (RULE_2)
+    7. HIGH/CRITICAL severity with INFORMATIONAL status generates warning (RULE_5)
 
     All violations raise GlobalAdjudicationError.
     No silent fixes, no auto-merge, explicit errors only.
@@ -189,7 +225,7 @@ class AdjudicationConsistencyChecker:
         Execute global consistency check on all findings.
 
         This is the main entry point for consistency validation.
-        Checks all 5 mandatory rules across all findings.
+        Checks all 7 rules across all findings.
 
         Args:
             findings: List of Finding objects to validate.
@@ -215,9 +251,9 @@ class AdjudicationConsistencyChecker:
                 vuln_groups[vuln_id] = []
             vuln_groups[vuln_id].append(finding)
 
-        # Rule 5: Check all findings have final_status
+        # Rule 5 (old): Check all findings have final_status
         for finding in findings:
-            conflict = self._check_rule_5(finding)
+            conflict = self._check_rule_5_missing_status(finding)
             if conflict:
                 result.conflicts.append(conflict)
 
@@ -227,11 +263,23 @@ class AdjudicationConsistencyChecker:
             if conflict:
                 result.conflicts.append(conflict)
 
-        # Rules 2, 3, 4: Check within each vulnerability group
+        # RULE_2: EXPLOITABLE must have severity >= MEDIUM
+        for finding in findings:
+            conflict = self._check_rule_2_severity_for_exploitable(finding)
+            if conflict:
+                result.conflicts.append(conflict)
+
+        # RULE_5 (new): HIGH/CRITICAL + INFORMATIONAL generates warning
+        for finding in findings:
+            warning = self._check_rule_5_severity_status_warning(finding)
+            if warning:
+                result.warnings.append(warning)
+
+        # Rules 2 (old), 3, 4: Check within each vulnerability group
         for vuln_id, group_findings in vuln_groups.items():
             if len(group_findings) > 1:
-                # Rule 2: No EXPLOITABLE + NOT_EXPLOITABLE in same group
-                conflict = self._check_rule_2(vuln_id, group_findings)
+                # Rule 2 (old): No EXPLOITABLE + NOT_EXPLOITABLE in same group
+                conflict = self._check_rule_2_status_conflict(vuln_id, group_findings)
                 if conflict:
                     result.conflicts.append(conflict)
 
@@ -263,7 +311,8 @@ class AdjudicationConsistencyChecker:
 
         self.logger.info(
             f"Consistency check: {result.findings_checked} findings, "
-            f"{len(result.conflicts)} conflicts, passed={result.passed}"
+            f"{len(result.conflicts)} conflicts, {len(result.warnings)} warnings, "
+            f"passed={result.passed}"
         )
 
         return result
@@ -306,6 +355,20 @@ class AdjudicationConsistencyChecker:
         normalized = status.lower().strip()
         return STATUS_LEVELS.get(normalized, StatusLevel.CONDITIONAL)
 
+    def _get_severity(self, finding: Any) -> str | None:
+        """Get severity value from finding."""
+        if hasattr(finding, "severity") and finding.severity:
+            sev = finding.severity
+            if hasattr(sev, "value"):
+                return sev.value.lower().strip()
+            return str(sev).lower().strip()
+        return None
+
+    def _get_severity_level(self, severity: str) -> int:
+        """Get numeric level for a severity."""
+        normalized = severity.lower().strip()
+        return SEVERITY_LEVELS.get(normalized, SeverityLevel.MEDIUM)
+
     def _check_rule_1(self, finding: Any) -> ConflictInfo | None:
         """
         Rule 1: Exploitability must match final_status.
@@ -343,7 +406,65 @@ class AdjudicationConsistencyChecker:
 
         return None
 
-    def _check_rule_2(
+    def _check_rule_2_severity_for_exploitable(self, finding: Any) -> ConflictInfo | None:
+        """
+        RULE_2: EXPLOITABLE finding must have severity >= MEDIUM.
+
+        An EXPLOITABLE finding with LOW or INFO severity is a logical error.
+        """
+        final_status = self._get_final_status(finding)
+        if not final_status:
+            return None
+
+        status_normalized = final_status.lower().strip()
+        if status_normalized != "exploitable":
+            return None
+
+        severity = self._get_severity(finding)
+        if not severity:
+            return None
+
+        severity_level = self._get_severity_level(severity)
+
+        # EXPLOITABLE requires at least MEDIUM severity
+        if severity_level < SeverityLevel.MEDIUM:
+            return ConflictInfo(
+                conflict_type="RULE_2_SEVERITY_TOO_LOW_FOR_EXPLOITABLE",
+                finding_ids=[finding.id],
+                details=f"Finding {finding.id}: EXPLOITABLE status cannot have "
+                       f"{severity.upper()} severity (requires MEDIUM or higher)",
+            )
+
+        return None
+
+    def _check_rule_5_severity_status_warning(self, finding: Any) -> str | None:
+        """
+        RULE_5: HIGH/CRITICAL severity with INFORMATIONAL status generates warning.
+
+        This is not an error but indicates potential inconsistency that should
+        be reviewed.
+        """
+        final_status = self._get_final_status(finding)
+        severity = self._get_severity(finding)
+
+        if not final_status or not severity:
+            return None
+
+        status_normalized = final_status.lower().strip()
+        severity_level = self._get_severity_level(severity)
+
+        # HIGH/CRITICAL severity with INFORMATIONAL status
+        if status_normalized == "informational" and severity_level >= SeverityLevel.HIGH:
+            rule_id = getattr(finding, "rule_id", "unknown")
+            return (
+                f"RULE_5_SEVERITY_STATUS_INCONSISTENCY: "
+                f"{severity.upper()} severity with INFORMATIONAL status "
+                f"(finding_id={finding.id}, rule_id={rule_id})"
+            )
+
+        return None
+
+    def _check_rule_2_status_conflict(
         self, vuln_id: str, findings: list[Any]
     ) -> ConflictInfo | None:
         """
@@ -439,13 +560,13 @@ class AdjudicationConsistencyChecker:
             return None
 
         # Find max and min levels
-        max_level = max(l[2] for l in levels)
-        min_level = min(l[2] for l in levels)
+        max_level = max(entry[2] for entry in levels)
+        min_level = min(entry[2] for entry in levels)
 
         # If there's a significant gap (>1 level), it's a regression issue
         if max_level - min_level >= 2:
-            finding_ids = [l[0] for l in levels]
-            status_details = [(l[1], l[2]) for l in levels]
+            finding_ids = [entry[0] for entry in levels]
+            status_details = [(entry[1], entry[2]) for entry in levels]
             return ConflictInfo(
                 conflict_type="RULE_4_STATUS_REGRESSION",
                 finding_ids=finding_ids,
@@ -456,9 +577,9 @@ class AdjudicationConsistencyChecker:
 
         return None
 
-    def _check_rule_5(self, finding: Any) -> ConflictInfo | None:
+    def _check_rule_5_missing_status(self, finding: Any) -> ConflictInfo | None:
         """
-        Rule 5: final_status cannot be None.
+        Rule 5 (missing status): final_status cannot be None.
 
         Every finding must have a final_status after adjudication.
         """
@@ -499,6 +620,8 @@ def validate_consistency(
 __all__ = [
     "StatusLevel",
     "STATUS_LEVELS",
+    "SeverityLevel",
+    "SEVERITY_LEVELS",
     "GlobalAdjudicationError",
     "ConflictInfo",
     "ConsistencyCheckResult",
