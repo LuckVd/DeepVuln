@@ -77,8 +77,8 @@ DeepVuln/
 |---|---|---|---|---|
 |Phase 1|基础设施搭建|L1 + L2 初版|done|2026-02|
 |Phase 2|核心分析能力|L3 三引擎 + 多轮审计|done|2026-02|
-|Phase 3|精度重构|Rule Gating + TechStack 重构|**→ 当前阶段**|-|
-|Phase 4|裁决统一|Exploitability 主裁决 + 误报压制|todo|-|
+|Phase 3|精度重构|Rule Gating + TechStack 重构|done|2026-03|
+|Phase 4|裁决统一|Exploitability 主裁决 + 误报压制|**→ 当前阶段**|2026-03|
 |Phase 5|稳定化优化|性能优化、规则治理基础|todo|-|
 
 ---
@@ -102,11 +102,11 @@ DeepVuln/
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P4-01|引入统一 final_score 模型|P3-08|todo|
-|P4-02|Exploitability 成为主裁决权重|P4-01|todo|
-|P4-03|禁止 confirmed/not_exploitable 冲突|P4-02|todo|
-|P4-04|语义级去重（AST hash）|P2-10|todo|
-|P4-05|统一报告状态模型（informational/conditional/exploitable）|P4-02|todo|
+|P4-01|引入统一 final_score 模型|P3-08|done|
+|P4-02|Exploitability 成为主裁决权重|P4-01|done|
+|P4-03|禁止 confirmed/not_exploitable 冲突|P4-02|done|
+|P4-04|语义级去重（AST hash）|P2-10|done|
+|P4-05|统一报告状态模型（informational/conditional/exploitable）|P4-02|done|
 
 ---
 
@@ -119,8 +119,8 @@ DeepVuln/
 |v0.2.1|+ CodeQL|支持数据流分析|done|2026-02|
 |v0.2.2|+ Agent|支持 AI 驱动深度审计|done|2026-02|
 |v0.3|L3 完整|三引擎 + 多轮审计|done|2026-02|
-|v0.4|精度重构|Rule Gating + 语言重构|dev|-|
-|v0.5|裁决统一|Exploitability 主导裁决|todo|-|
+|v0.4|精度重构|Rule Gating + 语言重构|done|2026-03|
+|v0.5|裁决统一|Exploitability 主导裁决|**dev**|-|
 |v0.6|企业稳定版|高精度、低误报、CI 可用|todo|-|
 
 ---

@@ -8,7 +8,7 @@
 | 字段 | 值 |
 |------|-----|
 | **任务** | P4-04：AST Semantic Deduplication |
-| **状态** | in_progress |
+| **状态** | completed |
 | **优先级** | P0 |
 | **创建日期** | 2026-03-06 |
 | **所属阶段** | Phase 4 - 裁决统一 |
@@ -201,3 +201,4 @@ finding.metadata["deduplicated_from"] = [
 | 时间 | 进展 |
 |------|------|
 | 2026-03-06 | 开始 P4-04 AST Semantic Deduplication |
+| 2026-03-06 01:45 | ✅ P4-04 完成 - 76 测试通过，Pipeline 集成完成 |
