@@ -600,7 +600,7 @@ async def run_full_security_scan(
     # Tech Stack Detection
     tech_detector = TechStackDetector()
     tech_result = tech_detector.detect(source_path)
-    primary_lang = tech_result.languages[0].name if tech_result.languages else "Unknown"
+    primary_lang = tech_result.languages[0].language.value if tech_result.languages else "Unknown"
     console.print(f"  Primary Language: {primary_lang}")
     result["primary_language"] = primary_lang
 
@@ -645,11 +645,13 @@ async def run_full_security_scan(
             max_batch_chars=batch_max_chars,
         )
     elif llm_detect and llm_client_for_detect:
-        # LLM-enhanced detection (static + LLM fallback)
-        surface_report = await surface_detector.detect_async(source_path)
+        # LLM-enhanced detection (static + LLM fallback) - pass detected frameworks
+        detected_frameworks = [fw.name for fw in tech_result.frameworks] if tech_result.frameworks else None
+        surface_report = await surface_detector.detect_async(source_path, frameworks=detected_frameworks)
     else:
-        # Static detection only
-        surface_report = surface_detector.detect(source_path)
+        # Static detection only - pass detected frameworks for better accuracy
+        detected_frameworks = [fw.name for fw in tech_result.frameworks] if tech_result.frameworks else None
+        surface_report = surface_detector.detect(source_path, frameworks=detected_frameworks)
 
     total_endpoints = (
         surface_report.http_endpoints +
@@ -1135,11 +1137,11 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
         if finding and hasattr(finding, "id"):
             adversarial_lookup[finding.id] = adv
 
-    # Separate confirmed findings from suspicious code
-    # Also categorize by adversarial verdict
-    confirmed_findings = []
+    # Separate verified findings from suspicious code
+    # Also categorize by adversarial verdict (using unified report_status)
+    verified_findings = []
     suspicious_findings = []
-    adversarial_confirmed = []
+    adversarial_exploitable = []
     adversarial_false_positive = []
     adversarial_conditional = []
     adversarial_needs_review = []
@@ -1155,15 +1157,16 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
         if is_suspicious:
             suspicious_findings.append(v)
         else:
-            confirmed_findings.append(v)
+            verified_findings.append(v)
 
             # Categorize by adversarial verdict
             if adv_result and adv_result.get("adversarial"):
                 adv = adv_result["adversarial"]
                 if hasattr(adv, "verdict") and adv.verdict:
                     verdict_value = adv.verdict.verdict.value if hasattr(adv.verdict.verdict, "value") else str(adv.verdict.verdict)
-                    if verdict_value == "confirmed":
-                        adversarial_confirmed.append(v)
+                    # Map "confirmed" to "exploitable" for unified status
+                    if verdict_value in ("confirmed", "exploitable"):
+                        adversarial_exploitable.append(v)
                     elif verdict_value == "false_positive":
                         adversarial_false_positive.append(v)
                     elif verdict_value == "conditional":
@@ -1210,7 +1213,7 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     stats = result.get("statistics", {})
     lines.append(f"  Total Findings: {stats.get('total_findings', 0)}")
     lines.append(f"  Verified: {stats.get('verified_count', 0)}")
-    lines.append(f"  Confirmed Vulnerabilities: {len(confirmed_findings)}")
+    lines.append(f"  Exploitable Findings: {len(verified_findings)}")
     lines.append(f"  Suspicious Code: {len(suspicious_findings)}")
 
     if "by_exploitability" in stats:
@@ -1221,7 +1224,7 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     # Adversarial Verification Statistics
     if result.get("adversarial_results"):
         lines.append("  By Adversarial Verdict:")
-        lines.append(f"    - CONFIRMED: {len(adversarial_confirmed)}")
+        lines.append(f"    - EXPLOITABLE: {len(adversarial_exploitable)}")
         lines.append(f"    - CONDITIONAL: {len(adversarial_conditional)}")
         lines.append(f"    - FALSE_POSITIVE: {len(adversarial_false_positive)}")
         lines.append(f"    - NEEDS_REVIEW: {len(adversarial_needs_review)}")
@@ -1239,13 +1242,13 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
 
     # Detailed Findings (if requested)
     if options.get("detailed"):
-        # Confirmed Findings
-        if confirmed_findings:
+        # Exploitable Findings
+        if verified_findings:
             lines.append("=" * 70)
-            lines.append("Confirmed Vulnerabilities")
+            lines.append("Exploitable Findings")
             lines.append("=" * 70)
 
-            for i, v in enumerate(confirmed_findings[:50], 1):
+            for i, v in enumerate(verified_findings[:50], 1):
                 finding = v["finding"]
                 exp = v.get("exploitability")
                 adv = v.get("adversarial")
@@ -1457,8 +1460,8 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
     total = stats.get("total_findings", 0)
     verified = stats.get("verified_count", 0)
 
-    # Separate confirmed findings from suspicious code
-    confirmed_findings = []
+    # Separate exploitable findings from suspicious code
+    exploitable_findings = []
     suspicious_findings = []
 
     for v in result.get("verified_findings", []):
@@ -1468,7 +1471,7 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
         if is_suspicious:
             suspicious_findings.append(v)
         else:
-            confirmed_findings.append(v)
+            exploitable_findings.append(v)
 
     # Also check all_findings for suspicious code (if not verified yet)
     if not result.get("verified_findings"):
@@ -1478,7 +1481,7 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
             if is_suspicious:
                 suspicious_findings.append(item)
 
-    confirmed_count = len(confirmed_findings)
+    exploitable_count = len(exploitable_findings)
     suspicious_count = len(suspicious_findings)
 
     console.print(f"[bold]Total Findings:[/] {total}")
@@ -1517,11 +1520,25 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
             emoji = verdict_emoji.get(verdict, "❓")
             console.print(f"  {emoji} {verdict.upper()}: {count}")
 
-    # Confirmed Findings table
-    if confirmed_findings:
+    # P4-05: Report Status breakdown (unified status)
+    if "report_status" in stats:
+        console.print()
+        report_emoji = {
+            "exploitable": "🔴",
+            "conditional": "🟡",
+            "informational": "🔵",
+            "suppressed": "⚫",
+        }
+        console.print("[bold]By Report Status (P4-05):[/]")
+        for status, count in stats["report_status"].items():
+            emoji = report_emoji.get(status, "❓")
+            console.print(f"  {emoji} {status.upper()}: {count}")
+
+    # Exploitable Findings table
+    if exploitable_findings:
         console.print()
 
-        findings_table = Table(title="Confirmed Findings", show_header=True)
+        findings_table = Table(title="Exploitable Findings", show_header=True)
         findings_table.add_column("Status", width=12)
         findings_table.add_column("Severity", width=10)
         findings_table.add_column("Source", width=10)
@@ -1543,7 +1560,7 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
             "info": "dim",
         }
 
-        for v in confirmed_findings[:30]:  # Limit display
+        for v in exploitable_findings[:30]:  # Limit display
             finding = v["finding"]
             exp = v.get("exploitability")
 
@@ -1575,8 +1592,8 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
 
         console.print(findings_table)
 
-        if len(confirmed_findings) > 30:
-            console.print(f"\n[dim]... and {len(confirmed_findings) - 30} more findings[/]")
+        if len(exploitable_findings) > 30:
+            console.print(f"\n[dim]... and {len(exploitable_findings) - 30} more findings[/]")
 
     # Suspicious Code table (separate section)
     if suspicious_findings:
@@ -1695,8 +1712,8 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
     console.print()
     console.rule("[bold cyan]Detailed Findings[/]")
 
-    # Separate confirmed findings from suspicious code
-    confirmed_findings = []
+    # Separate exploitable findings from suspicious code
+    exploitable_findings = []
     suspicious_findings = []
 
     for v in result.get("verified_findings", []):
@@ -1705,12 +1722,12 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
         if is_suspicious:
             suspicious_findings.append(v)
         else:
-            confirmed_findings.append(v)
+            exploitable_findings.append(v)
 
-    # Display confirmed findings first
-    if confirmed_findings:
-        console.print("\n[bold green]✓ Confirmed Vulnerabilities[/]")
-        for i, v in enumerate(confirmed_findings[:20], 1):
+    # Display exploitable findings first
+    if exploitable_findings:
+        console.print("\n[bold green]✓ Exploitable Findings[/]")
+        for i, v in enumerate(exploitable_findings[:20], 1):
             finding = v["finding"]
             exp = v.get("exploitability")
 
@@ -1786,7 +1803,7 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
             console.print(f"   [dim]Action:[/] {action_label}")
 
     # Summary if no findings
-    if not confirmed_findings and not suspicious_findings:
+    if not exploitable_findings and not suspicious_findings:
         console.print("\n[dim]No findings to display.[/]")
 
 

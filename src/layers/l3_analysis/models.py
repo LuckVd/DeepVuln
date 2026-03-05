@@ -152,6 +152,27 @@ class Finding(BaseModel):
         description="Logical vulnerability ID for deduplication across engines",
     )
 
+    # P4-04: Semantic deduplication fields
+    related_engines: list[str] = Field(
+        default_factory=list,
+        description="List of engines that detected this vulnerability (for cross-engine dedup)",
+    )
+    duplicate_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of duplicate findings merged into this one",
+    )
+    ast_hash: str | None = Field(
+        default=None,
+        description="Semantic hash for AST-level deduplication",
+    )
+
+    # P4-05: Unified report status
+    report_status: str | None = Field(
+        default=None,
+        description="Unified report status for external output (exploitable/conditional/informational/suppressed)",
+    )
+
     # Timestamps
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

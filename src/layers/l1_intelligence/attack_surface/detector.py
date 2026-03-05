@@ -381,14 +381,22 @@ class AttackSurfaceDetector:
 
         for ext in extensions:
             for file_path in source_path.rglob(f"*{ext}"):
-                if self._should_skip_path(file_path):
+                if self._should_skip_path(file_path, source_path):
                     continue
                 source_files.append(file_path)
 
         return source_files
 
-    def _should_skip_path(self, path: Path) -> bool:
-        """Check if path should be skipped."""
+    def _should_skip_path(self, path: Path, source_path: Path | None = None) -> bool:
+        """Check if path should be skipped.
+
+        Args:
+            path: The file path to check.
+            source_path: The root source path. If provided, only relative path parts are checked.
+
+        Returns:
+            True if the path should be skipped.
+        """
         skip_dirs = {
             "node_modules",
             "venv",
@@ -408,7 +416,20 @@ class AttackSurfaceDetector:
             "examples",
             "docs",
         }
-        for part in path.parts:
+
+        # If source_path is provided, check only relative path parts
+        # This prevents false positives when source_path itself contains a skip word
+        if source_path:
+            try:
+                relative_path = path.relative_to(source_path)
+                parts_to_check = relative_path.parts
+            except ValueError:
+                # path is not relative to source_path, use all parts
+                parts_to_check = path.parts
+        else:
+            parts_to_check = path.parts
+
+        for part in parts_to_check:
             if part.lower() in skip_dirs:
                 return True
         return False

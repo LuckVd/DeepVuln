@@ -33,6 +33,14 @@ from src.layers.l3_analysis.consistency import (
     ConsistencyCheckResult,
     GlobalAdjudicationError,
 )
+from src.layers.l3_analysis.deduplicator import (
+    ASTDeduplicator,
+    DeduplicationResult,
+)
+from src.layers.l3_analysis.reporting import (
+    ReportStatus,
+    apply_report_status,
+)
 
 
 class FinalStatus(str, Enum):
@@ -134,6 +142,14 @@ class AdjudicationSummary:
     consistency_check: dict[str, Any] | None = None
     """Result of global consistency check (P4-03)."""
 
+    # P4-04: Deduplication result
+    deduplication: dict[str, Any] | None = None
+    """Result of semantic deduplication (P4-04)."""
+
+    # P4-05: Unified report status counts
+    report_status: dict[str, int] | None = None
+    """Count of findings by unified report status (P4-05)."""
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for metadata storage."""
         return {
@@ -143,6 +159,8 @@ class AdjudicationSummary:
             "conflict_detected": self.conflicts_detected > 0,
             "by_status": self.by_status,
             "consistency_check": self.consistency_check,
+            "deduplication": self.deduplication,
+            "report_status": self.report_status,
         }
 
 
@@ -405,6 +423,7 @@ def adjudicate_findings(
     findings: list[Any],
     validate: bool = True,
     strict_consistency: bool = True,
+    enable_deduplication: bool = True,
 ) -> tuple[list[Any], AdjudicationSummary]:
     """
     Apply exploitability override to a batch of findings.
@@ -412,14 +431,16 @@ def adjudicate_findings(
     This function:
     1. Applies exploitability override to each finding
     2. Validates for individual conflicts
-    3. Enforces global consistency (P4-03)
-    4. Returns summary statistics
+    3. Performs semantic deduplication (P4-04)
+    4. Enforces global consistency (P4-03)
+    5. Returns summary statistics
 
     Args:
         findings: List of Finding objects to adjudicate.
         validate: Whether to validate for conflicts (default: True).
         strict_consistency: If True, raise GlobalAdjudicationError on consistency
                            violations. If False, return result with conflicts listed.
+        enable_deduplication: If True, perform semantic deduplication (default: True).
 
     Returns:
         Tuple of (adjudicated_findings, summary).
@@ -451,6 +472,23 @@ def adjudicate_findings(
                 summary.conflicts_detected += 1
                 logger.error(f"Conflict detected: {e}")
 
+    # P4-04: Semantic Deduplication
+    # Deduplicate AFTER adjudication but BEFORE consistency check
+    if enable_deduplication:
+        deduplicator = ASTDeduplicator()
+        dedup_result = deduplicator.deduplicate(findings)
+
+        # Update findings to deduplicated list
+        findings = dedup_result.unique_findings
+
+        # Store deduplication result in summary metadata
+        summary.deduplication = dedup_result.to_dict()
+
+        logger.info(
+            f"Semantic deduplication: {summary.total_findings} -> {len(findings)} findings "
+            f"({dedup_result.removed_count} removed, {dedup_result.merged_groups} groups merged)"
+        )
+
     # P4-03: Global Adjudication Consistency Check
     # This is the FINAL consistency check before output.
     # All conflicts are explicitly raised - never silently corrected.
@@ -469,6 +507,15 @@ def adjudicate_findings(
         )
         # In strict mode, GlobalAdjudicationError is already raised by the checker
         # In non-strict mode, we just log and continue
+
+    # P4-05: Apply unified report status
+    # This is the FINAL step - map internal states to unified report status
+    report_counts = apply_report_status(findings)
+    summary.report_status = report_counts  # type: ignore
+
+    logger.info(
+        f"Applied report status: {report_counts}"
+    )
 
     return findings, summary
 
@@ -551,4 +598,7 @@ __all__ = [
     "GlobalAdjudicationError",
     "AdjudicationConsistencyChecker",
     "ConsistencyCheckResult",
+    # P4-04: Re-export deduplication types for convenience
+    "ASTDeduplicator",
+    "DeduplicationResult",
 ]

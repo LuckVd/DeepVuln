@@ -4,6 +4,7 @@
 
 | 时间 | Commit | 简介 |
 |------|--------|------|
+| 2026-03-05 17:40 | 4a7cf90 | fix(l1): 攻击面检测路径跳过修复 + P4-05 报告状态统一模型，+2625 行 |
 | 2026-03-05 01:36 | cfede99 | feat(l3): 全局裁决一致性层，5 条强制规则 + GlobalAdjudicationError + 52 测试 |
 | 2026-03-05 01:07 | 07006d6 | feat(l3): Exploitability 裁决系统，Override 机制 + FinalStatus + 冲突检测，+54 测试 |
 | 2026-03-05 00:27 | 76e3f2f | feat(core): Final Score 计算模型，severity + exploitability + confidence + engine 权重，+58 测试 |

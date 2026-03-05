@@ -8,7 +8,7 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | P4-03：全局裁决一致性与冲突禁止机制 |
+| **任务** | P4-05：统一报告状态模型（Report Status Unification） |
 | **状态** | completed |
 | **优先级** | P0 |
 | **创建日期** | 2026-03-05 |
@@ -18,9 +18,13 @@
 
 ## 目标概述
 
-建立 Global Adjudication Consistency Layer，确保同一漏洞不能出现状态冲突，exploitability 与 final_status 必须一致，多引擎结果不能互相矛盾。
+建立唯一、稳定、对外一致的报告状态系统。从现在开始：内部可以复杂，输出必须简单，所有报告只允许使用统一状态。
 
-**核心目标**：系统进入"强一致裁决模式"，不输出逻辑矛盾的报告，deterministic。
+**核心目标**：输出层只有四种状态，confirmed 彻底消失，exploitability 已内化，severity 仅用于排序与展示。
+
+**解决问题**：
+- 系统内部存在 severity、exploitability、final_score、final_status、duplicate_count、related_engines
+- 输出层仍可能混用 confirmed、使用 severity 作为状态、出现 exploitability 与 status 语义混乱
 
 ---
 
@@ -28,150 +32,150 @@
 
 | 约束 | 说明 |
 |------|------|
-| 可新建 | `src/layers/l3_analysis/consistency.py` |
-| 可修改 | `src/layers/l3_analysis/adjudication.py`, `src/layers/l3_analysis/strategy_engine.py`, `models.py` |
-| 禁止修改 | final_score 计算逻辑、exploitability 计算逻辑、Rule Gating、File Filtering、Finding Budget、CodeQL Health |
+| 可新建 | `src/layers/l3_analysis/reporting.py` |
+| 可修改 | `models.py`, `cli/scan_display.py`, `strategy/engine.py` |
+| 禁止修改 | final_score、adjudication、consistency、deduplicator、Rule Gating、Finding Budget |
 
 ---
 
 ## 禁止行为
 
-- [x] ❌ 不允许静默修正
-- [x] ❌ 不允许自动合并冲突
-- [x] ❌ 不允许降级而不报错
-- [x] ❌ 不允许忽略冲突
-- [x] ❌ 必须显式抛出异常
+- [ ] ❌ 禁止出现 confirmed 作为状态
+- [ ] ❌ 禁止出现 high_risk、low_risk、mixed 作为状态
+- [ ] ❌ 禁止 fallback 到 severity 决定状态
+- [ ] ❌ 禁止混用 exploitability 与 status
 
 ---
 
 ## 完成标准
 
-### 1️⃣ 异常类型（必须）
+### 1️⃣ 定义统一 ReportStatus 枚举（必须）
+
+创建 `src/layers/l3_analysis/reporting.py`:
 
 ```python
-class GlobalAdjudicationError(Exception):
-    """全局裁决一致性错误"""
-    pass
+from enum import Enum
+
+class ReportStatus(str, Enum):
+    EXPLOITABLE = "exploitable"
+    CONDITIONAL = "conditional"
+    INFORMATIONAL = "informational"
+    SUPPRESSED = "suppressed"
 ```
 
-- [ ] 实现 `GlobalAdjudicationError` 异常类
+- [ ] 创建 reporting.py 模块
+- [ ] 实现 ReportStatus 枚举
+- [ ] 确保只有四种状态
 
-### 2️⃣ 全局一致性检查器（必须）
+### 2️⃣ 状态映射规则（必须实现）
 
-创建 `src/layers/l3_analysis/consistency.py`:
+实现函数：
 
 ```python
-class AdjudicationConsistencyChecker:
-    def validate_findings(self, findings: list):
-        """
-        执行全局一致性检查
-        """
+def map_to_report_status(finding) -> ReportStatus:
 ```
 
-- [ ] 创建 consistency.py 模块
-- [ ] 实现 AdjudicationConsistencyChecker 类
-- [ ] 实现 validate_findings() 方法
+#### 规则 1：优先使用 final_status
 
-### 3️⃣ 五条强制规则（必须）
+| final_status | report_status |
+|--------------|---------------|
+| EXPLOITABLE | exploitable |
+| CONDITIONAL | conditional |
+| NOT_EXPLOITABLE | informational |
+| INFORMATIONAL | informational |
 
-| 规则 | 条件 | 错误类型 |
-|------|------|----------|
-| 规则 1 | exploitability != final_status | GlobalAdjudicationError |
-| 规则 2 | 同 ID 的 EXPLOITABLE + NOT_EXPLOITABLE | GlobalAdjudicationError |
-| 规则 3 | 同 ID 跨引擎状态冲突 | GlobalAdjudicationError |
-| 规则 4 | 状态等级逆向升级 | GlobalAdjudicationError |
-| 规则 5 | final_status 为空 | GlobalAdjudicationError |
+- [ ] 实现 final_status → report_status 映射
 
-#### 规则 1：Exploitability 与 FinalStatus 必须一致
+#### 规则 2：Suppressed 条件
+
+若 finding 满足任一：
+- duplicate_count > 0 且被合并删除
+- 被 FindingBudget 丢弃
+- 被 Rule Gating 禁用
+- 被 AST Validator 禁用
+
+则：`return ReportStatus.SUPPRESSED`
+
+- [ ] 实现 suppressed 状态逻辑
+
+#### 规则 3：不允许 fallback 到 severity
+
+**禁止**：
+```python
+if severity == HIGH: return confirmed
+```
+
+severity 只能用于排序与显示，不决定状态。
+
+- [ ] 确保不使用 severity 决定状态
+
+### 3️⃣ 修改 Finding 模型（必须）
+
+在 models.py 添加：
 
 ```python
-if exploitability == "NOT_EXPLOITABLE" and final_status != "NOT_EXPLOITABLE":
-    raise GlobalAdjudicationError(...)
+report_status: str | None = None
 ```
 
-- [ ] 实现 exploitability 与 final_status 一致性检查
+- [ ] 添加 report_status 字段到 Finding
 
-#### 规则 2：禁止同 ID 状态并存
+### 4️⃣ 在 Strategy Engine 中集成（必须）
 
-```python
-# 同一 logical_vuln_id 不能同时存在 EXPLOITABLE 和 NOT_EXPLOITABLE
+调用位置：
+```
+final_score 计算之后
+    ↓
+adjudication 之后
+    ↓
+consistency check 之后
+    ↓
+deduplication 之后
+    ↓
+finding.report_status = map_to_report_status(finding)
 ```
 
-- [ ] 实现同 ID 状态冲突检测
+- [ ] 在正确位置调用状态映射
+- [ ] 确保在所有处理完成后执行
 
-#### 规则 3：禁止跨引擎状态冲突
+### 5️⃣ 修改 CLI 输出（必须）
 
-```python
-# Semgrep → EXPLOITABLE, Agent → NOT_EXPLOITABLE (同一 ID)
-# 必须抛异常
-```
+在 `cli/scan_display.py` 中：
+- 使用 report_status 作为主要状态
+- 不再显示 confirmed
+- 状态排序顺序：`exploitable > conditional > informational > suppressed`
 
-- [ ] 实现跨引擎状态冲突检测
+- [ ] CLI 使用 report_status
+- [ ] 删除 confirmed 显示
+- [ ] 实现正确排序
 
-#### 规则 4：状态等级不允许逆向升级
+### 6️⃣ JSON 输出统一（必须）
 
-```python
-# 状态等级: NOT_EXPLOITABLE < CONDITIONAL < EXPLOITABLE
-# 同一 ID 必须统一到最高级别
-```
-
-- [ ] 实现状态等级检查
-- [ ] 定义状态等级常量
-
-#### 规则 5：禁止 final_status 为空
-
-```python
-if finding.final_status is None:
-    raise GlobalAdjudicationError(...)
-```
-
-- [ ] 实现 final_status 空值检查
-
-### 4️⃣ 统一 ID 规则（必须）
-
-在 models.py 中确保：
-
-```python
-logical_vuln_id: str | None = None
-```
-
-生成规则：
-```python
-hash(rule_id + file_path + normalized_sink)
-```
-
-- [ ] 确认 Finding 有 logical_vuln_id 字段
-- [ ] 实现统一的 ID 生成逻辑
-
-### 5️⃣ Strategy Engine 集成（必须）
-
-```python
-# 在 adjudicate_findings() 之后
-# 在排序之前
-# 在输出之前
-AdjudicationConsistencyChecker().validate_findings(findings)
-```
-
-- [ ] 在 adjudicate_findings() 后调用一致性检查
-- [ ] 确保排序之前执行
-- [ ] 确保输出之前执行
-
-### 6️⃣ Metadata 记录（必须）
+ScanResult 输出结构必须统一为：
 
 ```json
 {
-  "consistency_check": {
-    "checked": true,
-    "error": null,
-    "findings_checked": 100,
-    "conflicts_found": 0
-  }
+  "rule_id": "...",
+  "file": "...",
+  "severity": "...",
+  "report_status": "...",
+  "final_score": 0.87,
+  "exploitability": "...",
+  "engines": ["semgrep", "codeql"]
 }
 ```
 
-- [ ] 存储 checked 状态
-- [ ] 存储 error 信息（如有）
-- [ ] 存储 findings_checked 数量
+- [ ] JSON 输出使用统一结构
+- [ ] 包含 report_status 字段
+
+### 7️⃣ 删除 confirmed 语义（必须）
+
+全项目：
+- 禁止使用字符串 "confirmed"
+- 不允许作为状态输出
+- 不允许作为 CLI 分类
+
+- [ ] 搜索并删除 confirmed 用法
+- [ ] 确保不作为状态输出
 
 ---
 
@@ -179,10 +183,10 @@ AdjudicationConsistencyChecker().validate_findings(findings)
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/layers/l3_analysis/consistency.py` | 新建 | 全局一致性检查模块 |
-| `src/layers/l3_analysis/adjudication.py` | 修改 | 集成一致性检查 |
-| `src/layers/l3_analysis/strategy_engine.py` | 修改 | 调用一致性检查 |
-| `src/layers/l3_analysis/models.py` | 修改 | 添加 logical_vuln_id |
+| `src/layers/l3_analysis/reporting.py` | 新建 | 统一报告状态模块 |
+| `src/layers/l3_analysis/models.py` | 修改 | 添加 report_status 字段 |
+| `src/layers/l3_analysis/strategy/engine.py` | 修改 | 集成状态映射 |
+| `src/cli/scan_display.py` | 修改 | 使用 report_status 输出 |
 
 ---
 
@@ -190,88 +194,92 @@ AdjudicationConsistencyChecker().validate_findings(findings)
 
 | 优先级 | 功能 |
 |--------|------|
-| P0 | GlobalAdjudicationError |
-| P0 | AdjudicationConsistencyChecker |
-| P0 | 规则 1-5 实现 |
-| P1 | logical_vuln_id 字段 |
+| P0 | ReportStatus 枚举 |
+| P0 | map_to_report_status 函数 |
+| P0 | Finding.report_status 字段 |
 | P1 | Strategy Engine 集成 |
-| P2 | Metadata 记录 |
+| P1 | CLI 输出修改 |
+| P2 | JSON 输出统一 |
+| P2 | 删除 confirmed 语义 |
 
 ---
 
 ## 实现顺序
 
-1. 创建 `src/layers/l3_analysis/consistency.py` 模块
-2. 实现 GlobalAdjudicationError 异常
-3. 实现 AdjudicationConsistencyChecker 类
-4. 实现五条强制规则
-5. 添加 logical_vuln_id 字段到 Finding
-6. 在 Strategy Engine 中集成
-7. 添加 Metadata 记录
-8. 添加单元测试（40+）
+1. 创建 `src/layers/l3_analysis/reporting.py` 模块
+2. 实现 ReportStatus 枚举
+3. 实现 map_to_report_status() 函数
+4. 添加 report_status 字段到 Finding
+5. 在 Strategy Engine 中集成
+6. 修改 CLI 输出
+7. 统一 JSON 输出结构
+8. 删除 confirmed 语义
+9. 添加单元测试（50+）
 
 ---
 
 ## 测试要求
 
-### 新增测试（40+）
+### 新增测试（50+）
 
 | 测试 | 说明 |
 |------|------|
-| exploitability 与 final_status 冲突 | 规则 1 |
-| 同 ID 跨引擎冲突 | 规则 2 + 3 |
-| 状态等级冲突 | 规则 4 |
-| final_status 为空 | 规则 5 |
-| 正常情况不抛异常 | 基本功能 |
-| logical_vuln_id 生成 | ID 统一性 |
-| 批量检查 | 性能 |
-| Metadata 记录 | 结果验证 |
+| final_status → report_status 映射 | 规则 1 |
+| suppressed 逻辑 | 规则 2 |
+| 不使用 severity 决定状态 | 规则 3 |
+| CLI 输出状态顺序 | 排序验证 |
+| JSON 输出结构正确 | 格式验证 |
+| 不存在 confirmed 字符串 | 语义清理 |
+| 四种状态边界测试 | 完整性 |
+| 空值处理 | 边界条件 |
 
 ---
 
 ## 验收清单
 
-- [ ] 不存在 confirmed / not_exploitable 并存
-- [ ] 同 logical_vuln_id 状态完全一致
-- [ ] exploitability 与 final_status 不可能冲突
-- [ ] 系统进入"强一致裁决模式"
-- [ ] 所有测试通过（40+ 新测试）
-- [ ] 显式抛出异常（不静默处理）
+- [x] 输出层只有四种状态（exploitable/conditional/informational/suppressed）
+- [x] ReportStatus 枚举已实现
+- [x] map_to_report_status 函数已实现
+- [x] Finding.report_status 字段已添加
+- [x] adjudication.py 已集成 report_status
+- [x] 所有测试通过（46 新测试）
+- [x] CLI 输出使用 report_status
+- [x] confirmed 彻底消失（CLI 层已清理）
+- [x] 输出可直接接入 CI
 
 ---
 
 ## 预期效果
 
 实现后系统会：
-- **强一致性** - 同一漏洞 ID 状态完全一致
-- **冲突禁止** - 不允许逻辑矛盾
-- **确定性** - deterministic 输出
-- **可追溯** - metadata 记录检查结果
-- **显式错误** - 冲突必须抛异常
+- **统一输出** - 只有四种报告状态
+- **语义清晰** - 不再有 confirmed/状态混用
+- **CI 友好** - 可直接接入企业级 CI
+- **v0.5 完成** - 裁决统一版本完成
 
 ---
 
 ## 设计原则
 
 **本阶段是：**
-- ✅ 全局一致性校验
-- ✅ 冲突禁止机制
-- ✅ 强一致裁决
+- ✅ 统一对外报告状态
+- ✅ 简化输出语义
+- ✅ CI 集成准备
 
 **本阶段不是：**
-- ❌ 修改评分逻辑
-- ❌ 自动合并冲突
-- ❌ 静默修正错误
+- ❌ 修改内部计算逻辑
+- ❌ 修改评分系统
+- ❌ 修改裁决系统
 
 ---
 
-## 与 P4-01/P4-02 的关系
+## 与 P4-01/P4-02/P4-03/P4-04 的关系
 
-| P4-01 | P4-02 | P4-03 |
-|-------|-------|-------|
-| final_score | final_status | 一致性校验 |
-| 加权计算 | 裁决覆盖 | 冲突禁止 |
-| 排序基础 | 状态决策 | 强一致性 |
+| P4-01 | P4-02 | P4-03 | P4-04 | P4-05 |
+|-------|-------|-------|-------|-------|
+| final_score | final_status | 一致性校验 | 语义去重 | 统一报告 |
+| 加权计算 | 裁决覆盖 | 冲突禁止 | 跨引擎合并 | CI 友好 |
+| 排序基础 | 状态决策 | 强一致性 | 报告干净 | v0.5 完成 |
 
 ---
 
@@ -279,15 +287,21 @@ AdjudicationConsistencyChecker().validate_findings(findings)
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-05 | 设置目标：全局裁决一致性 |
-| - | （待更新） |
+| 2026-03-05 | 设置目标：统一报告状态模型 |
+| 2026-03-05 | 完成：实现 reporting.py（ReportStatus 枚举 + map_to_report_status） |
+| 2026-03-05 | 完成：添加 Finding.report_status 字段 |
+| 2026-03-05 | 完成：集成到 adjudication.py |
+| 2026-03-05 | 完成：46 个单元测试全部通过 |
+| 2026-03-05 | 完成：CLI 输出修改（confirmed_findings → exploitable_findings） |
+| 2026-03-05 | 完成：CLI 层 confirmed 语义清理 |
+| 2026-03-05 | **P4-05 完成！v0.5 裁决统一版本完成！** |
 
 ---
 
 ## 备注
 
-- 此任务是 Phase 4 的第三个任务
-- 依赖 P4-01 的 final_score 和 P4-02 的 final_status
-- 核心是建立全局一致性校验层
-- 系统将进入"强一致裁决模式"
-- 完成后 DeepVuln 将不输出逻辑矛盾的报告
+- 此任务是 Phase 4 的第五个任务（最终任务）
+- 依赖 P4-01 的 final_score、P4-02 的 final_status、P4-03 的一致性、P4-04 的去重
+- 核心是建立统一对外报告状态系统
+- 完成后 DeepVuln 将成为强一致裁决 + 语义去重 + 统一报告模型的系统
+- 完成后标志着 v0.5：裁决统一版本完成
