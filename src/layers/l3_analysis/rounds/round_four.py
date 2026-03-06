@@ -889,7 +889,7 @@ class RoundFourExecutor:
                             f"Source → Sink confirmed, but {len(sanitizers)} sanitizer(s) detected."
                         )
                         return (
-                            ExploitabilityStatus.CONitional,
+                            ExploitabilityStatus.CONDITIONAL,
                             0.70,
                             " | ".join(reasoning_parts) + " | Sanitizers may reduce exploitability."
                         )
