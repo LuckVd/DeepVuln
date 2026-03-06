@@ -10,16 +10,14 @@ Supports:
 - Decorator detection (entry points)
 """
 
-from pathlib import Path
 from typing import Any
 
 import tree_sitter_python as tspython
 
-from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.call_graph.builders.base import CallGraphBuilder
 from src.layers.l3_analysis.call_graph.models import (
-    CallNode,
     CallEdge,
+    CallNode,
     CallType,
     NodeType,
 )

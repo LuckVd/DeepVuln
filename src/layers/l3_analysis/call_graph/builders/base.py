@@ -13,11 +13,9 @@ from tree_sitter import Language, Parser
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.call_graph.models import (
+    CallEdge,
     CallGraph,
     CallNode,
-    CallEdge,
-    CallType,
-    NodeType,
     FileCallGraph,
 )
 

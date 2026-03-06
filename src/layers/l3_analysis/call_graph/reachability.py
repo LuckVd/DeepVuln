@@ -7,7 +7,6 @@ is reachable from an entry point.
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.call_graph.models import (

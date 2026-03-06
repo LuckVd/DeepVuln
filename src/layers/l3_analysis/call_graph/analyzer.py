@@ -5,17 +5,16 @@ Main orchestrator for building and analyzing call graphs across multiple languag
 """
 
 from pathlib import Path
-from typing import Any
 
 from src.core.logger.logger import get_logger
+from src.layers.l3_analysis.call_graph.builders.base import CallGraphBuilder
+from src.layers.l3_analysis.call_graph.builders.python_builder import PythonCallGraphBuilder
 from src.layers.l3_analysis.call_graph.models import (
     CallGraph,
     CallNode,
-    ReachabilityResult,
     FileCallGraph,
+    ReachabilityResult,
 )
-from src.layers.l3_analysis.call_graph.builders.base import CallGraphBuilder
-from src.layers.l3_analysis.call_graph.builders.python_builder import PythonCallGraphBuilder
 from src.layers.l3_analysis.call_graph.reachability import (
     ReachabilityChecker,
     ReachabilityConfig,
