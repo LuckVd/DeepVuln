@@ -14,20 +14,33 @@ Enhanced with multi-round evolution:
 - Rule extraction for future use
 """
 
+from .adversarial import AdversarialVerifier, AdversarialVerifierConfig
+from .arbiter import ArbiterVerifier
+from .attacker import AttackerVerifier
+from .convergence import (
+    ConvergenceChecker,
+    ConvergenceConfig,
+    ConvergenceReason,
+    ConvergenceResult,
+    ConvergenceState,
+    RoundSummary,
+)
+from .defender import DefenderVerifier
+from .enhanced_adversarial import (
+    EnhancedAdversarialVerification,
+    EnhancedVerificationConfig,
+    create_enhanced_verifier,
+)
 from .models import (
     AdversarialVerdict,
     ArgumentStrength,
     DebateRound,
     TriggerConditions,
+    VerdictType,
     VerificationArgument,
     VerificationResult,
     VerificationSession,
-    VerdictType,
 )
-from .attacker import AttackerVerifier
-from .defender import DefenderVerifier
-from .arbiter import ArbiterVerifier
-from .adversarial import AdversarialVerifier, AdversarialVerifierConfig
 
 # Enhanced verification components
 from .strategy_library import (
@@ -44,19 +57,6 @@ from .strategy_library import (
     SuccessRecord,
     create_attacker_library,
     create_defender_library,
-)
-from .convergence import (
-    ConvergenceChecker,
-    ConvergenceConfig,
-    ConvergenceReason,
-    ConvergenceResult,
-    ConvergenceState,
-    RoundSummary,
-)
-from .enhanced_adversarial import (
-    EnhancedAdversarialVerification,
-    EnhancedVerificationConfig,
-    create_enhanced_verifier,
 )
 
 __all__ = [

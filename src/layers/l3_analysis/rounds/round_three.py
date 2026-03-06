@@ -11,16 +11,14 @@ from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.rounds.correlation import (
+    DEFAULT_CORRELATION_RULES,
     CorrelationResult,
     CorrelationRule,
-    DEFAULT_CORRELATION_RULES,
     EvidenceChain,
     VerificationStatus,
 )
 from src.layers.l3_analysis.rounds.evidence_builder import EvidenceChainBuilder
 from src.layers.l3_analysis.rounds.models import (
-    AnalysisDepth,
-    AuditSession,
     ConfidenceLevel,
     CoverageStats,
     EngineStats,

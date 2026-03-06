@@ -477,23 +477,23 @@ async def run_full_security_scan(
 
     from src.layers.l1_intelligence.attack_surface import AttackSurfaceDetector
     from src.layers.l1_intelligence.tech_stack_detector.detector import TechStackDetector
-    from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
     from src.layers.l3_analysis.engines.codeql import CodeQLEngine
     from src.layers.l3_analysis.engines.opencode_agent import OpenCodeAgent
+    from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
+    from src.layers.l3_analysis.llm.openai_client import OpenAIClient
+    from src.layers.l3_analysis.rounds.models import (
+        ConfidenceLevel,
+        VulnerabilityCandidate,
+    )
     from src.layers.l3_analysis.rounds.round_four import (
         RoundFourExecutor,
-        ExploitabilityStatus,
     )
-    from src.layers.l3_analysis.rounds.models import (
-        VulnerabilityCandidate,
-        ConfidenceLevel,
-    )
-    from src.layers.l3_analysis.llm.openai_client import OpenAIClient
 
     logger = logging.getLogger(__name__)
 
     full_scan = options.get("full_scan", False)
-    engines = options.get("engines") or (["semgrep", "codeql", "agent"] if full_scan else [])
+    base_scan = options.get("base_scan", False)
+    engines = options.get("engines") or (["semgrep", "codeql", "agent"] if (full_scan or base_scan) else [])
     llm_verify = options.get("llm_verify", False)
     llm_detect = options.get("llm_detect", False)
     llm_full_detect = options.get("llm_full_detect", False)
@@ -526,8 +526,8 @@ async def run_full_security_scan(
 
         try:
             from src.layers.l3_analysis.incremental import (
-                IncrementalScanner,
                 IncrementalScanConfig,
+                IncrementalScanner,
             )
 
             # Configure incremental scanner
@@ -576,10 +576,10 @@ async def run_full_security_scan(
             console.print(f"\n{inc_result.to_summary()}")
 
             if inc_result.success:
-                console.print(f"\n[green]✓ Incremental scan completed successfully[/]")
+                console.print("\n[green]✓ Incremental scan completed successfully[/]")
                 console.print(f"  [cyan]Speedup: {inc_result.speedup_factor:.1f}x faster than full scan[/]")
             else:
-                console.print(f"\n[yellow]⚠ Incremental scan completed with issues[/]")
+                console.print("\n[yellow]⚠ Incremental scan completed with issues[/]")
                 console.print(f"  Error: {inc_result.error_message}")
 
             result["success"] = inc_result.success
@@ -608,8 +608,8 @@ async def run_full_security_scan(
     llm_client_for_detect = None
     if llm_detect or llm_full_detect:
         try:
+            from src.core.config import get_llm_config, get_openai_config
             from src.layers.l3_analysis.llm.openai_client import OpenAIClient
-            from src.core.config import get_openai_config, get_llm_config
 
             openai_config = get_openai_config()
             llm_config = get_llm_config()
@@ -676,7 +676,7 @@ async def run_full_security_scan(
     # LLM Client (for agent and verification)
     llm_client = None
     if "agent" in engines or llm_verify:
-        from src.core.config import get_openai_config, get_llm_config
+        from src.core.config import get_llm_config, get_openai_config
         llm_config = get_llm_config()
         openai_config = get_openai_config()
         api_key = openai_config.get("api_key")
@@ -1113,8 +1113,19 @@ async def run_full_security_scan(
     result["statistics"]["total_findings"] = len(result["all_findings"])
     result["statistics"]["verified_count"] = len(result["verified_findings"])
 
-    # Clean up LLM client
+    # Collect token usage from LLM client
     if llm_client:
+        try:
+            usage = llm_client.get_total_usage()
+            result["statistics"]["token_usage"] = {
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens,
+            }
+            logger.info(f"Total token usage: {usage.total_tokens} (prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens})")
+        except Exception as e:
+            logger.warning(f"Failed to get token usage: {e}")
+            result["statistics"]["token_usage"] = None
         await llm_client.close()
 
     return result
@@ -1128,7 +1139,6 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
         export_path: Path to export file.
         options: Scan options.
     """
-    from datetime import datetime
 
     # Build adversarial lookup: finding_id -> adversarial result
     adversarial_lookup = {}
@@ -1215,6 +1225,14 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     lines.append(f"  Verified: {stats.get('verified_count', 0)}")
     lines.append(f"  Exploitable Findings: {len(verified_findings)}")
     lines.append(f"  Suspicious Code: {len(suspicious_findings)}")
+
+    # Token Usage
+    token_usage = stats.get("token_usage")
+    if token_usage:
+        lines.append("  Token Usage:")
+        lines.append(f"    - Prompt Tokens: {token_usage.get('prompt_tokens', 0)}")
+        lines.append(f"    - Completion Tokens: {token_usage.get('completion_tokens', 0)}")
+        lines.append(f"    - Total Tokens: {token_usage.get('total_tokens', 0)}")
 
     if "by_exploitability" in stats:
         lines.append("  By Exploitability:")
@@ -1347,9 +1365,10 @@ def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | N
     engines = options.get("engines")
     llm_verify = options.get("llm_verify", False)
     llm_full_detect = options.get("llm_full_detect", False)
+    base_scan = options.get("base_scan", False)
 
-    # Run full scan if requested (including LLM full detect)
-    if full_scan or engines or llm_full_detect:
+    # Run full scan if requested (including LLM full detect or base scan)
+    if full_scan or base_scan or engines or llm_full_detect:
         result = asyncio.run(run_full_security_scan(source_path, options))
         _display_full_scan_result_interactive(result, options)
         return
@@ -1533,6 +1552,15 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
         for status, count in stats["report_status"].items():
             emoji = report_emoji.get(status, "❓")
             console.print(f"  {emoji} {status.upper()}: {count}")
+
+    # Token Usage
+    token_usage = stats.get("token_usage")
+    if token_usage and token_usage.get("total_tokens", 0) > 0:
+        console.print()
+        console.print("[bold]Token Usage:[/]")
+        console.print(f"  📊 Prompt Tokens: {token_usage.get('prompt_tokens', 0):,}")
+        console.print(f"  📊 Completion Tokens: {token_usage.get('completion_tokens', 0):,}")
+        console.print(f"  📊 [cyan]Total Tokens: {token_usage.get('total_tokens', 0):,}[/cyan]")
 
     # Exploitable Findings table
     if exploitable_findings:
@@ -1788,7 +1816,7 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
 
             # Show code snippet if available
             if finding.location.snippet:
-                console.print(f"   [dim]Code:[/]")
+                console.print("   [dim]Code:[/]")
                 console.print(f"   [dim]  {finding.location.snippet[:100]}[/]")
 
             # Recommended action
@@ -1917,7 +1945,8 @@ def clean() -> None:
 @click.option("--include-low", is_flag=True, help="Include low severity vulnerabilities")
 @click.option("--detailed", "-d", is_flag=True, help="Show detailed report")
 @click.option("--export", "-e", "export_path", help="Export report to file")
-@click.option("--full", "-f", "full_scan", is_flag=True, help="Full scan: include code analysis (semgrep + codeql + agent)")
+@click.option("--full", "-f", "full_scan", is_flag=True, help="Full scan: all engines + LLM verification + adversarial debate (most complete)")
+@click.option("--base", "-b", "base_scan", is_flag=True, help="Base scan: 3 engines only (semgrep + codeql + agent), no LLM verification")
 @click.option("--engines", multiple=True, type=click.Choice(["semgrep", "codeql", "agent"]), help="Specify engines for code analysis")
 @click.option("--llm-verify", is_flag=True, help="Enable LLM-assisted exploitability verification (Round 4)")
 @click.option("--llm-detect", is_flag=True, help="Enable LLM-assisted attack surface detection")
@@ -1936,6 +1965,7 @@ def scan(
     detailed: bool,
     export_path: str | None,
     full_scan: bool,
+    base_scan: bool,
     engines: tuple[str, ...],
     llm_verify: bool,
     llm_detect: bool,
@@ -1953,10 +1983,10 @@ def scan(
 
     By default, this command scans for dependency vulnerabilities (CVE).
 
-    With --full or --engines, it also performs code analysis:
-    - Semgrep: Fast pattern matching for known vulnerability patterns
-    - CodeQL: Deep dataflow analysis (requires CodeQL CLI)
-    - Agent: AI-powered semantic code analysis
+    Scan Modes:
+    - --base: 3 engines only (semgrep + codeql + agent), no LLM verification
+    - --full: Complete experience with all engines + LLM verification + adversarial debate
+    - --engines: Custom engine selection
 
     With --llm-verify, findings are verified with LLM for exploitability.
 
@@ -1976,23 +2006,20 @@ def scan(
         # Quick dependency scan (default)
         deepvuln scan -p /path/to/project
 
-        # Full scan with all engines
+        # Base scan: 3 engines only (no LLM verification)
+        deepvuln scan -p . --base
+
+        # Full scan: all engines + LLM verification + adversarial (recommended)
         deepvuln scan -p . --full
 
         # Specific engines only
         deepvuln scan -p . --engines semgrep --engines agent
-
-        # Full scan with LLM verification
-        deepvuln scan -p . --full --llm-verify
 
         # Full scan with LLM-assisted attack surface detection
         deepvuln scan -p . --full --llm-detect
 
         # Full scan with pure LLM attack surface detection (any language)
         deepvuln scan -p . --full --llm-full-detect
-
-        # Full scan with enhanced adversarial verification (strategy evolution + debate)
-        deepvuln scan -p . --full --adversarial
 
         # Incremental scan (only changed files, 70%+ faster)
         deepvuln scan -p . --full --incremental
@@ -2005,6 +2032,22 @@ def scan(
     """
     show_banner()
 
+    # Handle --full and --base mode logic
+    # --full: Enable all features (engines + llm_verify + adversarial)
+    # --base: Enable 3 engines only (no LLM verification)
+    if full_scan:
+        # Full scan enables everything
+        llm_verify = True
+        adversarial = True
+        if not engines:
+            engines = ("semgrep", "codeql", "agent")
+    elif base_scan:
+        # Base scan: 3 engines only, no LLM features
+        if not engines:
+            engines = ("semgrep", "codeql", "agent")
+        llm_verify = False
+        adversarial = False
+
     # If model not specified, read from config file
     resolved_model = model
     if resolved_model is None:
@@ -2016,7 +2059,7 @@ def scan(
             pass
 
     # Check if LLM features are enabled but model is not configured
-    needs_llm = llm_verify or llm_detect or llm_full_detect or full_scan
+    needs_llm = llm_verify or llm_detect or llm_full_detect or adversarial or full_scan
     if needs_llm and not resolved_model:
         from src.cli.display import show_error
         show_error(
@@ -2055,6 +2098,7 @@ def scan(
         "include_low_severity": include_low,
         "detailed": detailed,
         "full_scan": full_scan,
+        "base_scan": base_scan,
         "engines": list(engines) if engines else None,
         "llm_verify": llm_verify,
         "llm_detect": llm_detect,
@@ -2091,9 +2135,10 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
     llm_verify = options.get("llm_verify", False)
     llm_full_detect = options.get("llm_full_detect", False)
     no_deps = options.get("no_deps", False)
+    base_scan = options.get("base_scan", False)
 
     # Check if code analysis is requested
-    needs_code_analysis = full_scan or engines or llm_full_detect
+    needs_code_analysis = full_scan or base_scan or engines or llm_full_detect
 
     if needs_code_analysis:
         # Run full scan with code analysis
@@ -2237,6 +2282,7 @@ def parse(path: str, output: str | None, output_format: str, call_graph: bool, v
             output_result = _format_module_text(module, verbose)
 
         if output:
+            import json
             Path(output).write_text(output_result if isinstance(output_result, str) else json.dumps(output_result, indent=2), encoding="utf-8")
             console.print(f"[green]Output written to: {output}[/]")
         else:

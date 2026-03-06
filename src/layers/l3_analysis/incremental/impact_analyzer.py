@@ -5,16 +5,13 @@ Determines which files and modules are affected by changes and
 calculates impact scores for prioritizing incremental scans.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.incremental.change_detector import (
-    ChangeDetector,
     ChangeInfo,
     ChangeType,
     DiffResult,

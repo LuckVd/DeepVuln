@@ -17,7 +17,6 @@ from typing import Any
 
 from .security_audit import VULNERABILITY_PATTERNS
 
-
 # =============================================================================
 # CONFIDENCE CALIBRATION (Shared across all roles)
 # =============================================================================

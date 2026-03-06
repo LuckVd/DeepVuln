@@ -6,7 +6,6 @@ Provides intelligent decision-making for when to terminate multi-round audits.
 
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -334,7 +333,7 @@ class TerminationDecider:
                 should_continue=False,
                 reason=resource_reason,
                 metrics=metrics,
-                explanation=f"Resource limit reached",
+                explanation="Resource limit reached",
             )
 
         # 6. Check benefit vs cost

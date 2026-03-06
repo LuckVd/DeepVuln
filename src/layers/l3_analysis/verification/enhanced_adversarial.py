@@ -9,23 +9,23 @@ the base three-role debate system with:
 - Rule extraction from successful verifications
 """
 
-import asyncio
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any
 
 from ..llm.client import LLMClient
 from ..models import Finding
 from .adversarial import AdversarialVerifier, AdversarialVerifierConfig
-from .convergence import ConvergenceChecker, ConvergenceConfig, ConvergenceResult
+from .convergence import ConvergenceChecker, ConvergenceConfig
 from .models import (
     AdversarialVerdict,
     DebateRound,
+    VerdictType,
     VerificationArgument,
     VerificationResult,
     VerificationSession,
-    VerdictType,
 )
 from .strategy_library import (
     AttackStrategy,

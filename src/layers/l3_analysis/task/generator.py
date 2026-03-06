@@ -6,7 +6,6 @@ Generates Agent tasks from audit targets and attack surface data.
 
 import uuid
 from pathlib import Path
-from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.strategy.models import (
@@ -18,7 +17,6 @@ from src.layers.l3_analysis.task.models import (
     TaskBatch,
     TaskContext,
     TaskPriority,
-    TaskStatus,
     TaskType,
 )
 

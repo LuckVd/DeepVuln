@@ -7,10 +7,9 @@ context, and results.
 
 from datetime import UTC, datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class TaskType(str, Enum):

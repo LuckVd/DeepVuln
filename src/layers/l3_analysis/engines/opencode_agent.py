@@ -9,7 +9,6 @@ import asyncio
 import logging
 import os
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +18,11 @@ from src.layers.l3_analysis.llm.client import (
     LLMClient,
     LLMEmptyResponseError,
     LLMError,
-    LLMJSONParseError,
     LLMProvider,
     LLMTruncatedResponseError,
 )
-from src.layers.l3_analysis.llm.openai_client import OpenAIClient
 from src.layers.l3_analysis.llm.ollama_client import OllamaClient
+from src.layers.l3_analysis.llm.openai_client import OpenAIClient
 from src.layers.l3_analysis.models import (
     CodeLocation,
     Finding,
@@ -33,10 +31,8 @@ from src.layers.l3_analysis.models import (
     SeverityLevel,
 )
 from src.layers.l3_analysis.prompts.security_audit import (
-    SecurityAuditPrompt,
     build_audit_prompt,
 )
-
 
 # Default models for each provider
 DEFAULT_MODELS = {

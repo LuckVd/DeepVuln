@@ -79,8 +79,8 @@ class AttackSurfaceDetector:
         """Initialize LLM detector lazily."""
         try:
             from src.layers.l1_intelligence.attack_surface.llm_detector import (
-                LLMHTTPDetector,
                 LLMFullDetector,
+                LLMHTTPDetector,
             )
 
             self._llm_detector = LLMHTTPDetector(

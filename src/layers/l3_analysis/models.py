@@ -6,7 +6,6 @@ Unified data models for vulnerability findings across all analysis engines.
 
 from datetime import UTC, datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -411,7 +410,7 @@ class ScanResult(BaseModel):
     def to_markdown(self) -> str:
         """Export results as Markdown report."""
         lines = [
-            f"# Scan Report",
+            "# Scan Report",
             "",
             f"**Source:** {self.source_path}",
             f"**Engine:** {self.engine}",
@@ -420,8 +419,8 @@ class ScanResult(BaseModel):
             "",
             "## Summary",
             "",
-            f"| Severity | Count |",
-            f"|----------|-------|",
+            "| Severity | Count |",
+            "|----------|-------|",
         ]
 
         for sev in ["critical", "high", "medium", "low", "info"]:
@@ -451,7 +450,7 @@ class ScanResult(BaseModel):
 
             lines.extend([
                 "",
-                f"**Description:**",
+                "**Description:**",
                 f"{finding.description}",
                 "",
             ])

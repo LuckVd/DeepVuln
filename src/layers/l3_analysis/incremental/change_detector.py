@@ -7,9 +7,7 @@ by identifying what files have been added, modified, or deleted.
 
 import asyncio
 import hashlib
-import os
 import re
-import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum

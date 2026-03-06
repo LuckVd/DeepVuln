@@ -17,8 +17,8 @@ from .models import (
     AdversarialVerdict,
     DebateRound,
     TriggerConditions,
-    VerificationArgument,
     VerdictType,
+    VerificationArgument,
 )
 
 logger = logging.getLogger(__name__)

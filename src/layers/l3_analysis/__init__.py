@@ -19,72 +19,72 @@ Core components:
 - IncrementalScanner: Incremental analysis for 70%+ speedup
 """
 
-from src.layers.l3_analysis.models import (
-    Finding,
-    FindingType,
-    SeverityLevel,
-    CodeLocation,
-    ScanResult,
-)
 from src.layers.l3_analysis.engines.base import BaseEngine, EngineRegistry
 from src.layers.l3_analysis.engines.codeql import CodeQLEngine
 from src.layers.l3_analysis.engines.opencode_agent import OpenCodeAgent
 from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
+from src.layers.l3_analysis.incremental import (
+    BaselineDiff,
+    BaselineManager,
+    ChangeDetector,
+    ChangeInfo,
+    ChangeType,
+    DependencyEdge,
+    DependencyGraph,
+    DependencyNode,
+    DependencyType,
+    DiffResult,
+    ImpactAnalyzer,
+    ImpactLevel,
+    ImpactResult,
+    IncrementalScanConfig,
+    IncrementalScanner,
+    IncrementalScanResult,
+    VulnerabilityBaseline,
+    VulnerabilityStatus,
+)
+from src.layers.l3_analysis.models import (
+    CodeLocation,
+    Finding,
+    FindingType,
+    ScanResult,
+    SeverityLevel,
+)
+from src.layers.l3_analysis.rounds import (
+    AnalysisDepth,
+    AuditSession,
+    ConfidenceLevel,
+    CoverageStats,
+    EngineStats,
+    RoundController,
+    RoundOneExecutor,
+    RoundResult,
+    RoundStatus,
+    VulnerabilityCandidate,
+)
 from src.layers.l3_analysis.smart_scanner import SmartScanner, create_smart_scanner
 from src.layers.l3_analysis.strategy import (
     AuditPriority,
     AuditPriorityLevel,
-    AuditTarget,
     AuditStrategy,
+    AuditTarget,
     EngineAllocation,
-    TargetGroup,
-    PriorityScore,
     PriorityCalculator,
+    PriorityScore,
     StrategyEngine,
+    TargetGroup,
 )
 from src.layers.l3_analysis.task import (
     AgentTask,
-    TaskType,
-    TaskPriority,
-    TaskStatus,
-    TaskContext,
-    TaskResult,
-    TaskBatch,
-    TaskGenerator,
-    TaskDispatcher,
     ContextBuilder,
-)
-from src.layers.l3_analysis.rounds import (
-    RoundStatus,
-    RoundResult,
-    RoundController,
-    RoundOneExecutor,
-    VulnerabilityCandidate,
-    ConfidenceLevel,
-    AnalysisDepth,
-    CoverageStats,
-    EngineStats,
-    AuditSession,
-)
-from src.layers.l3_analysis.incremental import (
-    ChangeDetector,
-    ChangeInfo,
-    ChangeType,
-    DiffResult,
-    ImpactAnalyzer,
-    ImpactResult,
-    ImpactLevel,
-    DependencyGraph,
-    DependencyNode,
-    DependencyEdge,
-    DependencyType,
-    BaselineManager,
-    VulnerabilityBaseline,
-    VulnerabilityStatus,
-    BaselineDiff,
-    IncrementalScanner,
-    IncrementalScanConfig,
-    IncrementalScanResult,
+    TaskBatch,
+    TaskContext,
+    TaskDispatcher,
+    TaskGenerator,
+    TaskPriority,
+    TaskResult,
+    TaskStatus,
+    TaskType,
 )
 
 __all__ = [

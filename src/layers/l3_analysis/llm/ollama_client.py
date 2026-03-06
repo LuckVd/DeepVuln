@@ -14,7 +14,6 @@ import httpx
 
 from src.layers.l3_analysis.llm.client import (
     LLMClient,
-    LLMConfigurationError,
     LLMError,
     LLMProvider,
     LLMResponse,

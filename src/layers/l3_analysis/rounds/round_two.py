@@ -17,22 +17,16 @@ from pathlib import Path
 from typing import Any
 
 from src.core.logger.logger import get_logger
-from src.layers.l3_analysis.engines.codeql import CodeQLEngine
 from src.layers.l3_analysis.codeql import (
     CodeQLDataflowExecutor,
     DataflowAnalysisConfig,
     QueryGenerator,
-    SanitizerDetector,
-    SARIFParser,
-    ParsedDataflowPath,
 )
-from src.layers.l3_analysis.models import CodeLocation
+from src.layers.l3_analysis.engines.codeql import CodeQLEngine
 from src.layers.l3_analysis.rounds.dataflow import (
     DataFlowPath,
     DeepAnalysisResult,
     PathNode,
-    Sanitizer,
-    SanitizerType,
     SinkType,
     SourceType,
     TaintSink,
@@ -40,7 +34,6 @@ from src.layers.l3_analysis.rounds.dataflow import (
 )
 from src.layers.l3_analysis.rounds.models import (
     AnalysisDepth,
-    AuditSession,
     ConfidenceLevel,
     CoverageStats,
     EngineStats,

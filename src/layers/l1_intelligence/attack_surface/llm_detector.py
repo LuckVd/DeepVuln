@@ -8,7 +8,6 @@ Two-phase approach:
 2. Phase 2: Entry point detection - LLM analyzes code to find entry points
 """
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -23,7 +22,6 @@ from src.layers.l1_intelligence.attack_surface.models import (
 from src.layers.l3_analysis.llm.client import (
     LLMEmptyResponseError,
     LLMError,
-    LLMJSONParseError,
     LLMTruncatedResponseError,
 )
 
@@ -285,7 +283,6 @@ class ProjectTreeGenerator:
         "build",
         "target",
         "vendor",
-        "vendor",
         ".idea",
         ".vscode",
         "coverage",
@@ -293,7 +290,6 @@ class ProjectTreeGenerator:
         ".mypy_cache",
         "eggs",
         "*.egg-info",
-        "node_modules",
         "bower_components",
         "jspm_packages",
         ".npm",

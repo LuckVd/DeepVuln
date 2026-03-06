@@ -11,10 +11,9 @@ from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
-from src.layers.l3_analysis.models import Finding, FindingType, ScanResult, SeverityLevel
+from src.layers.l3_analysis.models import Finding, FindingType, SeverityLevel
 from src.layers.l3_analysis.rounds.models import (
     AnalysisDepth,
-    AuditSession,
     ConfidenceLevel,
     CoverageStats,
     EngineStats,
@@ -25,11 +24,9 @@ from src.layers.l3_analysis.rounds.models import (
 from src.layers.l3_analysis.strategy.models import (
     AuditPriorityLevel,
     AuditStrategy,
-    AuditTarget,
 )
 from src.layers.l3_analysis.task.dispatcher import TaskDispatcher
 from src.layers.l3_analysis.task.generator import TaskGenerator
-from src.layers.l3_analysis.task.models import AgentTask, TaskResult
 
 
 class RoundOneExecutor:

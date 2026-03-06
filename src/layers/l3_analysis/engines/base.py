@@ -7,13 +7,12 @@ and implement the required methods.
 
 import asyncio
 import shutil
-import time
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.layers.l3_analysis.models import Finding, ScanResult, SeverityLevel
+from src.layers.l3_analysis.models import ScanResult
 
 
 class BaseEngine(ABC):

@@ -13,19 +13,17 @@ Enhanced with:
 
 import json
 import uuid
-import yaml
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from src.core.finding_budget import FindingBudget, FindingBudgetResult
-from src.core.file_filtering import FileFilteringEngine, FileFilteringResult
-from src.core.rule_ast_validator import (
-    RuleASTValidator,
-    RuleValidationStatus,
-    ASTValidationSummary,
-)
 from src.core.logger.logger import get_logger
+from src.core.rule_ast_validator import (
+    ASTValidationSummary,
+    RuleASTValidator,
+)
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
 from src.layers.l3_analysis.models import (
     CodeLocation,
@@ -34,7 +32,6 @@ from src.layers.l3_analysis.models import (
     ScanResult,
     SeverityLevel,
 )
-
 
 # Semgrep severity mapping to our SeverityLevel
 SEVERITY_MAP: dict[str, SeverityLevel] = {

@@ -7,7 +7,7 @@ to ensure the main scanning workflow never fails due to CodeQL issues.
 Target: CodeQL can fail, but the system stays stable.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 

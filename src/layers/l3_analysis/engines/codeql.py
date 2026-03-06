@@ -12,11 +12,9 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import tempfile
 import time
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +23,6 @@ from rich.markup import escape
 from src.core.codeql_health import (
     DEFAULT_ANALYZE_TIMEOUT,
     DEFAULT_BUILD_TIMEOUT,
-    CODEQL_SUPPORTED_LANGUAGES,
     CodeQLHealthManager,
     CodeQLHealthResult,
     CodeQLStatus,
@@ -1444,7 +1441,7 @@ class CodeQLEngine(BaseEngine):
 
             # Read and parse SARIF output
             if sarif_path.exists():
-                with open(sarif_path, "r", encoding="utf-8") as f:
+                with open(sarif_path, encoding="utf-8") as f:
                     return json.load(f)
 
             logger.warning(f"SARIF output file not found: {sarif_path}")
@@ -1598,7 +1595,6 @@ class CodeQLEngine(BaseEngine):
         Returns:
             Resolved query suite path, or None if not found.
         """
-        import os
 
         # Check for downloaded packs in default location
         pack_name = DEFAULT_QUERY_PACKS.get(language)

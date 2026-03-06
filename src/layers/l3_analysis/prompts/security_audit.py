@@ -8,7 +8,6 @@ and producing structured, actionable findings.
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # =============================================================================
 # VULNERABILITY PATTERN LIBRARY
 # =============================================================================

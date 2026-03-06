@@ -12,7 +12,6 @@ from src.core.logger.logger import get_logger
 from src.layers.l1_intelligence.attack_surface.models import (
     AttackSurfaceReport,
     EntryPoint,
-    EntryPointType,
 )
 from src.layers.l3_analysis.strategy.calculator import PriorityCalculator
 from src.layers.l3_analysis.strategy.models import (

@@ -9,10 +9,9 @@ import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from src.core.logger.logger import get_logger
-from src.layers.l3_analysis.models import Finding, CodeLocation
+from src.layers.l3_analysis.models import Finding
 
 logger = get_logger(__name__)
 

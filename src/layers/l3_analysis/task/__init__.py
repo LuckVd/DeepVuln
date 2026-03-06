@@ -12,18 +12,18 @@ This module provides task management for Agent-based auditing:
 - ContextBuilder: Build code context for tasks
 """
 
+from src.layers.l3_analysis.task.context_builder import ContextBuilder
+from src.layers.l3_analysis.task.dispatcher import TaskDispatcher
+from src.layers.l3_analysis.task.generator import TaskGenerator
 from src.layers.l3_analysis.task.models import (
     AgentTask,
-    TaskType,
-    TaskPriority,
-    TaskStatus,
-    TaskContext,
-    TaskResult,
     TaskBatch,
+    TaskContext,
+    TaskPriority,
+    TaskResult,
+    TaskStatus,
+    TaskType,
 )
-from src.layers.l3_analysis.task.generator import TaskGenerator
-from src.layers.l3_analysis.task.dispatcher import TaskDispatcher
-from src.layers.l3_analysis.task.context_builder import ContextBuilder
 
 __all__ = [
     # Models

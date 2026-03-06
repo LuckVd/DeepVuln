@@ -5,7 +5,6 @@ Data models for audit priority, targets, and strategy configuration.
 """
 
 from enum import Enum
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -466,7 +465,7 @@ class AuditStrategy(BaseModel):
     def to_yaml_config(self) -> str:
         """Generate YAML configuration for the strategy."""
         lines = [
-            f"strategy:",
+            "strategy:",
             f"  project: \"{self.project_name}\"",
             f"  source_path: \"{self.source_path}\"",
             f"  total_targets: {self.total_targets}",
@@ -484,7 +483,7 @@ class AuditStrategy(BaseModel):
                 if level in self.groups:
                     group = self.groups[level]
                     if group.engine_allocations:
-                        lines.append(f"      engines:")
+                        lines.append("      engines:")
                         for alloc in group.engine_allocations:
                             lines.append(f"        - engine: {alloc.engine}")
                             if alloc.concurrent > 1:

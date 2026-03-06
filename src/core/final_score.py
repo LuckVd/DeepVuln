@@ -17,9 +17,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from src.core.logger.logger import get_logger
-
-
 # =============================================================================
 # Constants - All weights are configurable constants for easy tuning
 # =============================================================================

@@ -23,17 +23,17 @@ from .models import (
     DOC_DIRECTORIES,
     DOC_FILE_PATTERNS,
     EXTENSION_TO_LANGUAGE,
+    PACKAGE_FILES,
+    SKIP_DIRECTORIES,
+    TEST_DIRECTORIES,
+    TEST_FILE_PATTERNS,
+    Database,
     Framework,
     Language,
     LanguageInfo,
     Middleware,
-    PACKAGE_FILES,
     ProjectType,
-    SKIP_DIRECTORIES,
-    TEST_DIRECTORIES,
-    TEST_FILE_PATTERNS,
     TechStack,
-    Database,
 )
 
 
@@ -487,7 +487,7 @@ class TechStackDetector:
     def _count_lines(self, file_path: Path) -> int:
         """Count non-empty lines in a file."""
         try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(file_path, encoding="utf-8", errors="replace") as f:
                 count = 0
                 for line in f:
                     stripped = line.strip()

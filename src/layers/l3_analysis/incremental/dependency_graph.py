@@ -5,11 +5,8 @@ Constructs a graph of file dependencies to enable impact analysis
 by tracking how changes in one file can affect others.
 """
 
-import asyncio
 import ast
-import hashlib
-import json
-import os
+import asyncio
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field

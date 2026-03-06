@@ -13,9 +13,9 @@ Enhanced with multi-round debate support:
 import asyncio
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ..llm.client import LLMClient
 from ..models import Finding
@@ -26,10 +26,10 @@ from .models import (
     AdversarialVerdict,
     DebateRound,
     TriggerConditions,
+    VerdictType,
     VerificationArgument,
     VerificationResult,
     VerificationSession,
-    VerdictType,
 )
 
 logger = logging.getLogger(__name__)

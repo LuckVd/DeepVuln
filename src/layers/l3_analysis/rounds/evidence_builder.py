@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ from src.layers.l3_analysis.rounds.correlation import (
     EvidenceType,
     VerificationStatus,
 )
-from src.layers.l3_analysis.rounds.dataflow import DataFlowPath, DeepAnalysisResult
+from src.layers.l3_analysis.rounds.dataflow import DataFlowPath
 from src.layers.l3_analysis.rounds.models import ConfidenceLevel, VulnerabilityCandidate
 
 

@@ -12,32 +12,32 @@ Core components:
 - IncrementalScanner: Coordinate incremental scanning workflow
 """
 
+from src.layers.l3_analysis.incremental.baseline_manager import (
+    BaselineDiff,
+    BaselineManager,
+    VulnerabilityBaseline,
+    VulnerabilityStatus,
+)
 from src.layers.l3_analysis.incremental.change_detector import (
     ChangeDetector,
     ChangeInfo,
     ChangeType,
     DiffResult,
 )
-from src.layers.l3_analysis.incremental.impact_analyzer import (
-    ImpactAnalyzer,
-    ImpactResult,
-    ImpactLevel,
-)
 from src.layers.l3_analysis.incremental.dependency_graph import (
+    DependencyEdge,
     DependencyGraph,
     DependencyNode,
-    DependencyEdge,
     DependencyType,
 )
-from src.layers.l3_analysis.incremental.baseline_manager import (
-    BaselineManager,
-    VulnerabilityBaseline,
-    VulnerabilityStatus,
-    BaselineDiff,
+from src.layers.l3_analysis.incremental.impact_analyzer import (
+    ImpactAnalyzer,
+    ImpactLevel,
+    ImpactResult,
 )
 from src.layers.l3_analysis.incremental.scanner import (
-    IncrementalScanner,
     IncrementalScanConfig,
+    IncrementalScanner,
     IncrementalScanResult,
 )
 

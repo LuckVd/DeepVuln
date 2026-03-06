@@ -11,29 +11,29 @@ Components:
 - SanitizerDetector: Identify and evaluate sanitizers in data flow paths
 """
 
+from src.layers.l3_analysis.codeql.executor import (
+    CodeQLDataflowExecutor,
+    DataflowAnalysisConfig,
+    DataflowResult,
+)
 from src.layers.l3_analysis.codeql.query_generator import (
     QueryGenerator,
     QueryTemplate,
-    SourceDefinition,
     SinkDefinition,
+    SourceDefinition,
     TaintTrackingConfig,
     VulnerabilityCategory,
     generate_taint_tracking_query,
 )
-from src.layers.l3_analysis.codeql.executor import (
-    CodeQLDataflowExecutor,
-    DataflowResult,
-    DataflowAnalysisConfig,
-)
-from src.layers.l3_analysis.codeql.sarif_parser import (
-    SARIFParser,
-    ParsedDataflowPath,
-    PathLocation,
-)
 from src.layers.l3_analysis.codeql.sanitizer_detector import (
     SanitizerDetector,
-    SanitizerMatch,
     SanitizerEffectiveness,
+    SanitizerMatch,
+)
+from src.layers.l3_analysis.codeql.sarif_parser import (
+    ParsedDataflowPath,
+    PathLocation,
+    SARIFParser,
 )
 
 __all__ = [

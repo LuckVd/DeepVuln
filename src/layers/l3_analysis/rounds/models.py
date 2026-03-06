@@ -6,11 +6,11 @@ Data models for multi-round audit system.
 
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.layers.l3_analysis.models import Finding, FindingType, SeverityLevel
+from src.layers.l3_analysis.models import Finding, SeverityLevel
 
 
 class RoundStatus(str, Enum):

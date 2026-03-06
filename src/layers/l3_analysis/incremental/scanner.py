@@ -6,28 +6,22 @@ to achieve fast incremental analysis with 70%+ speedup.
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from src.core.logger.logger import get_logger
+from src.layers.l3_analysis.incremental.baseline_manager import (
+    BaselineManager,
+)
 from src.layers.l3_analysis.incremental.change_detector import (
     ChangeDetector,
-    ChangeInfo,
-    ChangeType,
-    DiffResult,
 )
 from src.layers.l3_analysis.incremental.dependency_graph import DependencyGraph
 from src.layers.l3_analysis.incremental.impact_analyzer import (
     ImpactAnalyzer,
-    ImpactResult,
-    ImpactLevel,
-)
-from src.layers.l3_analysis.incremental.baseline_manager import (
-    BaselineManager,
-    BaselineDiff,
-    VulnerabilityStatus,
 )
 
 logger = get_logger(__name__)
@@ -120,31 +114,31 @@ class IncrementalScanResult:
     def to_summary(self) -> str:
         """Generate a summary of the scan result."""
         lines = [
-            f"Incremental Scan Results",
+            "Incremental Scan Results",
             f"{'=' * 40}",
             f"Project: {self.project_path}",
             f"Base: {self.base_ref} -> Head: {self.head_ref}",
-            f"",
-            f"Changes Detected:",
+            "",
+            "Changes Detected:",
             f"  Files changed: {self.files_changed}",
             f"  Added: {self.files_added}, Modified: {self.files_modified}, Deleted: {self.files_deleted}",
-            f"",
-            f"Impact Analysis:",
+            "",
+            "Impact Analysis:",
             f"  Files affected: {self.files_affected}",
             f"  Coverage: {self.coverage_ratio:.1%}",
-            f"",
-            f"Scan Results:",
+            "",
+            "Scan Results:",
             f"  Files scanned: {self.files_scanned}",
             f"  Files skipped: {self.files_skipped}",
             f"  Cache hits: {self.files_cached}",
-            f"",
-            f"Findings:",
+            "",
+            "Findings:",
             f"  Total: {self.total_findings}",
             f"  New: {self.new_findings}",
             f"  Persistent: {self.persistent_findings}",
             f"  Fixed: {self.fixed_findings}",
-            f"",
-            f"Performance:",
+            "",
+            "Performance:",
             f"  Duration: {self.duration_seconds:.2f}s",
             f"  Speedup: {self.speedup_factor:.1f}x",
         ]

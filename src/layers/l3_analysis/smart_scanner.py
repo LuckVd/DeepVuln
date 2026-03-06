@@ -9,10 +9,9 @@ from typing import Any
 
 from src.layers.l3_analysis.engines.base import EngineRegistry
 from src.layers.l3_analysis.engines.semgrep import OFFICIAL_RULE_SETS, SemgrepEngine
-from src.layers.l3_analysis.models import Finding, ScanResult, SeverityLevel
+from src.layers.l3_analysis.models import ScanResult, SeverityLevel
 from src.layers.l3_analysis.strategy.engine import StrategyEngine
-from src.layers.l3_analysis.strategy.models import AuditStrategy, AuditTarget
-
+from src.layers.l3_analysis.strategy.models import AuditStrategy
 
 # Language to rule set mapping
 LANGUAGE_RULE_SETS: dict[str, list[str]] = {

@@ -8,7 +8,6 @@ For vulnerabilities that cannot be determined by static rules (NEEDS_REVIEW),
 LLM-assisted assessment is available for more accurate judgment.
 """
 
-import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -28,8 +27,6 @@ from src.layers.l3_analysis.prompts.exploitability import (
     parse_exploitability_response,
 )
 from src.layers.l3_analysis.rounds.models import (
-    AnalysisDepth,
-    AuditSession,
     ConfidenceLevel,
     CoverageStats,
     EngineStats,

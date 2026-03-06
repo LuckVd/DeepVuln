@@ -255,6 +255,7 @@ def get_llm_config(force_reload: bool = False) -> dict[str, Any]:
         "max_retries": llm_config.get("max_retries", 3),
         "max_tokens": llm_config.get("max_tokens", 4096),
         "temperature": llm_config.get("temperature", 0.1),
+        "max_concurrent": llm_config.get("max_concurrent", 7),  # GLM-4.5 safe limit
     }
 
     # OpenAI config with env overrides

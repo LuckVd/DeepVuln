@@ -12,7 +12,6 @@ Enhanced with:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.task.models import TaskContext
@@ -406,7 +405,7 @@ class ContextBuilder:
         )
 
         # Add entry point metadata
-        header = f"# Entry Point Analysis\n"
+        header = "# Entry Point Analysis\n"
         header += f"# Type: {entry_point_type}\n"
         if http_method and endpoint_path:
             header += f"# Endpoint: {http_method} {endpoint_path}\n"
@@ -951,7 +950,7 @@ class ContextBuilder:
         ]
 
         if call_chain.is_entry_point:
-            lines.append(f"[ENTRY POINT] This function is an external entry point")
+            lines.append("[ENTRY POINT] This function is an external entry point")
             lines.append(f"Entry Type: {call_chain.entry_point_type}")
             lines.append("")
             lines.append("WARNING: Input to this function may be user-controlled!")

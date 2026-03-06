@@ -4,7 +4,6 @@ Priority Calculator
 Calculates audit priority scores for targets based on multiple factors.
 """
 
-from pathlib import Path
 from typing import Any
 
 from src.core.logger.logger import get_logger

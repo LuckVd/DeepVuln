@@ -15,18 +15,14 @@ from typing import Any
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.codeql import (
     CodeQLDataflowExecutor,
-    DataflowResult,
     QueryGenerator,
     SanitizerDetector,
     SARIFParser,
-    TaintTrackingConfig,
 )
-from src.layers.l3_analysis.codeql.query_generator import VulnerabilityCategory
 from src.layers.l3_analysis.codeql.sanitizer_detector import SanitizerEffectiveness
 from src.layers.l3_analysis.models import Finding
 from src.layers.l3_analysis.rounds.dataflow import (
     DataFlowPath,
-    DeepAnalysisResult,
     PathNode,
     Sanitizer,
     TaintSink,
