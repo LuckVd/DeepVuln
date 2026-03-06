@@ -7,135 +7,105 @@
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | P5-01a：整合 CodeQL 数据流结果 |
-| **状态** | completed |
+| **任务** | P5-01b：AST 调用图构建与可达性分析 |
+| **状态** | in_progress |
 | **优先级** | P0 |
 | **创建日期** | 2026-03-06 |
 | **所属阶段** | Phase 5 - 精度深化 |
 | **模块层级** | L3 Analysis Layer |
-| **依赖** | P4-05 |
+| **依赖** | P5-01a（已完成） |
 | **父任务** | P5-01：可利用性评估增强 |
 
 ---
 
 ## 问题背景
 
-当前 Phase 4 可利用性评估与 CodeQL 数据流分析脱节：
+当前 `ContextBuilder.analyze_call_chain()` 使用正则匹配，存在以下问题：
 
 | 问题 | 现状 | 影响 |
 |------|------|------|
-| CodeQL 数据流 | Round 2 运行，但 Phase 4 不使用 | 浪费深度分析能力 |
-| 可利用性判断 | 只用正则模式匹配用户输入 | 漏报大量真实可利用漏洞 |
-| 数据流信息丢失 | source/sink/path 未传递 | 无法利用精确的污点分析结果 |
-
-**实测结果**：OWASP Juice Shop 扫描中，100% 漏洞被判定为 "not_exploitable"，但 CodeQL 已识别出完整的污点路径。
+| 调用关系检测 | 基于文本正则匹配 | 无法处理复杂调用模式 |
+| 跨文件分析 | 不支持 | 无法追踪跨文件调用链 |
+| 可达性判断 | 简单的入口点检测 | 无法计算完整调用路径 |
+| 置信度 | 无路径长度考量 | 无法区分直接/间接可达 |
 
 ---
 
 ## 核心目标
 
-**将 Round 2 的 CodeQL 数据流结果传递到 Phase 4 可利用性评估。**
+**构建 AST 调用图，实现从入口点到漏洞点的可达性分析。**
 
 ---
 
-## CodeQL 提供的关键信息
+## 技术方案
+
+### 1. 模块结构
+
+```
+src/layers/l3_analysis/call_graph/
+├── __init__.py
+├── analyzer.py          # CallGraphAnalyzer 主类
+├── models.py            # 数据模型 (CallNode, CallEdge, CallGraph)
+├── builders/
+│   ├── __init__.py
+│   ├── base.py          # 抽象基类
+│   ├── python_builder.py
+│   ├── java_builder.py
+│   └── go_builder.py
+└── reachability.py      # 可达性分析 (BFS)
+```
+
+### 2. 核心数据模型
 
 ```python
-class CodeQLDataFlowResult:
-    source: TaintSource       # 污点源（用户输入位置）
-    sink: TaintSink           # 污点汇聚点（漏洞位置）
-    path: list[PathElement]   # 完整的数据流路径
-    sanitizers: list[Sanitizer]  # 检测到的净化器
+@dataclass
+class CallNode:
+    id: str           # "file:function"
+    name: str         # 函数名
+    file_path: str    # 文件路径
+    line: int         # 行号
+    is_entry_point: bool
+    entry_point_type: str | None
+
+@dataclass
+class CallEdge:
+    caller_id: str    # 调用者
+    callee_id: str    # 被调用者
+    call_site: str    # 调用位置
+
+@dataclass
+class CallGraph:
+    nodes: dict[str, CallNode]
+    edges: list[CallEdge]
+    reverse_index: dict[str, list[str]]  # callee -> callers
+
+@dataclass
+class ReachabilityResult:
+    source_id: str
+    target_id: str
+    is_reachable: bool
+    path: list[str]
+    path_length: int
+    confidence: float
 ```
 
----
-
-## 实现方案
-
-### 1. 修改数据流
-
-```
-L3 Round 2 (CodeQL)
-        │
-        ▼ codeql_results: list[CodeQLResult]
-L3 Round 4 (Exploitability)  ←── 新增参数
-        │
-        ▼ 使用 CodeQL 的 source/sink/path 判断可利用性
-```
-
-### 2. 修改 RoundFourExecutor
-
-**文件**: `src/layers/l3_analysis/rounds/round_four.py`
+### 3. Tree-sitter 查询示例
 
 ```python
-class RoundFourExecutor:
-    def __init__(
-        self,
-        source_path: Path,
-        context_builder: ContextBuilder | None = None,
-        llm_client: LLMClientProtocol | None = None,
-        enable_llm_assessment: bool = True,
-        attack_surface_report: AttackSurfaceReport | None = None,
-        codeql_results: list[CodeQLResult] | None = None,  # 新增
-    ):
-        self._codeql_results = codeql_results
-        self._codeql_index = self._build_codeql_index(codeql_results)
+# Python 函数定义
+FUNCTION_QUERY = """
+(function_definition
+    name: (identifier) @name
+    body: (block) @body
+)
+"""
 
-    def _build_codeql_index(self, results) -> dict[str, CodeQLResult]:
-        """按 file:line 索引 CodeQL 结果"""
-        index = {}
-        for r in results or []:
-            key = f"{r.location.file}:{r.location.line}"
-            index[key] = r
-        return index
-
-    def _get_codeql_dataflow(self, finding: Finding) -> CodeQLResult | None:
-        """获取该漏洞的 CodeQL 数据流信息"""
-        key = f"{finding.location.file}:{finding.location.line_start}"
-        return self._codeql_index.get(key)
-```
-
-### 3. 修改可利用性判断逻辑
-
-**文件**: `src/layers/l3_analysis/rounds/round_four.py`
-
-```python
-def _assess_exploitability(
-    self,
-    call_chain: CallChainInfo | None,
-    data_flow: list[DataFlowMarker],
-    finding: Finding,
-) -> tuple[ExploitabilityStatus, float, str]:
-    # 新增：优先使用 CodeQL 数据流结果
-    codeql_flow = self._get_codeql_dataflow(finding)
-
-    if codeql_flow and codeql_flow.has_user_source:
-        # CodeQL 确认有用户输入到漏洞的数据流
-        return (
-            ExploitabilityStatus.EXPLOITABLE,
-            0.90,  # CodeQL 确认的置信度更高
-            f"CodeQL confirmed taint flow: {codeql_flow.source} → {codeql_flow.sink}"
-        )
-
-    # 原有逻辑作为 fallback
-    # ...
-```
-
-### 4. 修改 CLI 传递 CodeQL 结果
-
-**文件**: `src/cli/main.py`
-
-```python
-# 在 run_full_security_scan 中
-async def run_full_security_scan(...):
-    # ... Round 2 执行 CodeQL ...
-
-    # Round 4: 传递 CodeQL 结果
-    round_four = RoundFourExecutor(
-        source_path=source_path,
-        attack_surface_report=attack_surface_report,
-        codeql_results=codeql_results,  # 新增
-    )
+# Python 函数调用
+CALL_QUERY = """
+(call
+    function: (identifier) @func_name
+)
+"""
 ```
 
 ---
@@ -144,7 +114,15 @@ async def run_full_security_scan(...):
 
 | 文件 | 用途 |
 |------|------|
-| 无 | 本次修改只涉及现有文件 |
+| `src/layers/l3_analysis/call_graph/__init__.py` | 模块入口 |
+| `src/layers/l3_analysis/call_graph/models.py` | 数据模型 |
+| `src/layers/l3_analysis/call_graph/analyzer.py` | 主分析器 |
+| `src/layers/l3_analysis/call_graph/builders/base.py` | 构建器基类 |
+| `src/layers/l3_analysis/call_graph/builders/python_builder.py` | Python 构建器 |
+| `src/layers/l3_analysis/call_graph/builders/java_builder.py` | Java 构建器 |
+| `src/layers/l3_analysis/call_graph/builders/go_builder.py` | Go 构建器 |
+| `src/layers/l3_analysis/call_graph/reachability.py` | 可达性分析 |
+| `tests/unit/test_l3/test_call_graph.py` | 单元测试 |
 
 ---
 
@@ -152,20 +130,20 @@ async def run_full_security_scan(...):
 
 | 文件 | 改动 |
 |------|------|
-| `src/layers/l3_analysis/rounds/round_four.py` | 接收 CodeQL 结果 + 整合判断逻辑 |
-| `src/cli/main.py` | 传递 CodeQL 结果到 Round 4 |
+| `src/layers/l3_analysis/rounds/round_four.py` | 集成 CallGraphAnalyzer |
 
 ---
 
 ## 验收标准
 
-| 标准 | 指标 | 状态 |
-|------|------|------|
-| CodeQL 整合 | CodeQL 数据流结果被利用 | ✅ 完成 |
-| 可利用性精度 | 与对抗验证一致性提升至 > 60% | ⏳ 待实测验证 |
-| 向后兼容 | 无 CodeQL 结果时降级正常工作 | ✅ 完成 |
-| 测试覆盖 | 20+ 新测试 | ✅ 23 测试 |
-| 兼容性 | 现有测试全部通过 | ✅ 1716 通过 |
+| 标准 | 指标 |
+|------|------|
+| 调用图构建 | 支持 Python/Java/Go 三语言 |
+| 可达性分析 | 准确识别入口点→漏洞点路径 |
+| AST 解析 | 基于 Tree-sitter，复用现有基础设施 |
+| 性能 | 单文件分析 < 100ms |
+| 测试覆盖 | 30+ 新测试 |
+| 兼容性 | 现有测试全部通过 |
 
 ---
 
@@ -173,10 +151,10 @@ async def run_full_security_scan(...):
 
 | 原则 | 实现方式 |
 |------|----------|
-| **可选参数** | `codeql_results=None`，不影响现有调用 |
-| **渐进增强** | 有 CodeQL 结果就用，没有就降级 |
-| **向后兼容** | 旧模式作为 fallback |
-| **不破坏接口** | 只添加可选参数，不修改签名 |
+| **复用基础设施** | 使用现有 Tree-sitter AST 解析器 |
+| **渐进增强** | 可选参数，不影响现有调用 |
+| **语言扩展性** | 抽象基类，易于添加新语言 |
+| **性能优化** | LRU 缓存，按需解析 |
 
 ---
 
@@ -184,9 +162,4 @@ async def run_full_security_scan(...):
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-06 10:20 | feat(l3): integrate CodeQL dataflow results (5484322) |
-| 2026-03-06 | 创建 P5-01a 目标 |
-| 2026-03-06 | 完成 CodeQL 升级到 2.20.5 + 所有语言包下载 |
-| 2026-03-06 | 完成 RoundFourExecutor 整合 CodeQL 数据流的核心代码修改 |
-| 2026-03-06 15:30 | fix(l3): 修复 CONitional → CONDITIONAL typo |
-| 2026-03-06 15:35 | test(l3): 添加 23 个 CodeQL 数据流集成测试 (1b8ed54) |
+| 2026-03-06 | 创建 P5-01b 目标 |
