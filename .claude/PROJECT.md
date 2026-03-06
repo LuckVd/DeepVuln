@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-03-06 | 483ec9d | feat(l3): add P5-01c taint tracking models and analyzer skeleton |
 | 2026-03-06 | 5484322 | feat(l3): integrate CodeQL dataflow results into exploitability assessment (P5-01a) |
 | 2026-03-06 | cd6d96c | docs: complete Phase 4, start Phase 5 with P5-01 exploitability enhancement |
 | 2026-03-05 | cfede99 | feat(l3): implement Global Adjudication Consistency Layer for P4-03 |
