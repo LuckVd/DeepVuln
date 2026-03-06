@@ -9,7 +9,6 @@ from enum import Enum
 from typing import Any
 
 from src.layers.l3_analysis.codeql.sanitizer_detector import (
-    SanitizerEffectiveness,
     SanitizerMatch,
 )
 
@@ -217,6 +216,17 @@ class SanitizerDetectionMethod(str, Enum):
     CODEQL = "codeql"  # CodeQL native sanitizer predicate
 
 
+class SanitizerType(str, Enum):
+    """Type of sanitizer."""
+
+    ESCAPE = "escape"  # Character escaping (html.escape, etc.)
+    VALIDATION = "validation"  # Input validation
+    NORMALIZATION = "normalization"  # Data normalization
+    ENCODING = "encoding"  # Character encoding
+    REPLACEMENT = "replacement"  # String replacement
+    FILTERING = "filtering"  # Data filtering
+
+
 @dataclass
 class TransformScore:
     """Score from transform analysis for sanitizer detection."""
@@ -331,6 +341,7 @@ class TaintTraceResult:
             "sink_id": self.sink_id,
             "is_reachable": self.is_reachable,
             "is_sanitized": self.is_sanitized,
+            "is_exploitable": self.is_exploitable,
             "path": self.path,
             "path_length": self.path_length,
             "sanitizers": [s.to_dict() for s in self.sanitizers],

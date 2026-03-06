@@ -21,6 +21,13 @@ from src.layers.l1_intelligence.attack_surface.models import (
     EntryPoint,
     EntryPointType,
 )
+
+# P5-01c: Call graph taint tracking
+from src.layers.l3_analysis.call_graph import (
+    CallGraphAnalyzer,
+    TaintTracker,
+    TaintTrackerConfig,
+)
 from src.layers.l3_analysis.models import Finding, SeverityLevel
 from src.layers.l3_analysis.prompts.exploitability import (
     build_exploitability_prompt,
@@ -223,6 +230,25 @@ class RoundFourExecutor:
             self.logger.debug("No LLM client provided, LLM assessment disabled")
         else:
             self.logger.debug("LLM assessment explicitly disabled")
+
+        # P5-01c: Initialize call graph taint tracker
+        self._call_graph_analyzer: CallGraphAnalyzer | None = None
+        self._taint_tracker: TaintTracker | None = None
+        self._source_code_map: dict[str, str] = {}  # Cache for source code
+
+        try:
+            self._call_graph_analyzer = CallGraphAnalyzer(
+                reachability_config=None  # Use default config
+            )
+            self._taint_tracker = TaintTracker(
+                config=TaintTrackerConfig(),
+                language="python",  # TODO: detect from source
+            )
+            self.logger.info("P5-01c: Call graph taint tracker initialized")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize taint tracker: {e}")
+            self._call_graph_analyzer = None
+            self._taint_tracker = None
 
     def _build_entry_point_index(self, report: AttackSurfaceReport) -> None:
         """Build an index of entry points by file for fast lookup.
@@ -653,12 +679,86 @@ class RoundFourExecutor:
             function_name=function_name,
         )
 
-        # Determine exploitability using static rules
-        status, confidence, reasoning = self._assess_exploitability(
-            call_chain=call_chain,
-            data_flow=data_flow,
-            finding=finding,
-        )
+        # P5-01c: Enhance with call graph taint tracking
+        taint_trace_result = None
+        if self._taint_tracker and self._call_graph_analyzer:
+            try:
+                # Build source code map for the vulnerability file
+                source_code = self._get_source_code(location.file)
+                if source_code:
+                    # Build call graph for the project
+                    call_graph = self._call_graph_analyzer.build_graph(
+                        source_path=self.source_path,
+                        file_patterns=["**/*.py"],  # TODO: detect from source
+                        max_files=100,  # Limit for performance
+                    )
+
+                    # Determine vulnerability type from finding
+                    vuln_type = self._infer_vulnerability_type(finding)
+
+                    # Trace from sink to entry points with sanitizer detection
+                    taint_trace_result = self._taint_tracker.trace_from_sink(
+                        graph=call_graph,
+                        sink_file=location.file,
+                        sink_function=function_name,
+                        sink_line=location.line_start,
+                        vuln_type=vuln_type,
+                        source_code_map={location.file: source_code},
+                    )
+
+                    self.logger.debug(
+                        f"P5-01c taint tracking for {finding.id}: "
+                        f"reachable={taint_trace_result.is_reachable}, "
+                        f"sanitized={taint_trace_result.is_sanitized}, "
+                        f"exploitable={taint_trace_result.is_exploitable}"
+                    )
+
+                    # Use taint tracking results to override exploitability assessment
+                    if taint_trace_result.is_reachable:
+                        if taint_trace_result.is_sanitized:
+                            # Path has effective sanitizer
+                            status = ExploitabilityStatus.NOT_EXPLOITABLE
+                            reasoning = (
+                                f"Taint tracking confirms sanitizer on path: "
+                                f"{taint_trace_result.effective_sanitizer.function_name if taint_trace_result.effective_sanitizer else 'unknown'} "
+                                f"(confidence: {taint_trace_result.effective_sanitizer.combined_confidence if taint_trace_result.effective_sanitizer else 0:.2f})"
+                            )
+                        else:
+                            # Reachable without sanitizer - exploitable
+                            status = ExploitabilityStatus.EXPLOITABLE
+                            reasoning = (
+                                f"Taint tracking confirms exploitable: reachable from "
+                                f"{taint_trace_result.entry_point_type} entry point, "
+                                f"path length: {taint_trace_result.path_length}"
+                            )
+                    else:
+                        # Not reachable from entry points
+                        status = ExploitabilityStatus.UNLIKELY
+                        reasoning = (
+                            "Taint tracking shows no path from entry points to sink"
+                        )
+
+                    # Add taint tracking info to evidence
+                    candidate.add_evidence("taint_tracking", {
+                        "is_reachable": taint_trace_result.is_reachable,
+                        "is_sanitized": taint_trace_result.is_sanitized,
+                        "is_exploitable": taint_trace_result.is_exploitable,
+                        "path_length": taint_trace_result.path_length,
+                        "sanitizer_count": len(taint_trace_result.sanitizers),
+                        "confidence": taint_trace_result.confidence,
+                    })
+
+            except Exception as e:
+                self.logger.warning(f"P5-01c taint tracking failed for {finding.id}: {e}")
+                # Continue with static assessment if taint tracking fails
+
+        # Determine exploitability using static rules (if not already determined by taint tracking)
+        if taint_trace_result is None:
+            status, confidence, reasoning = self._assess_exploitability(
+                call_chain=call_chain,
+                data_flow=data_flow,
+                finding=finding,
+            )
 
         # If NEEDS_REVIEW and LLM is available, use LLM-assisted assessment
         if status == ExploitabilityStatus.NEEDS_REVIEW and self._enable_llm_assessment:
@@ -1226,6 +1326,102 @@ class RoundFourExecutor:
                 return match.group(1)
 
         return None
+
+    def _get_source_code(self, file_path: str) -> str | None:
+        """
+        Get source code for a file, using cache if available.
+
+        Args:
+            file_path: Path to the source file (relative or absolute)
+
+        Returns:
+            Source code content or None if file cannot be read.
+        """
+        # Check cache first
+        if file_path in self._source_code_map:
+            return self._source_code_map[file_path]
+
+        # Try to resolve relative path against source_path
+        try:
+            if not Path(file_path).is_absolute():
+                full_path = self.source_path / file_path
+            else:
+                full_path = Path(file_path)
+
+            if not full_path.exists():
+                # Try relative to project root
+                full_path = Path.cwd() / file_path
+
+            if full_path.exists():
+                content = full_path.read_text(encoding="utf-8", errors="ignore")
+                # Cache for future use
+                self._source_code_map[file_path] = content
+                return content
+        except Exception as e:
+            self.logger.debug(f"Failed to read source code for {file_path}: {e}")
+
+        return None
+
+    def _infer_vulnerability_type(self, finding: Finding) -> str:
+        """
+        Infer vulnerability type from finding metadata.
+
+        Args:
+            finding: The finding to analyze.
+
+        Returns:
+            Vulnerability type string (xss, sqli, cmdi, path_traversal, etc.)
+        """
+        # Check rule ID first
+        if finding.rule_id:
+            rule_id_lower = finding.rule_id.lower()
+            if "xss" in rule_id_lower or "cross-site" in rule_id_lower:
+                return "xss"
+            elif "sqli" in rule_id_lower or "injection" in rule_id_lower and "sql" in rule_id_lower:
+                return "sqli"
+            elif "rce" in rule_id_lower or "command" in rule_id_lower and "injection" in rule_id_lower:
+                return "cmdi"
+            elif "path" in rule_id_lower or "traversal" in rule_id_lower:
+                return "path_traversal"
+
+        # Check CWE
+        if finding.cwe:
+            cwe_str = str(finding.cwe)
+            if "79" in cwe_str:  # Cross-site Scripting
+                return "xss"
+            elif "89" in cwe_str:  # SQL Injection
+                return "sqli"
+            elif "78" in cwe_str:  # OS Command Injection
+                return "cmdi"
+            elif "22" in cwe_str:  # Path Traversal
+                return "path_traversal"
+
+        # Check OWASP category
+        if finding.owasp:
+            owasp_str = str(finding.owasp).lower()
+            if "xss" in owasp_str:
+                return "xss"
+            elif "injection" in owasp_str and "sql" in owasp_str:
+                return "sqli"
+            elif "injection" in owasp_str and "command" in owasp_str:
+                return "cmdi"
+
+        # Check title/description
+        title_lower = (finding.title or "").lower()
+        desc_lower = (finding.description or "").lower()
+        combined = title_lower + " " + desc_lower
+
+        if "xss" in combined or "cross-site" in combined:
+            return "xss"
+        elif "sql" in combined and "injection" in combined:
+            return "sqli"
+        elif "command" in combined and "injection" in combined:
+            return "cmdi"
+        elif "path" in combined and "traversal" in combined:
+            return "path_traversal"
+
+        # Default to XSS for web vulnerabilities
+        return "xss"
 
     def _has_user_controlled_data(self, data_flow: list[DataFlowMarker]) -> bool:
         """Check if any data flow marker indicates user-controlled input."""

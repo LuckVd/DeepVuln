@@ -211,7 +211,7 @@ DeepVuln/
 |字段|值|
 |---|---|
 |**阶段**|Phase 5 - 精度深化|
-|**当前进度**|P5-01 可利用性评估增强|
-|**下一步**|P5-01a 整合 CodeQL 数据流 / P5-01d 多维评分系统|
-|**重点模块**|RoundFourExecutor + ContextBuilder + CallGraphAnalyzer|
-|**目标**|重构可利用性评估，整合 CodeQL 数据流，构建 AST 调用图，实现多维评分|
+|**当前进度**|P5-01c 已完成 ✅|
+|**下一步**|P5-01d 多维评分系统 或 Phase 5 验收|
+|**重点模块**|RoundFourExecutor + TaintTracker + TransformAnalyzer + TypeAnalyzer|
+|**目标**|多维消毒剂检测 + 污点追踪已实现，110 测试通过|
