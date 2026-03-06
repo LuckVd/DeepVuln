@@ -85,7 +85,8 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
-| 2026-03-07 | 52d2230 | feat(l3): implement P5-01d multi-dimensional scoring system |
+| 2026-03-07 | 1c8dade | docs(goal): set new goal - fix Round 4 integration tests |
+| 2026-03-07 | bb69563 | feat(l3): implement P5-01d multi-dimensional scoring system |
 | 2026-03-06 | 2b9c11c | style(l3): fix import ordering in call graph modules |
 | 2026-03-06 | d58f555 | feat(l3): implement P5-01c taint tracking with multi-dimensional sanitizer detection |
 | 2026-03-06 | 483ec9d | feat(l3): add P5-01c taint tracking models and analyzer skeleton |
