@@ -173,6 +173,7 @@ class RoundFourExecutor:
         llm_client: LLMClientProtocol | None = None,
         enable_llm_assessment: bool = True,
         attack_surface_report: AttackSurfaceReport | None = None,
+        codeql_results: list[Finding] | None = None,  # 新增：CodeQL 数据流结果
     ):
         """
         Initialize the round four executor.
@@ -186,6 +187,9 @@ class RoundFourExecutor:
             attack_surface_report: Pre-computed attack surface report from L1.
                 When provided, this is used instead of ContextBuilder's
                 simplified entry point detection for more accurate results.
+            codeql_results: CodeQL scan results containing dataflow information.
+                When provided, these results are used to enhance exploitability
+                assessment with precise taint analysis from CodeQL.
         """
         self.logger = get_logger(__name__)
         self.source_path = source_path
@@ -193,6 +197,10 @@ class RoundFourExecutor:
         self._llm_client = llm_client
         self._enable_llm_assessment = enable_llm_assessment and llm_client is not None
         self._attack_surface_report = attack_surface_report
+
+        # Store CodeQL results and build index
+        self._codeql_results = codeql_results
+        self._codeql_index = self._build_codeql_index(codeql_results)
 
         # Build entry point lookup index for fast queries
         self._entry_point_index: dict[str, list[EntryPoint]] = {}
@@ -242,6 +250,63 @@ class RoundFourExecutor:
             f"Built entry point index with {len(self._entry_point_index)} keys, "
             f"{len(self._entry_point_files)} files with entry points"
         )
+
+    def _build_codeql_index(self, results: list[Finding] | None) -> dict[str, Finding]:
+        """Build an index of CodeQL results by file and line.
+
+        This allows fast lookup of CodeQL dataflow information for a given finding.
+
+        Args:
+            results: List of CodeQL findings.
+
+        Returns:
+            Dictionary mapping "file:line" to the corresponding Finding.
+        """
+        if not results:
+            return {}
+
+        index = {}
+        for finding in results:
+            # Index by file and line number
+            if finding.location:
+                key = f"{finding.location.file}:{finding.location.line}"
+                index[key] = finding
+
+        self.logger.debug(
+            f"Built CodeQL index with {len(index)} entries from {len(results)} results"
+        )
+        return index
+
+    def _get_codeql_dataflow(self, finding: Finding) -> Finding | None:
+        """Get CodeQL dataflow information for a finding.
+
+        Args:
+            finding: The finding to look up.
+
+        Returns:
+            The CodeQL finding with dataflow info, or None if not found.
+        """
+        if not self._codeql_index or not finding.location:
+            return None
+
+        # Try exact match first
+        key = f"{finding.location.file}:{finding.location.line}"
+        if key in self._codeql_index:
+            return self._codeql_index[key]
+
+        # Try fuzzy match (same file, nearby line)
+        file_key = finding.location.file
+        for k, v in self._codeql_index.items():
+            if k.startswith(f"{file_key}:"):
+                # Check if within 5 lines
+                stored_line = int(k.split(":")[-1])
+                if abs(stored_line - finding.location.line) <= 5:
+                    self.logger.debug(
+                        f"CodeQL fuzzy match: {k} for finding at {key}"
+                    )
+                    return v
+
+        return None
 
     def _build_entry_point_import_index(self) -> None:
         """Build an index of imports in entry point files.
@@ -795,11 +860,67 @@ class RoundFourExecutor:
         """
         Assess the exploitability of a finding.
 
+        Priority order:
+        1. CodeQL confirmed taint flow (highest confidence)
+        2. Entry point + user-controlled input (static analysis)
+        3. Pattern-based analysis (fallback)
+
         Returns:
             Tuple of (status, confidence, reasoning).
         """
         reasoning_parts = []
 
+        # === Priority 1: Check CodeQL dataflow results ===
+        codeql_finding = self._get_codeql_dataflow(finding)
+        if codeql_finding:
+            # CodeQL confirmed this vulnerability with dataflow analysis
+            reasoning_parts.append("CodeQL CONFIRMED taint flow.")
+
+            # Extract dataflow info from CodeQL result
+            codeql_info = self._extract_codeql_dataflow_info(codeql_finding)
+            if codeql_info:
+                has_source = codeql_info.get("has_user_source", False)
+                has_sink = codeql_info.get("has_dangerous_sink", True)
+                sanitizers = codeql_info.get("sanitizers", [])
+
+                if has_source and has_sink:
+                    if sanitizers:
+                        reasoning_parts.append(
+                            f"Source → Sink confirmed, but {len(sanitizers)} sanitizer(s) detected."
+                        )
+                        return (
+                            ExploitabilityStatus.CONitional,
+                            0.70,
+                            " | ".join(reasoning_parts) + " | Sanitizers may reduce exploitability."
+                        )
+                    else:
+                        # Full taint path from user input to dangerous sink
+                        source_desc = codeql_info.get("source_description", "user input")
+                        sink_desc = codeql_info.get("sink_description", "dangerous operation")
+                        reasoning_parts.append(
+                            f"Full path: {source_desc} → {sink_desc}"
+                        )
+                        return (
+                            ExploitabilityStatus.EXPLOITABLE,
+                            0.90,  # CodeQL confirmation has higher confidence
+                            " | ".join(reasoning_parts) + " | HIGH CONFIDENCE - CodeQL confirmed exploitable."
+                        )
+                elif has_source:
+                    reasoning_parts.append("User-controlled source found, but sink unclear.")
+                    return (
+                        ExploitabilityStatus.UNLIKELY,
+                        0.45,
+                        " | ".join(reasoning_parts)
+                    )
+                elif has_sink:
+                    reasoning_parts.append("Dangerous sink found, but source unclear.")
+                    return (
+                        ExploitabilityStatus.NEEDS_REVIEW,
+                        0.50,
+                        " | ".join(reasoning_parts)
+                    )
+
+        # === Priority 2: Static analysis (fallback) ===
         # Check 1: Is this code reachable from external entry points?
         if call_chain:
             if call_chain.is_entry_point:
@@ -987,6 +1108,105 @@ class RoundFourExecutor:
     # =========================================================================
     # Helper Methods
     # =========================================================================
+
+    def _get_codeql_dataflow(self, finding: Finding) -> Finding | None:
+        """Get CodeQL dataflow result for a finding.
+
+        Args:
+            finding: The finding to look up.
+
+        Returns:
+            CodeQL Finding with dataflow info, None if not found.
+        """
+        if not self._codeql_index:
+            return None
+
+        # Try exact match first
+        key = f"{finding.location.file}:{finding.location.line}"
+        if key in self._codeql_index:
+            return self._codeql_index[key]
+
+        # Try fuzzy match (within 5 lines)
+        for line_offset in range(-5, 6):
+            fuzzy_key = f"{finding.location.file}:{finding.location.line + line_offset}"
+            if fuzzy_key in self._codeql_index:
+                codeql_finding = self._codeql_index[fuzzy_key]
+                self.logger.debug(
+                    f"CodeQL fuzzy match: {fuzzy_key} for finding at {key}"
+                )
+                return codeql_finding
+
+        return None
+
+    def _extract_codeql_dataflow_info(self, codeql_finding: Finding) -> dict[str, Any]:
+        """Extract dataflow information from a CodeQL finding.
+
+        Args:
+            codeql_finding: CodeQL finding with dataflow info.
+
+        Returns:
+            Dict with dataflow analysis results.
+        """
+        info: dict[str, Any] = {
+            "has_user_source": False,
+            "has_dangerous_sink": True,
+            "sanitizers": [],
+            "source_description": "",
+            "sink_description": "",
+            "path_length": 0,
+        }
+
+        # Check metadata for dataflow info
+        metadata = codeql_finding.metadata or {}
+
+        # Check if CodeQL identified this as having taint flow
+        if metadata.get("has_dataflow", False):
+            info["has_user_source"] = True
+            info["has_dangerous_sink"] = True
+
+        # Check for specific source types in CodeQL result
+        sources = metadata.get("sources", [])
+        if sources:
+            for source in sources:
+                source_type = source.get("type", "").lower()
+                if any(t in source_type for t in ["user", "input", "request", "parameter", "http", "remote"]):
+                    info["has_user_source"] = True
+                    info["source_description"] = source.get("description", "user input")
+                    break
+
+        # Check for sanitizers
+        sanitizers = metadata.get("sanitizers", [])
+        if sanitizers:
+            info["sanitizers"] = sanitizers
+
+        # Check for path information
+        path = metadata.get("path", [])
+        if path:
+            info["path_length"] = len(path)
+            # Get sink description from last path element
+            if path:
+                last_step = path[-1] if isinstance(path, list) else path
+                if isinstance(last_step, dict):
+                    info["sink_description"] = last_step.get("description", "dangerous operation")
+
+        # Check for CodeQL-specific fields
+        if metadata.get("codeql_confirmed", False):
+            info["has_user_source"] = True
+            info["has_dangerous_sink"] = True
+
+        # Look for data_flow in metadata (CodeQL stores dataflow info here)
+        data_flow = metadata.get("data_flow", {})
+        if data_flow:
+            if data_flow.get("source_type") == "user_input":
+                info["has_user_source"] = True
+                info["source_description"] = data_flow.get("source", "user input")
+            if data_flow.get("sink_type"):
+                info["has_dangerous_sink"] = True
+                info["sink_description"] = data_flow.get("sink", "dangerous operation")
+            if data_flow.get("sanitizers"):
+                info["sanitizers"].extend(data_flow["sanitizers"])
+
+        return info
 
     def _extract_function_name(self, code_snippet: str) -> str | None:
         """Extract function name from code snippet."""

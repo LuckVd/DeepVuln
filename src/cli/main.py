@@ -500,7 +500,7 @@ async def run_full_security_scan(
     adversarial = options.get("adversarial", False)
     model = options.get("model")
     include_low = options.get("include_low_severity", False)
-    no_deps = options.get("no_deps", False)
+    _no_deps = options.get("no_deps", False)  # Reserved for future use
     incremental = options.get("incremental", False)
     base_ref = options.get("base_ref", "HEAD~1")
     head_ref = options.get("head_ref", "HEAD")
@@ -789,7 +789,6 @@ async def run_full_security_scan(
 
     # Build parallel scan tasks
     scan_tasks = []
-    task_names = []
 
     if semgrep_engine and semgrep_engine.is_available():
         scan_tasks.append(("semgrep", semgrep_engine.scan(
@@ -871,11 +870,19 @@ async def run_full_security_scan(
         try:
             from src.core.llm import get_global_concurrency_manager
 
+            # Collect CodeQL findings for enhanced exploitability assessment
+            codeql_findings = [
+                item["finding"]
+                for item in result["all_findings"]
+                if item.get("source") == "codeql"
+            ]
+
             executor = RoundFourExecutor(
                 source_path=source_path,
                 llm_client=llm_client if llm_verify else None,
                 enable_llm_assessment=llm_verify,
                 attack_surface_report=surface_report,
+                codeql_results=codeql_findings,  # Pass CodeQL findings for dataflow integration
             )
 
             total = len(result["all_findings"])
