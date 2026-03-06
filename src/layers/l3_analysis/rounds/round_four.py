@@ -250,6 +250,22 @@ class RoundFourExecutor:
             self._call_graph_analyzer = None
             self._taint_tracker = None
 
+        # P5-01d: Initialize multi-dimensional scorer
+        self._multi_dim_scorer = None
+        try:
+            from src.layers.l3_analysis.scoring import MultiDimScorer, MultiDimConfig
+
+            self._multi_dim_scorer = MultiDimScorer(
+                config=MultiDimConfig(
+                    strategy_name="weighted_average",
+                    exploitable_threshold=0.7,
+                    not_exploitable_threshold=0.3,
+                )
+            )
+            self.logger.info("P5-01d: Multi-dimensional scorer initialized")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize multi-dim scorer: {e}")
+
     def _build_entry_point_index(self, report: AttackSurfaceReport) -> None:
         """Build an index of entry points by file for fast lookup.
 
@@ -679,81 +695,111 @@ class RoundFourExecutor:
             function_name=function_name,
         )
 
-        # P5-01c: Enhance with call graph taint tracking
+        # P5-01c/d: Use multi-dimensional scorer for exploitability assessment
+        status = None
+        confidence = 0.0
+        reasoning = ""
+
+        # P5-01c: Get taint tracking result
         taint_trace_result = None
         if self._taint_tracker and self._call_graph_analyzer:
             try:
-                # Build source code map for the vulnerability file
-                source_code = self._get_source_code(location.file)
-                if source_code:
-                    # Build call graph for the project
-                    call_graph = self._call_graph_analyzer.build_graph(
-                        source_path=self.source_path,
-                        file_patterns=["**/*.py"],  # TODO: detect from source
-                        max_files=100,  # Limit for performance
-                    )
+                # Build or get call graph for taint tracking
+                graph = self._call_graph_analyzer.build_graph(
+                    self.source_path,
+                )
+                taint_trace_result = self._taint_tracker.trace_from_sink(
+                    graph=graph,
+                    sink_file=location.file,
+                    sink_function=function_name or "unknown",
+                    sink_line=location.line,
+                    vuln_type=finding.rule_id.split(".")[0] if "." in finding.rule_id else "xss",
+                    source_code_map=self._source_code_map,
+                )
+                self.logger.debug(
+                    f"Taint tracking result for {finding.id}: "
+                    f"reachable={taint_trace_result.is_reachable}, "
+                    f"sanitized={taint_trace_result.is_sanitized}"
+                )
+            except Exception as e:
+                self.logger.warning(f"Taint tracking failed for {finding.id}: {e}")
 
-                    # Determine vulnerability type from finding
-                    vuln_type = self._infer_vulnerability_type(finding)
+        if self._multi_dim_scorer:
+            try:
+                # Gather evidence for each dimension
+                codeql_dataflow = self._extract_codeql_dataflow_dict(candidate)
+                attack_surface_type = entry_type_from_report if is_entry_from_report else None
 
-                    # Trace from sink to entry points with sanitizer detection
-                    taint_trace_result = self._taint_tracker.trace_from_sink(
-                        graph=call_graph,
-                        sink_file=location.file,
-                        sink_function=function_name,
-                        sink_line=location.line_start,
-                        vuln_type=vuln_type,
-                        source_code_map={location.file: source_code},
-                    )
+                # Use multi-dimensional scorer
+                multi_score = self._multi_dim_scorer.score_candidate(
+                    finding=finding,
+                    codeql_dataflow=codeql_dataflow,
+                    taint_trace_result=taint_trace_result,
+                    call_chain=call_chain,
+                    attack_surface_type=attack_surface_type,
+                )
 
-                    self.logger.debug(
-                        f"P5-01c taint tracking for {finding.id}: "
-                        f"reachable={taint_trace_result.is_reachable}, "
-                        f"sanitized={taint_trace_result.is_sanitized}, "
-                        f"exploitable={taint_trace_result.is_exploitable}"
-                    )
+                # Use multi-dim results
+                status = multi_score.exploitability_status
+                confidence = multi_score.final_confidence
 
-                    # Use taint tracking results to override exploitability assessment
-                    if taint_trace_result.is_reachable:
-                        if taint_trace_result.is_sanitized:
-                            # Path has effective sanitizer
-                            status = ExploitabilityStatus.NOT_EXPLOITABLE
-                            reasoning = (
-                                f"Taint tracking confirms sanitizer on path: "
-                                f"{taint_trace_result.effective_sanitizer.function_name if taint_trace_result.effective_sanitizer else 'unknown'} "
-                                f"(confidence: {taint_trace_result.effective_sanitizer.combined_confidence if taint_trace_result.effective_sanitizer else 0:.2f})"
-                            )
-                        else:
-                            # Reachable without sanitizer - exploitable
-                            status = ExploitabilityStatus.EXPLOITABLE
-                            reasoning = (
-                                f"Taint tracking confirms exploitable: reachable from "
-                                f"{taint_trace_result.entry_point_type} entry point, "
-                                f"path length: {taint_trace_result.path_length}"
-                            )
-                    else:
-                        # Not reachable from entry points
-                        status = ExploitabilityStatus.UNLIKELY
-                        reasoning = (
-                            "Taint tracking shows no path from entry points to sink"
-                        )
+                # Build reasoning from multi-dim evidence
+                reasoning_parts = [
+                    f"Multi-dimensional scoring (strategy: {multi_score.strategy_used})",
+                    f"Final score: {multi_score.final_score:.2f}",
+                    f"Dimensions used: {', '.join(multi_score.dimensions_used)}",
+                ]
 
-                    # Add taint tracking info to evidence
-                    candidate.add_evidence("taint_tracking", {
-                        "is_reachable": taint_trace_result.is_reachable,
-                        "is_sanitized": taint_trace_result.is_sanitized,
-                        "is_exploitable": taint_trace_result.is_exploitable,
-                        "path_length": taint_trace_result.path_length,
-                        "sanitizer_count": len(taint_trace_result.sanitizers),
-                        "confidence": taint_trace_result.confidence,
-                    })
+                if multi_score.missing_dimensions:
+                    reasoning_parts.append(f"Missing: {', '.join(multi_score.missing_dimensions)}")
+
+                # Add dimension-specific reasoning
+                if multi_score.codeql.available:
+                    reasoning_parts.append(f"CodeQL: {multi_score.codeql.score:.2f}")
+                if multi_score.taint_tracking.available:
+                    reasoning_parts.append(f"Taint: {multi_score.taint_tracking.score:.2f}")
+                if multi_score.reachability.available:
+                    reasoning_parts.append(f"Reachability: {multi_score.reachability.score:.2f}")
+                if multi_score.attack_surface.available:
+                    reasoning_parts.append(f"AttackSurface: {multi_score.attack_surface.score:.2f}")
+
+                reasoning = " | ".join(reasoning_parts)
+
+                # Add multi-dim scoring evidence to candidate
+                candidate.add_evidence("multi_dim_scoring", multi_score.to_dict())
+
+                self.logger.debug(
+                    f"P5-01d multi-dim scoring for {finding.id}: "
+                    f"status={status.value}, score={multi_score.final_score:.2f}, "
+                    f"confidence={confidence:.2f}"
+                )
 
             except Exception as e:
-                self.logger.warning(f"P5-01c taint tracking failed for {finding.id}: {e}")
-                # Continue with static assessment if taint tracking fails
+                self.logger.warning(f"P5-01d multi-dim scoring failed for {finding.id}: {e}")
+                # Fall back to taint tracking or static assessment
 
-        # Determine exploitability using static rules (if not already determined by taint tracking)
-        if taint_trace_result is None:
+        # Fallback: use taint tracking results directly if available
+        if status is None and taint_trace_result is not None:
+            if taint_trace_result.is_reachable:
+                if taint_trace_result.is_sanitized:
+                    status = ExploitabilityStatus.NOT_EXPLOITABLE
+                    reasoning = (
+                        f"Taint tracking: sanitizer on path: "
+                        f"{taint_trace_result.effective_sanitizer.function_name if taint_trace_result.effective_sanitizer else 'unknown'}"
+                    )
+                else:
+                    status = ExploitabilityStatus.EXPLOITABLE
+                    reasoning = (
+                        f"Taint tracking: exploitable (reachable from "
+                        f"{taint_trace_result.entry_point_type} entry point)"
+                    )
+            else:
+                status = ExploitabilityStatus.UNLIKELY
+                reasoning = "Taint tracking: not reachable from entry points"
+            confidence = taint_trace_result.confidence
+
+        # Final fallback: static assessment
+        if status is None:
             status, confidence, reasoning = self._assess_exploitability(
                 call_chain=call_chain,
                 data_flow=data_flow,
@@ -1237,6 +1283,31 @@ class RoundFourExecutor:
                 return codeql_finding
 
         return None
+
+    def _extract_codeql_dataflow_dict(self, candidate: VulnerabilityCandidate) -> dict[str, Any] | None:
+        """Extract CodeQL dataflow information as a dict for the multi-dim scorer.
+
+        Args:
+            candidate: The vulnerability candidate.
+
+        Returns:
+            Dict with CodeQL dataflow info or None if not available.
+        """
+        codeql_finding = self._get_codeql_dataflow(candidate.finding)
+        if not codeql_finding:
+            return None
+
+        # Extract metadata
+        metadata = codeql_finding.metadata or {}
+
+        # Convert to format expected by CodeQLScorer
+        return {
+            "has_source": metadata.get("has_dataflow", False) or bool(metadata.get("sources")),
+            "has_sink": True,  # If we have a CodeQL finding, there's a sink
+            "has_sanitizer": bool(metadata.get("sanitizers")),
+            "sanitizer_effectiveness": metadata.get("sanitizer_effectiveness", "none"),
+            "path_length": len(metadata.get("path", [])),
+        }
 
     def _extract_codeql_dataflow_info(self, codeql_finding: Finding) -> dict[str, Any]:
         """Extract dataflow information from a CodeQL finding.
