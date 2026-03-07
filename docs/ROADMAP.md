@@ -118,7 +118,13 @@ DeepVuln/
 |P5-01a|整合 CodeQL 数据流结果到 Phase 4|P5-01|done|
 |P5-01b|AST 调用图构建与可达性分析|P5-01|done|
 |P5-01c|污点追踪增强（反向追踪+净化器检测）|P5-01|done|
-|P5-01d|多维评分系统（可达性+用户输入+净化器）|P5-01|**→ 进行中**|
+|P5-01d|多维评分系统（可达性+用户输入+净化器）|P5-01|done|
+|P5-01e|扫描编排一致性修复（路由/状态/统计口径）|P5-01d|**→ 进行中**|
+|P5-01e-1|修复 scan 路由与参数语义一致性（llm_verify/llm_detect/incremental/no_deps）|P5-01e|todo|
+|P5-01e-2|增量扫描接入真实引擎回调，移除占位执行路径|P5-01e|todo|
+|P5-01e-3|修复 full scan 成功状态聚合与 exploitable 统计口径|P5-01e|todo|
+|P5-01e-4|修复 Round4 重复方法覆盖与不确定场景误判偏置|P5-01e|todo|
+|P5-01e-5|接入 full scan 去重与 report_status 统一统计|P5-01e|todo|
 |P5-02|性能优化|P5-01|todo|
 |P5-03|规则治理基础|P5-02|todo|
 
@@ -211,7 +217,7 @@ DeepVuln/
 |字段|值|
 |---|---|
 |**阶段**|Phase 5 - 精度深化|
-|**当前进度**|P5-01d 已完成 ✅|
-|**下一步**|等待新任务指派|
-|**重点模块**|-|
-|**目标**|-|
+|**当前进度**|P5-01d 已完成 ✅，P5-01e 进行中 🔧|
+|**下一步**|优先修复扫描路由/增量扫描/结果口径三类原则性问题|
+|**重点模块**|`src/cli/main.py`、`src/layers/l3_analysis/incremental/scanner.py`、`src/layers/l3_analysis/rounds/round_four.py`|
+|**目标**|检测参数语义、执行路径与报告统计完全一致，消除“宣称能力与实际行为不一致”问题|
