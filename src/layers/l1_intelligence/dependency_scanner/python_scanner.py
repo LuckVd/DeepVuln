@@ -8,6 +8,7 @@ from src.layers.l1_intelligence.dependency_scanner.base_scanner import (
     BaseDependencyScanner,
     Dependency,
     Ecosystem,
+    VersionSource,
 )
 
 
@@ -130,12 +131,24 @@ class PythonScanner(BaseDependencyScanner):
             # Parse requirement
             parsed = self._parse_requirement_line(line)
             if parsed:
+                # P5-01e Fix 1: Set version_source=EXPLICIT and version_confidence=1.0 for lock file versions
+                version = parsed["version"]
+                # Determine version source and confidence
+                version_source = "unknown"  # Use string, Pydantic will convert to enum
+                version_confidence = 0.5
+                if version and version != "*":
+                    # Exact version pin requirements.txt has from lock file
+                    version_source = "explicit"
+                    version_confidence = 1.0
+
                 dep = Dependency(
                     name=parsed["name"],
-                    version=parsed["version"],
+                    version=version,
                     ecosystem=Ecosystem.PYPI,
                     source_file=source_file,
                     is_direct=True,
+                    version_source=version_source,
+                    version_confidence=version_confidence,
                 )
                 dependencies.append(dep)
 
@@ -217,12 +230,16 @@ class PythonScanner(BaseDependencyScanner):
         for dep_str in project_deps:
             parsed = self._parse_requirement_line(dep_str)
             if parsed:
+                # P5-01e Fix: Set version_confidence for pyproject.toml dependencies
+                version_conf = 1.0 if parsed["version"] and parsed["version"] != "*" else 0.5
                 dep = Dependency(
                     name=parsed["name"],
                     version=parsed["version"],
                     ecosystem=Ecosystem.PYPI,
                     source_file=source_file,
                     is_direct=True,
+                    version_source=VersionSource.EXPLICIT if version_conf == 1.0 else VersionSource.UNKNOWN,
+                    version_confidence=version_conf,
                 )
                 dependencies.append(dep)
 
@@ -232,6 +249,7 @@ class PythonScanner(BaseDependencyScanner):
             for dep_str in deps_list:
                 parsed = self._parse_requirement_line(dep_str)
                 if parsed:
+                    version_conf = 1.0 if parsed["version"] and parsed["version"] != "*" else 0.5
                     dep = Dependency(
                         name=parsed["name"],
                         version=parsed["version"],
@@ -239,6 +257,8 @@ class PythonScanner(BaseDependencyScanner):
                         source_file=source_file,
                         is_direct=True,
                         is_optional=True,
+                        version_source=VersionSource.EXPLICIT if version_conf == 1.0 else VersionSource.UNKNOWN,
+                        version_confidence=version_conf,
                     )
                     dependencies.append(dep)
 
@@ -250,12 +270,15 @@ class PythonScanner(BaseDependencyScanner):
 
             version_str = self._poetry_version_to_string(version)
             if version_str:
+                version_conf = 1.0 if version_str and version_str != "*" else 0.5
                 dep = Dependency(
                     name=name.lower().replace("_", "-"),
                     version=version_str,
                     ecosystem=Ecosystem.PYPI,
                     source_file=source_file,
                     is_direct=True,
+                    version_source=VersionSource.EXPLICIT if version_conf == 1.0 else VersionSource.UNKNOWN,
+                    version_confidence=version_conf,
                 )
                 dependencies.append(dep)
 
@@ -264,6 +287,7 @@ class PythonScanner(BaseDependencyScanner):
         for name, version in poetry_dev_deps.items():
             version_str = self._poetry_version_to_string(version)
             if version_str:
+                version_conf = 1.0 if version_str and version_str != "*" else 0.5
                 dep = Dependency(
                     name=name.lower().replace("_", "-"),
                     version=version_str,
@@ -271,6 +295,8 @@ class PythonScanner(BaseDependencyScanner):
                     source_file=source_file,
                     is_direct=True,
                     is_dev=True,
+                    version_source=VersionSource.EXPLICIT if version_conf == 1.0 else VersionSource.UNKNOWN,
+                    version_confidence=version_conf,
                 )
                 dependencies.append(dep)
 
@@ -284,6 +310,7 @@ class PythonScanner(BaseDependencyScanner):
                     continue
                 version_str = self._poetry_version_to_string(version)
                 if version_str:
+                    version_conf = 1.0 if version_str and version_str != "*" else 0.5
                     dep = Dependency(
                         name=name.lower().replace("_", "-"),
                         version=version_str,
@@ -291,6 +318,8 @@ class PythonScanner(BaseDependencyScanner):
                         source_file=source_file,
                         is_direct=True,
                         is_dev=is_dev,
+                        version_source=VersionSource.EXPLICIT if version_conf == 1.0 else VersionSource.UNKNOWN,
+                        version_confidence=version_conf,
                     )
                     dependencies.append(dep)
 
@@ -388,12 +417,15 @@ class PythonScanner(BaseDependencyScanner):
                 for dep_str in dep_strings:
                     parsed = self._parse_requirement_line(dep_str)
                     if parsed:
+                        version_conf = 1.0 if parsed["version"] and parsed["version"] != "*" else 0.5
                         dep = Dependency(
                             name=parsed["name"],
                             version=parsed["version"],
                             ecosystem=Ecosystem.PYPI,
                             source_file=source_file,
                             is_direct=True,
+                            version_source=VersionSource.EXPLICIT if version_conf == 1.0 else VersionSource.UNKNOWN,
+                            version_confidence=version_conf,
                         )
                         dependencies.append(dep)
 
@@ -429,12 +461,15 @@ class PythonScanner(BaseDependencyScanner):
         for name, version in packages.items():
             version_str = self._pipfile_version_to_string(version)
             if version_str:
+                version_conf = 1.0 if version_str and version_str != "*" else 0.5
                 dep = Dependency(
                     name=name.lower().replace("_", "-"),
                     version=version_str,
                     ecosystem=Ecosystem.PYPI,
                     source_file=source_file,
                     is_direct=True,
+                    version_source=VersionSource.EXPLICIT if version_conf == 1.0 else VersionSource.UNKNOWN,
+                    version_confidence=version_conf,
                 )
                 dependencies.append(dep)
 
@@ -443,6 +478,7 @@ class PythonScanner(BaseDependencyScanner):
         for name, version in dev_packages.items():
             version_str = self._pipfile_version_to_string(version)
             if version_str:
+                version_conf = 1.0 if version_str and version_str != "*" else 0.5
                 dep = Dependency(
                     name=name.lower().replace("_", "-"),
                     version=version_str,
@@ -450,6 +486,8 @@ class PythonScanner(BaseDependencyScanner):
                     source_file=source_file,
                     is_direct=True,
                     is_dev=True,
+                    version_source=VersionSource.EXPLICIT if version_conf == 1.0 else VersionSource.UNKNOWN,
+                    version_confidence=version_conf,
                 )
                 dependencies.append(dep)
 

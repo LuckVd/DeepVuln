@@ -545,13 +545,23 @@ async def run_full_security_scan(
                     findings = []
                     try:
                         engine = SemgrepEngine()
+                        # P5-01e Fix 8: Normalize file paths to project-relative glob patterns
+                        # Semgrep expects glob patterns, not absolute file paths
+                        normalized_patterns = []
+                        for f in files:
+                            if f.startswith(str(project_path)):
+                                # Absolute path - convert to relative
+                                rel_path = str(Path(f).relative_to(project_path))
+                                normalized_patterns.append(rel_path)
+                            else:
+                                # Already relative - use as-is
+                                normalized_patterns.append(f)
+
                         # Scan the project with filtered files
-                        # Note: SemgrepEngine.scan is async, so we need asyncio.run()
-                        # Use include_patterns for file filtering (supported parameter)
                         async def _run_scan():
                             return await engine.scan(
                                 source_path=project_path,
-                                include_patterns=files,  # Filter to only changed files
+                                include_patterns=normalized_patterns,  # Use normalized patterns
                                 use_auto_config=True,
                             )
 
@@ -559,7 +569,10 @@ async def run_full_security_scan(
                         if result.findings:
                             findings.extend([f.model_dump() for f in result.findings])
                     except Exception as e:
-                        logger.warning(f"Incremental scan callback error: {e}")
+                        # P5-01e Fix 9 (revised): Re-raise exception instead of adding error marker
+                        # Adding error dict to findings causes dirty data (error treated as finding)
+                        logger.error(f"Incremental scan callback failed: {e}")
+                        raise  # Let the caller handle the exception properly
                     return findings
                 return scan_callback
 
@@ -605,6 +618,14 @@ async def run_full_security_scan(
             result["verified_findings"] = inc_result.new_vulnerabilities
             result["total_findings"] = inc_result.total_findings
             result["duration_seconds"] = inc_result.duration_seconds
+
+            # P5-01e Fix 6: Add statistics field for incremental results (consistency with full scan)
+            result["statistics"] = {
+                "total_findings": inc_result.total_findings,
+                "verified_count": len(inc_result.new_vulnerabilities) if inc_result.new_vulnerabilities else 0,
+                "by_severity": {},  # Incremental result doesn't have severity breakdown
+                "by_engine": {"incremental": inc_result.total_findings},
+            }
 
             # Display summary
             console.print(f"\n{inc_result.to_summary()}")
@@ -865,6 +886,21 @@ async def run_full_security_scan(
                 "auth_bypass",
             ],
         )))
+
+    # P5-01e Fix 5: Check if requested engines are all unavailable
+    if engines and not scan_tasks:
+        # Engines were explicitly requested but none are available
+        error_msg = f"Requested engines {engines} are all unavailable"
+        console.print(f"\n[red]Error: {error_msg}[/]")
+        result["success"] = False
+        result["errors"].append(error_msg)
+        result["statistics"] = {
+            "total_findings": 0,
+            "verified_count": 0,
+            "by_severity": {},
+            "by_engine": {},
+        }
+        return result
 
     # Execute all scans in parallel
     if scan_tasks:
@@ -2346,13 +2382,13 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
 
     full_scan = options.get("full_scan", False)
     engines = options.get("engines")
-    options.get("llm_verify", False)
+    llm_verify = options.get("llm_verify", False)  # P5-01e Fix 4: Fix missing assignment
     llm_full_detect = options.get("llm_full_detect", False)
     no_deps = options.get("no_deps", False)
     base_scan = options.get("base_scan", False)
 
-    # Check if code analysis is requested
-    needs_code_analysis = full_scan or base_scan or engines or llm_full_detect
+    # P5-01e Fix 4: Include llm_verify in needs_code_analysis condition
+    needs_code_analysis = full_scan or base_scan or engines or llm_full_detect or llm_verify
 
     if needs_code_analysis:
         # Run full scan with code analysis

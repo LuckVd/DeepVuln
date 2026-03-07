@@ -8,6 +8,7 @@ from src.layers.l1_intelligence.dependency_scanner.base_scanner import (
     BaseDependencyScanner,
     Dependency,
     Ecosystem,
+    VersionSource,
 )
 
 
@@ -93,6 +94,7 @@ class NpmScanner(BaseDependencyScanner):
                 if self._is_local_package(version):
                     continue
 
+                # P5-01e Fix 1: Set version_source=EXPLICIT and version_confidence=1.0 for lock file versions
                 dep = Dependency(
                     name=name,
                     version=self._clean_version(version),
@@ -100,6 +102,8 @@ class NpmScanner(BaseDependencyScanner):
                     source_file=source_file,
                     is_direct=True,
                     is_dev=is_dev,
+                    version_source=VersionSource.EXPLICIT,
+                    version_confidence=1.0,
                 )
                 dependencies.append(dep)
 
@@ -107,6 +111,7 @@ class NpmScanner(BaseDependencyScanner):
         for name, version in data.get("optionalDependencies", {}).items():
             if self._is_local_package(version):
                 continue
+            # P5-01e Fix 1: Set version_source=EXPLICIT and version_confidence=1.0 for lock file versions
             dep = Dependency(
                 name=name,
                 version=self._clean_version(version),
@@ -114,6 +119,8 @@ class NpmScanner(BaseDependencyScanner):
                 source_file=source_file,
                 is_direct=True,
                 is_optional=True,
+                version_source=VersionSource.EXPLICIT,
+                version_confidence=1.0,
             )
             dependencies.append(dep)
 
@@ -121,12 +128,15 @@ class NpmScanner(BaseDependencyScanner):
         for name, version in data.get("peerDependencies", {}).items():
             if self._is_local_package(version):
                 continue
+            # P5-01e Fix 1: Set version_source=EXPLICIT and version_confidence=1.0 for lock file versions
             dep = Dependency(
                 name=name,
                 version=self._clean_version(version),
                 ecosystem=Ecosystem.NPM,
                 source_file=source_file,
                 is_direct=True,
+                version_source=VersionSource.EXPLICIT,
+                version_confidence=1.0,
             )
             dependencies.append(dep)
 
@@ -173,6 +183,7 @@ class NpmScanner(BaseDependencyScanner):
                 is_dev = pkg_info.get("dev", False)
                 is_optional = pkg_info.get("optional", False)
 
+                # P5-01e Fix 1b: Lock file versions are precise
                 dep = Dependency(
                     name=name,
                     version=version,
@@ -181,6 +192,8 @@ class NpmScanner(BaseDependencyScanner):
                     is_direct=False,  # Lock file deps are transitive
                     is_dev=is_dev,
                     is_optional=is_optional,
+                    version_source=VersionSource.EXPLICIT,
+                    version_confidence=1.0,  # Lock file has exact version
                 )
                 dependencies.append(dep)
         else:
@@ -198,6 +211,8 @@ class NpmScanner(BaseDependencyScanner):
                             source_file=source_file,
                             is_direct=False,
                             is_dev=is_dev,
+                            version_source=VersionSource.EXPLICIT,
+                            version_confidence=1.0,  # Lock file has exact version
                         )
                         dependencies.append(dep)
 
@@ -211,6 +226,8 @@ class NpmScanner(BaseDependencyScanner):
                             source_file=source_file,
                             is_direct=False,
                             is_dev=is_dev,
+                            version_source=VersionSource.EXPLICIT,
+                            version_confidence=1.0,  # Lock file has exact version
                         )
                         dependencies.append(dep)
 

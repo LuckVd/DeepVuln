@@ -127,8 +127,9 @@ class AutoSecurityScanner:
                 return result
 
             # Run security analysis
+            # P5-01e Fix 7: Pass config to analyzer
             self.logger.info("Running security analysis...")
-            report = await self.security_analyzer.analyze(source_path)
+            report = await self.security_analyzer.analyze(source_path, config=self.config)
 
             # Apply filters based on config
             self._apply_filters(report)

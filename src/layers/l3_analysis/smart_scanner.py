@@ -421,19 +421,28 @@ class SmartScanner:
             )
 
         elif engine_name == "codeql":
-            # CodeQL integration (placeholder for now)
+            # P5-01e Fix 3: CodeQL integration with target files (passed via options for metadata)
+            # Note: CodeQL doesn't support file-level filtering natively, but we pass
+            # target_files for metadata tracking and potential future use
             if self.engine_registry:
                 codeql_engine = self.engine_registry.get("codeql")
                 if codeql_engine:
-                    return await codeql_engine.scan(source_path=source_path)
+                    return await codeql_engine.scan(
+                        source_path=source_path,
+                        # CodeQL analyzes entire DB, but we track targets in metadata
+                        **({"_target_files": target_files} if target_files else {}),
+                    )
             return None
 
         elif engine_name == "agent":
-            # Agent integration (placeholder for now)
+            # P5-01e Fix 3: Agent integration with explicit target files
             if self.engine_registry:
                 agent_engine = self.engine_registry.get("agent")
                 if agent_engine:
-                    return await agent_engine.scan(source_path=source_path)
+                    return await agent_engine.scan(
+                        source_path=source_path,
+                        files=target_files if target_files else None,
+                    )
             return None
 
         return None

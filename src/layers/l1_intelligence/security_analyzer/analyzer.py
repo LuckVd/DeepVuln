@@ -193,11 +193,16 @@ class SecurityAnalyzer:
         self.python_scanner = PythonScanner()
         self.tech_detector = TechStackDetector()
 
-    async def analyze(self, source_path: Path) -> SecurityReport:
+    async def analyze(
+        self,
+        source_path: Path,
+        config: Any = None,
+    ) -> SecurityReport:
         """Perform security analysis on source code.
 
         Args:
             source_path: Path to the source code.
+            config: Optional ScanConfig to control which steps are executed.
 
         Returns:
             Security analysis report.
@@ -205,14 +210,25 @@ class SecurityAnalyzer:
         start_time = datetime.now()
         self.logger.info(f"Starting security analysis of {source_path}")
 
+        # P5-01e Fix 7: Extract config options with defaults
+        scan_dependencies = getattr(config, "scan_dependencies", True) if config else True
+        scan_frameworks = getattr(config, "scan_frameworks", True) if config else True
+        scan_attack_surface = getattr(config, "scan_attack_surface", True) if config else True
+        lookup_cves = getattr(config, "lookup_cves", True) if config else True
+
         report = SecurityReport(source_path=str(source_path))
 
         try:
-            # Step 1: Scan dependencies
-            self.logger.info("Scanning dependencies...")
-            scan_result = await self._scan_dependencies(source_path)
-            report.dependencies_scanned = scan_result.total_dependencies
-            report.errors.extend(scan_result.errors)
+            # Step 1: Scan dependencies (if enabled)
+            scan_result = None
+            if scan_dependencies:
+                self.logger.info("Scanning dependencies...")
+                scan_result = await self._scan_dependencies(source_path)
+                report.dependencies_scanned = scan_result.total_dependencies
+                report.errors.extend(scan_result.errors)
+            else:
+                self.logger.info("Skipping dependency scan (disabled)")
+                scan_result = ScanResult(total_dependencies=0, dependencies=[], errors=[])
 
             # Step 2: Detect tech stack
             self.logger.info("Detecting tech stack...")
@@ -220,21 +236,30 @@ class SecurityAnalyzer:
             report.tech_stack = tech_stack
             report.frameworks_detected = len(tech_stack.frameworks)
 
-            # Step 3: Detect attack surface
-            self.logger.info("Detecting attack surface...")
-            self._detect_attack_surface(report, source_path, tech_stack)
+            # Step 3: Detect attack surface (if enabled)
+            if scan_attack_surface:
+                self.logger.info("Detecting attack surface...")
+                self._detect_attack_surface(report, source_path, tech_stack)
+            else:
+                self.logger.info("Skipping attack surface detection (disabled)")
 
-            # Step 4: Lookup CVEs for dependencies
-            self.logger.info("Looking up CVEs for dependencies...")
-            dep_vulns, unresolved_deps = await self._lookup_dependency_vulns(scan_result)
-            report.dependency_vulns = dep_vulns
-            report.unresolved_dependencies = unresolved_deps
-            report.unresolved_count = len(unresolved_deps)
+            # Step 4: Lookup CVEs for dependencies (if enabled)
+            if lookup_cves and scan_result:
+                self.logger.info("Looking up CVEs for dependencies...")
+                dep_vulns, unresolved_deps = await self._lookup_dependency_vulns(scan_result)
+                report.dependency_vulns = dep_vulns
+                report.unresolved_dependencies = unresolved_deps
+                report.unresolved_count = len(unresolved_deps)
+            else:
+                self.logger.info("Skipping CVE lookup for dependencies (disabled or no dependencies)")
 
-            # Step 5: Lookup CVEs for frameworks
-            self.logger.info("Looking up CVEs for frameworks...")
-            fw_vulns = await self._lookup_framework_vulns(tech_stack)
-            report.framework_vulns = fw_vulns
+            # Step 5: Lookup CVEs for frameworks (if enabled)
+            if lookup_cves and scan_frameworks:
+                self.logger.info("Looking up CVEs for frameworks...")
+                fw_vulns = await self._lookup_framework_vulns(tech_stack)
+                report.framework_vulns = fw_vulns
+            else:
+                self.logger.info("Skipping CVE lookup for frameworks (disabled)")
 
             # Step 6: Calculate statistics
             self._calculate_statistics(report)

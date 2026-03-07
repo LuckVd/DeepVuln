@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-03-07 | 5a09e71 | fix(l1,l3,cli): 完成 P5-01e 缺陷收敛修复（version_confidence 全链路补齐 + 异常处理重构） |
 | 2026-03-07 | 7309631 | fix(cli): 修复 9 项运行时硬错误，确保扫描编排一致性 |
 | 2026-03-07 | f84dbc0 | docs(goal): set new goal - P5-01e scan orchestration consistency fix |
 | 2026-03-07 | da0d41d | test(l3): fix Round 4 integration tests for P5-01d multi-dimensional scoring |

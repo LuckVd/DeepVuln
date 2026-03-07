@@ -538,17 +538,16 @@ class CodeQLEngine(BaseEngine):
                 error_message=health_result.message,
             )
 
-        # Track rules used
+        # P5-01e Fix 2: Track rules used - include ALL default suites
         rules_used = []
         if query_suite:
             rules_used.append(query_suite)
         elif queries:
             rules_used.extend(queries)
         else:
-            # Use default security suite
+            # Use ALL default security suites (not just the first one)
             default_suites = DEFAULT_QUERY_SUITES.get(codeql_lang, [])
-            if default_suites:
-                rules_used.append(default_suites[0])
+            rules_used.extend(default_suites)  # All suites, not just [0]
 
         # Create scan result
         result = self.create_scan_result(source_path, rules_used)
@@ -726,84 +725,80 @@ class CodeQLEngine(BaseEngine):
                 )
 
             # Phase 2: Analyze database
+            # P5-01e Fix 2: Execute ALL default suites and merge findings
             analyze_start_time = time.time()
-            try:
-                sarif_output = await asyncio.wait_for(
-                    self._analyze_database(
-                        database_path=database_path,
-                        queries=queries,
-                        query_suite=query_suite or (DEFAULT_QUERY_SUITES.get(codeql_lang, ["security"])[0]),
-                        language=codeql_lang,
-                    ),
-                    timeout=self.analyze_timeout,
-                )
-            except asyncio.TimeoutError:
-                analyze_duration = time.time() - analyze_start_time
-                health_result = self.health_manager.create_timeout_result(
-                    operation="analyze",
-                    duration=analyze_duration,
-                    timeout_seconds=self.analyze_timeout,
-                )
-                result.metadata["codeql_health"] = health_result.to_dict()
-                logger.warning(f"CodeQL analysis timeout after {self.analyze_timeout}s")
-                return self.finalize_scan_result(
-                    result,
-                    success=False,
-                    error_message=health_result.message,
-                )
-            except MemoryError:
-                health_result = CodeQLHealthResult(
-                    status=CodeQLStatus.RESOURCE_ERROR,
-                    message="Memory exhausted during analysis",
-                    duration=time.time() - analyze_start_time,
-                    fallback_triggered=True,
-                    operation="analyze",
-                )
-                result.metadata["codeql_health"] = health_result.to_dict()
-                logger.error("CodeQL analysis failed: memory exhausted")
-                return self.finalize_scan_result(
-                    result,
-                    success=False,
-                    error_message=health_result.message,
-                )
-            except json.JSONDecodeError as e:
+            all_findings: list[Finding] = []
+            suites_to_run: list[str] = []
+
+            # Determine which suites to run
+            if query_suite:
+                suites_to_run = [query_suite]
+            elif queries:
+                suites_to_run = queries
+            else:
+                # Use ALL default security suites
+                suites_to_run = DEFAULT_QUERY_SUITES.get(codeql_lang, ["security"])
+
+            # Run each suite and collect findings
+            suite_results: list[tuple[str, dict[str, Any] | None]] = []
+            for suite in suites_to_run:
+                try:
+                    suite_sarif = await asyncio.wait_for(
+                        self._analyze_database(
+                            database_path=database_path,
+                            queries=None,
+                            query_suite=suite,
+                            language=codeql_lang,
+                        ),
+                        timeout=self.analyze_timeout,
+                    )
+                    suite_results.append((suite, suite_sarif))
+                except asyncio.TimeoutError:
+                    logger.warning(f"CodeQL suite '{suite}' timed out after {self.analyze_timeout}s")
+                    suite_results.append((suite, None))
+                except Exception as e:
+                    logger.warning(f"CodeQL suite '{suite}' failed: {e}")
+                    suite_results.append((suite, None))
+
+            # Check if at least one suite succeeded
+            successful_suites = [(s, r) for s, r in suite_results if r is not None]
+            if not successful_suites:
+                # All suites failed - check first failure for error type
+                first_suite, first_result = suite_results[0]
+                # Re-raise the original exception type by checking context
+                # Since we caught exceptions above, create appropriate health result
                 health_result = CodeQLHealthResult(
                     status=CodeQLStatus.QUERY_FAILED,
-                    message=f"Failed to parse SARIF output: {e}",
+                    message=f"All CodeQL suites failed. First failure: {first_suite}",
                     duration=time.time() - analyze_start_time,
                     fallback_triggered=True,
-                    error_details={"error_type": "JSONDecodeError"},
                     operation="analyze",
                 )
                 result.metadata["codeql_health"] = health_result.to_dict()
-                logger.error(f"CodeQL SARIF parsing failed: {e}")
+                logger.warning("All CodeQL analysis suites failed")
                 return self.finalize_scan_result(
                     result,
                     success=False,
                     error_message=health_result.message,
                 )
 
-            if sarif_output is None:
-                health_result = CodeQLHealthResult(
-                    status=CodeQLStatus.QUERY_FAILED,
-                    message="Failed to analyze CodeQL database",
-                    duration=time.time() - analyze_start_time,
-                    fallback_triggered=True,
-                    operation="analyze",
-                )
-                result.metadata["codeql_health"] = health_result.to_dict()
-                logger.warning("CodeQL analysis returned no output")
-                return self.finalize_scan_result(
-                    result,
-                    success=False,
-                    error_message=health_result.message,
-                )
+            # Parse and merge findings from all successful suites
+            sarif_output = successful_suites[0][1]  # Keep first for raw_output
+            for suite_name, suite_sarif in successful_suites:
+                try:
+                    suite_findings = self._parse_sarif(
+                        sarif_output=suite_sarif,
+                        source_path=source_path,
+                    )
+                    # Tag findings with their source suite
+                    for finding in suite_findings:
+                        finding.metadata["codeql_suite"] = suite_name
+                    all_findings.extend(suite_findings)
+                    logger.info(f"CodeQL suite '{suite_name}' found {len(suite_findings)} findings")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse SARIF from suite '{suite_name}': {e}")
 
-            # Parse SARIF results
-            findings = self._parse_sarif(
-                sarif_output=sarif_output,
-                source_path=source_path,
-            )
+            findings = all_findings
 
             # Apply severity filter
             if severity_filter:

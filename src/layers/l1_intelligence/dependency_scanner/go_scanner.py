@@ -8,6 +8,7 @@ from src.layers.l1_intelligence.dependency_scanner.base_scanner import (
     BaseDependencyScanner,
     Dependency,
     Ecosystem,
+    VersionSource,
 )
 
 
@@ -220,6 +221,11 @@ class GoScanner(BaseDependencyScanner):
         # Clean version (remove 'v' prefix for consistency in search)
         clean_version = version.lstrip("v") if version else "*"
 
+        # P5-01e Fix 1: Set version_source=EXPLICIT and version_confidence=1.0 for lock file versions
+        # go.sum provides precise versions (lock file)
+        version_source = VersionSource.EXPLICIT if precise_version else VersionSource.UNKNOWN
+        version_confidence = 1.0 if precise_version else 0.5
+
         return Dependency(
             name=package_path,
             version=clean_version,
@@ -228,6 +234,8 @@ class GoScanner(BaseDependencyScanner):
             is_direct=not is_indirect,
             is_dev=False,
             is_optional=False,
+            version_source=version_source,
+            version_confidence=version_confidence,
         )
 
     def _parse_go_sum(self, file_path: Path) -> dict[str, str]:
