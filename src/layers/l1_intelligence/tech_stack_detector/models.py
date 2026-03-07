@@ -71,6 +71,8 @@ class Framework(BaseModel):
     version: str | None = None
     confidence: float = 1.0
     source_file: str | None = None
+    # P5-03b Fix 5: Add ecosystem for precise CVE matching
+    ecosystem: str | None = None  # npm, pypi, maven, go, nuget, gems, etc.
 
 
 class Database(BaseModel):
@@ -160,13 +162,19 @@ class TechStack(BaseModel):
     def get_all_keywords(self) -> list[str]:
         """Get all searchable keywords for CVE lookup.
 
+        P5-03b Fix 5: Include ecosystem prefix for precise matching.
+
         Returns:
-            List of keywords.
+            List of keywords with optional ecosystem prefix.
         """
         keywords = []
 
-        # Add frameworks
+        # Add frameworks with ecosystem prefix
         for fw in self.frameworks:
+            # Add ecosystem-prefixed keyword for precise matching
+            if fw.ecosystem:
+                keywords.append(f"{fw.ecosystem}:{fw.name}")
+            # Also add plain name for backward compatibility
             keywords.append(fw.name)
             if fw.version:
                 keywords.append(f"{fw.name} {fw.version}")

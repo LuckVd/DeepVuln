@@ -164,6 +164,60 @@ class IntelService:
 
         return results
 
+    async def search_cves_by_package(
+        self,
+        package_name: str,
+        ecosystem: str | None = None,
+        version: str | None = None,
+        limit: int = 50,
+    ) -> list[tuple[CVEInfo, float]]:
+        """Search CVEs by package with precise ecosystem matching.
+
+        P5-03b Fix 5: Prefer ecosystem + package exact matching over keyword matching.
+
+        Args:
+            package_name: Package name (e.g., "lodash", "requests").
+            ecosystem: Ecosystem identifier (npm, pypi, maven, go, nuget, gems).
+            version: Optional version constraint.
+            limit: Maximum results.
+
+        Returns:
+            List of (CVEInfo, confidence) tuples.
+        """
+        results_with_confidence: list[tuple[CVEInfo, float]] = []
+
+        # Step 1: Try exact ecosystem + package match (highest confidence)
+        if ecosystem:
+            ecosystem_query = f"{ecosystem}:{package_name}"
+            ecosystem_results = await self.search_cves(
+                query=ecosystem_query,
+                limit=limit,
+                use_api=True,
+            )
+            for cve in ecosystem_results:
+                results_with_confidence.append((cve, 1.0))  # High confidence
+
+        # Step 2: Try package name only (medium confidence)
+        remaining = limit - len(results_with_confidence)
+        if remaining > 0:
+            package_results = await self.search_cves(
+                query=package_name,
+                limit=remaining,
+                use_api=True,
+            )
+            found_ids = {c.cve_id for cve, _ in results_with_confidence}
+            for cve in package_results:
+                if cve.cve_id not in found_ids:
+                    # Medium confidence - no ecosystem match
+                    results_with_confidence.append((cve, 0.7))
+
+        # Step 3: Filter by version if specified
+        if version:
+            # TODO: Add version range matching logic
+            pass
+
+        return results_with_confidence[:limit]
+
     async def get_recent_cves(self, days: int = 7, limit: int = 100) -> list[CVEInfo]:
         """Get recently published CVEs.
 

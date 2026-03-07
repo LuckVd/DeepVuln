@@ -159,6 +159,10 @@ class RuleGatingResult:
     is_cli_project: bool = False
     restricted_reason: str | None = None
 
+    # P5-03a Fix 4: Add attack surface confidence for fail-open protection
+    attack_surface_confidence: float = 0.0  # 0.0 = no detection, 1.0 = full confidence
+    attack_surface_available: bool = False  # Whether attack surface detection was performed
+
     # Statistics
     total_packs_available: int = 0
     packs_disabled_count: int = 0
@@ -177,6 +181,8 @@ class RuleGatingResult:
             "has_websocket": self.has_websocket,
             "is_cli_project": self.is_cli_project,
             "restricted_reason": self.restricted_reason,
+            "attack_surface_confidence": self.attack_surface_confidence,
+            "attack_surface_available": self.attack_surface_available,
             "statistics": {
                 "total_packs_available": self.total_packs_available,
                 "packs_disabled_count": self.packs_disabled_count,
@@ -283,9 +289,17 @@ class RuleGatingEngine:
             result.is_cli_project = project_type_value.lower() == "cli"
 
     def _extract_attack_surface_info(self, result: RuleGatingResult) -> None:
-        """Extract information from attack surface."""
+        """Extract information from attack surface.
+
+        P5-03a Fix 4: Add confidence scoring for fail-open protection.
+        """
         if not self.attack_surface:
+            # No attack surface detection performed - use defaults (fail-open)
+            result.attack_surface_available = False
+            result.attack_surface_confidence = 0.0
             return
+
+        result.attack_surface_available = True
 
         # Check HTTP endpoints
         if hasattr(self.attack_surface, "http_endpoints"):
@@ -294,6 +308,33 @@ class RuleGatingEngine:
         # Check WebSocket endpoints
         if hasattr(self.attack_surface, "websocket_endpoints"):
             result.has_websocket = self.attack_surface.websocket_endpoints > 0
+
+        # P5-03a Fix 4: Calculate confidence based on detection coverage
+        # Confidence is higher when:
+        # 1. More files were scanned
+        # 2. Entry points were detected
+        # 3. Detection completed without errors
+        confidence = 0.5  # Base confidence
+
+        # Increase confidence if files were scanned
+        if hasattr(self.attack_surface, "files_scanned"):
+            files_scanned = self.attack_surface.files_scanned or 0
+            if files_scanned > 0:
+                confidence += min(0.2, files_scanned / 1000 * 0.2)
+
+        # Increase confidence if entry points were found
+        if hasattr(self.attack_surface, "entry_points"):
+            entry_points = self.attack_surface.entry_points or []
+            if len(entry_points) > 0:
+                confidence += 0.2
+
+        # Decrease confidence if there were errors
+        if hasattr(self.attack_surface, "errors"):
+            errors = self.attack_surface.errors or []
+            if errors:
+                confidence -= 0.2
+
+        result.attack_surface_confidence = min(1.0, max(0.0, confidence))
 
     def _determine_mode(self, result: RuleGatingResult) -> None:
         """Determine if restricted mode should be used."""
@@ -361,10 +402,36 @@ class RuleGatingEngine:
         result.disabled_packs.extend(sorted(list(disabled_packs)))
 
     def _apply_attack_surface_gating(self, result: RuleGatingResult) -> None:
-        """Apply attack surface-based rule gating."""
-        # HTTP-based gating
+        """Apply attack surface-based rule gating.
+
+        P5-03a Fix 4: Implement fail-open protection.
+        Only disable rules when attack surface detection confidence is HIGH.
+        """
+        # P5-03a Fix 4: Fail-open protection
+        # Only apply aggressive gating if we have HIGH confidence in attack surface detection
+        # Minimum confidence threshold for disabling rules
+        HIGH_CONFIDENCE_THRESHOLD = 0.7
+
+        if not result.attack_surface_available:
+            # No attack surface detection - fail-open (keep all rules enabled)
+            self.logger.info(
+                "Attack surface detection not available - keeping all rules enabled (fail-open)"
+            )
+            return
+
+        if result.attack_surface_confidence < HIGH_CONFIDENCE_THRESHOLD:
+            # Low confidence - fail-open (keep all rules enabled)
+            self.logger.info(
+                f"Attack surface confidence ({result.attack_surface_confidence:.2f}) "
+                f"below threshold ({HIGH_CONFIDENCE_THRESHOLD}) - keeping all rules enabled (fail-open)"
+            )
+            return
+
+        # HTTP-based gating - only if high confidence
         if not result.has_http:
-            self.logger.info("No HTTP endpoints detected, disabling web-related rules")
+            self.logger.info(
+                "No HTTP endpoints detected (high confidence), disabling web-related rules"
+            )
 
             # Disable web-related packs
             web_packs = [
@@ -380,12 +447,14 @@ class RuleGatingEngine:
             # Disable HTTP-related rule IDs
             result.disabled_rule_ids.extend(NO_HTTP_DISABLED_RULE_IDS)
 
-        # WebSocket-based gating
+        # WebSocket-based gating - only if high confidence
         if not result.has_websocket:
-            self.logger.info("No WebSocket endpoints detected, disabling websocket rules")
+            self.logger.info(
+                "No WebSocket endpoints detected (high confidence), disabling websocket rules"
+            )
             result.disabled_rule_ids.extend(WEBSOCKET_RULE_IDS)
 
-        # CLI project gating
+        # CLI project gating - apply regardless of confidence (explicit detection)
         if result.is_cli_project:
             self.logger.info("CLI project detected, disabling web/API packs")
             for pack in CLI_DISABLED_PACKS:

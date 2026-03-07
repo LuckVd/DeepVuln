@@ -535,44 +535,85 @@ async def run_full_security_scan(
             )
 
             # P5-01e B1: Create scan callback for incremental scanner
+            # P5-03a Fix 2: Multi-engine support for incremental scans
             def create_incremental_scan_callback(project_path: Path, scan_options: dict):
                 """Create a scan callback that uses actual scanner engines."""
                 def scan_callback(files: list[str]) -> list[dict]:
                     import asyncio
 
+                    from src.layers.l3_analysis.engines.codeql import CodeQLEngine
                     from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
 
                     findings = []
+                    by_engine: dict[str, int] = {}
+                    errors = []
+
+                    # P5-01e Fix 8: Normalize file paths to project-relative glob patterns
+                    normalized_patterns = []
+                    for f in files:
+                        if f.startswith(str(project_path)):
+                            rel_path = str(Path(f).relative_to(project_path))
+                            normalized_patterns.append(rel_path)
+                        else:
+                            normalized_patterns.append(f)
+
+                    async def _run_multi_engine_scan():
+                        """Run multiple engines in parallel for incremental scan."""
+                        nonlocal findings, by_engine, errors
+                        tasks = []
+
+                        # Semgrep engine (always included)
+                        try:
+                            semgrep_engine = SemgrepEngine()
+                            if semgrep_engine.is_available():
+                                tasks.append(("semgrep", semgrep_engine.scan(
+                                    source_path=project_path,
+                                    include_patterns=normalized_patterns,
+                                    use_auto_config=True,
+                                )))
+                        except Exception as e:
+                            errors.append(f"Semgrep init failed: {e}")
+
+                        # CodeQL engine (if available and requested)
+                        engines_requested = scan_options.get("engines", [])
+                        if "codeql" in engines_requested or scan_options.get("full_scan"):
+                            try:
+                                codeql_engine = CodeQLEngine()
+                                if codeql_engine.is_available():
+                                    # Detect primary language from project
+                                    from src.layers.l1_intelligence.tech_stack_detector import TechStackDetector
+                                    tech_detector = TechStackDetector()
+                                    tech_result = tech_detector.detect(project_path)
+                                    primary_lang = tech_result.languages[0].language.value if tech_result.languages else "python"
+                                    tasks.append(("codeql", codeql_engine.scan(
+                                        source_path=project_path,
+                                        language=primary_lang.lower(),
+                                    )))
+                            except Exception as e:
+                                errors.append(f"CodeQL init failed: {e}")
+
+                        if not tasks:
+                            return
+
+                        # Run all available engines in parallel
+                        results = await asyncio.gather(*[t[1] for t in tasks], return_exceptions=True)
+
+                        for (engine_name, _), result in zip(tasks, results, strict=False):
+                            if isinstance(result, Exception):
+                                errors.append(f"{engine_name} scan failed: {result}")
+                            elif result and result.findings:
+                                engine_findings = [f.model_dump() for f in result.findings]
+                                for f in engine_findings:
+                                    f["source_engine"] = engine_name  # Tag findings with engine
+                                findings.extend(engine_findings)
+                                by_engine[engine_name] = len(engine_findings)
+
                     try:
-                        engine = SemgrepEngine()
-                        # P5-01e Fix 8: Normalize file paths to project-relative glob patterns
-                        # Semgrep expects glob patterns, not absolute file paths
-                        normalized_patterns = []
-                        for f in files:
-                            if f.startswith(str(project_path)):
-                                # Absolute path - convert to relative
-                                rel_path = str(Path(f).relative_to(project_path))
-                                normalized_patterns.append(rel_path)
-                            else:
-                                # Already relative - use as-is
-                                normalized_patterns.append(f)
-
-                        # Scan the project with filtered files
-                        async def _run_scan():
-                            return await engine.scan(
-                                source_path=project_path,
-                                include_patterns=normalized_patterns,  # Use normalized patterns
-                                use_auto_config=True,
-                            )
-
-                        result = asyncio.run(_run_scan())
-                        if result.findings:
-                            findings.extend([f.model_dump() for f in result.findings])
+                        asyncio.run(_run_multi_engine_scan())
                     except Exception as e:
-                        # P5-01e Fix 9 (revised): Re-raise exception instead of adding error marker
-                        # Adding error dict to findings causes dirty data (error treated as finding)
-                        logger.error(f"Incremental scan callback failed: {e}")
-                        raise  # Let the caller handle the exception properly
+                        logger.error(f"Incremental multi-engine scan failed: {e}")
+                        raise
+
                     return findings
                 return scan_callback
 
@@ -658,6 +699,15 @@ async def run_full_security_scan(
     primary_lang = tech_result.languages[0].language.value if tech_result.languages else "Unknown"
     console.print(f"  Primary Language: {primary_lang}")
     result["primary_language"] = primary_lang
+
+    # P5-03a Fix 1: Extract all detected languages for multi-language CodeQL support
+    all_languages = []
+    if tech_result.languages:
+        for lang in tech_result.languages:
+            lang_value = lang.language.value if hasattr(lang, 'language') else str(lang)
+            all_languages.append(lang_value)
+    console.print(f"  Detected Languages: {', '.join(all_languages) if all_languages else primary_lang}")
+    result["detected_languages"] = all_languages
 
     # Attack Surface Detection
     llm_client_for_detect = None
@@ -770,13 +820,16 @@ async def run_full_security_scan(
             result["errors"].append("CodeQL not available: install from https://github.com/github/codeql-cli-binaries/releases")
 
     # Agent Engine
+    # P5-03b Fix 6: Add --agent-max-files option for larger projects
     agent_engine = None
     if "agent" in engines and llm_client:
+        agent_max_files = options.get("agent_max_files", 50)  # P5-03b Fix 6: Support custom file limit
         agent_engine = OpenCodeAgent(
             llm_client=llm_client,
             language=primary_lang.lower(),
+            max_files=agent_max_files,
         )
-        console.print("  Agent: ✓")
+        console.print(f"  Agent: ✓ (max_files: {agent_max_files})")
 
     # =========================================================================
     # Phase 1/2/3: Parallel Engine Scan (Semgrep + CodeQL + Agent)
@@ -845,6 +898,11 @@ async def run_full_security_scan(
     # Build parallel scan tasks
     scan_tasks = []
 
+    # P5-03a Fix 3: Track requested vs executed engines for degradation reporting
+    requested_engines = set(engines) if engines else set()
+    executed_engines = set()
+    unavailable_engines = set()
+
     if semgrep_engine and semgrep_engine.is_available():
         # P5-01e A8: pass tech_stack and attack_surface for rule gating and file filtering
         # P5-01e A9: Implement include_low semantics - skip low severity when not enabled
@@ -863,13 +921,40 @@ async def run_full_security_scan(
             tech_stack=tech_result,
             attack_surface=surface_report,
         )))
+        executed_engines.add("semgrep")
+    elif "semgrep" in requested_engines:
+        unavailable_engines.add("semgrep")
 
     if codeql_engine and codeql_engine.is_available():
-        scan_tasks.append(("codeql", codeql_engine.scan(
-            source_path=source_path,
-            language=primary_lang.lower(),
-            severity_filter=None,
-        )))
+        # P5-03a Fix 1: Multi-language CodeQL support
+        # Use scan_multi_language when multiple languages are detected
+        codeql_supported_languages = [
+            "java", "python", "go", "javascript", "typescript",
+            "c", "cpp", "csharp", "ruby", "swift"
+        ]
+        supported_detected = [
+            lang for lang in all_languages
+            if lang.lower() in codeql_supported_languages
+        ]
+
+        if len(supported_detected) > 1:
+            # Multi-language project - use scan_multi_language
+            console.print(f"  [dim]Multi-language CodeQL scan: {supported_detected}[/]")
+            scan_tasks.append(("codeql", codeql_engine.scan_multi_language(
+                source_path=source_path,
+                languages=[lang.lower() for lang in supported_detected],
+                severity_filter=None,
+            )))
+        else:
+            # Single language or no supported languages - use regular scan
+            scan_tasks.append(("codeql", codeql_engine.scan(
+                source_path=source_path,
+                language=primary_lang.lower(),
+                severity_filter=None,
+            )))
+        executed_engines.add("codeql")
+    elif "codeql" in requested_engines:
+        unavailable_engines.add("codeql")
 
     if agent_engine and agent_target_files:
         scan_tasks.append(("agent", agent_engine.scan(
@@ -886,6 +971,27 @@ async def run_full_security_scan(
                 "auth_bypass",
             ],
         )))
+        executed_engines.add("agent")
+    elif "agent" in requested_engines:
+        unavailable_engines.add("agent")
+
+    # P5-03a Fix 3: Report engine degradation status
+    result["engine_status"] = {
+        "requested": list(requested_engines),
+        "executed": list(executed_engines),
+        "unavailable": list(unavailable_engines),
+    }
+
+    # Show warnings for unavailable engines
+    if unavailable_engines:
+        console.print(f"\n[yellow]⚠ Engine Degradation Warning:[/]")
+        for engine in unavailable_engines:
+            if engine == "agent":
+                console.print(f"  [yellow]• agent: unavailable (requires LLM API key)[/]")
+            elif engine == "codeql":
+                console.print(f"  [yellow]• codeql: unavailable (CodeQL CLI not installed)[/]")
+            else:
+                console.print(f"  [yellow]• {engine}: unavailable[/]")
 
     # P5-01e Fix 5: Check if requested engines are all unavailable
     if engines and not scan_tasks:
@@ -893,6 +999,7 @@ async def run_full_security_scan(
         error_msg = f"Requested engines {engines} are all unavailable"
         console.print(f"\n[red]Error: {error_msg}[/]")
         result["success"] = False
+        result["partial_success"] = False
         result["errors"].append(error_msg)
         result["statistics"] = {
             "total_findings": 0,
@@ -901,6 +1008,13 @@ async def run_full_security_scan(
             "by_engine": {},
         }
         return result
+
+    # P5-03a Fix 3: Set partial_success if some engines are unavailable
+    if unavailable_engines and executed_engines:
+        result["partial_success"] = True
+        result["success"] = True  # Still success, but degraded
+    else:
+        result["partial_success"] = False
 
     # Execute all scans in parallel
     if scan_tasks:
@@ -931,11 +1045,18 @@ async def run_full_security_scan(
                         "source": engine_name,
                         "finding": finding,
                     })
-                console.print(f"  ✓ {engine_name.capitalize()}: {findings_count} findings")
-                result["phases"][engine_name] = {
+                # P5-03a Fix 1: Add codeql_lang metadata for multi-language tracking
+                phase_info = {
                     "success": True,
                     "findings_count": findings_count,
                 }
+                if engine_name == "codeql" and hasattr(scan_result, 'metadata'):
+                    if scan_result.metadata and "codeql_languages" in scan_result.metadata:
+                        phase_info["codeql_lang"] = scan_result.metadata["codeql_languages"]
+                    else:
+                        phase_info["codeql_lang"] = [primary_lang.lower()]
+                console.print(f"  ✓ {engine_name.capitalize()}: {findings_count} findings")
+                result["phases"][engine_name] = phase_info
             else:
                 error_msg = scan_result.error_message if hasattr(scan_result, 'error_message') else "Unknown error"
                 console.print(f"  ✗ {engine_name.capitalize()} failed: {error_msg}", markup=False)
@@ -2204,6 +2325,7 @@ def clean() -> None:
 @click.option("--adversarial", is_flag=True, help="Enable L3.5 adversarial verification (attacker vs defender debate)")
 @click.option("--batch-size", default=None, type=int, help="Files per LLM batch for entry point detection (deprecated, use --batch-max-chars)")
 @click.option("--batch-max-chars", default=None, type=int, help="Maximum characters per batch for LLM entry point detection (default: from config or 30000)")
+@click.option("--agent-max-files", default=50, type=int, help="Maximum files for Agent to analyze (default: 50, increase for larger projects)")
 @click.option("--model", default=None, help="LLM model for agent and verification (required for LLM features, read from config if not specified)")
 @click.option("--no-deps", is_flag=True, help="Skip dependency scanning")
 @click.option("--incremental", is_flag=True, help="Enable incremental scan mode (only scan changed files for 70%+ speedup)")

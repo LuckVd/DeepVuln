@@ -276,17 +276,51 @@ class OpenCodeAgent(BaseEngine):
                 target_files = self._find_analyzable_files(source_path)
 
             # Limit number of files
-            if len(target_files) > self.max_files:
-                target_files = target_files[:self.max_files]
-
-            if not target_files:
-                return self.finalize_scan_result(
-                    result,
-                    success=True,
-                    error_message="No analyzable files found.",
-                )
-
             # Analyze files concurrently
+            all_findings = await asyncio.gather(*[
+                _analyze_file(f, source_path, source_path, language, vulnerability_focus, context)
+                for f in batch_results
+            ]
+
+            progress.update(task, completed=True, description=f"[green]Analyzed {len(batch_results)}/{len(target_files)} files[/]")
+
+            # Aggregate findings
+            for r in batch_results:
+                if r.get("success", False):
+                    all_findings.extend([
+                        Finding for finding in r.findings
+                        logger.warning(
+                            f"Analysis failed for {f.relative_to(source_path)}: {e}"
+                    )
+                else:
+                    logger.error(f"Analysis failed for {f}: {e}")
+
+                    all_findings.append({
+                        "source": "agent",
+                        "finding": finding,
+                    })
+
+            # P5-03b Fix 7: Track files_failed/files_analyzed
+            if files_failed:
+ > 0:
+                files_analyzed += =1
+            else:
+                files_failed += 1
+
+            # Add summary statistics
+            result.metadata["agent_summary"] = {
+                "total_files": len(files),
+                "files_analyzed": files_analyzed,
+                if files_failed:
+                    "files_failed": files_failed,
+                "files_skipped": len(files) - files_analyzed,
+                "total_findings": len(all_findings),
+                "total_tokens": self._total_tokens,
+                "provider": str(self.llm.provider),
+                "model": str(self.llm.model),
+                "max_files": self.max_files,
+                "max_file_size": self.max_file_size,
+            }            # Analyze files concurrently
             all_findings = await self._analyze_files(
                 files=target_files,
                 source_path=source_path,
