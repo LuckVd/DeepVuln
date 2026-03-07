@@ -4,14 +4,18 @@ Smart Scanner - Integrates L1 tech stack detection with L3 analysis engines.
 Automatically selects appropriate rules and engines based on detected technologies.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
+from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.base import EngineRegistry
 from src.layers.l3_analysis.engines.semgrep import OFFICIAL_RULE_SETS, SemgrepEngine
 from src.layers.l3_analysis.models import ScanResult, SeverityLevel
 from src.layers.l3_analysis.strategy.engine import StrategyEngine
 from src.layers.l3_analysis.strategy.models import AuditStrategy
+
+logger = get_logger(__name__)
 
 # Language to rule set mapping
 LANGUAGE_RULE_SETS: dict[str, list[str]] = {
@@ -77,6 +81,7 @@ class SmartScanner:
         custom_rules_dir: Path | None = None,
         semgrep_engine: SemgrepEngine | None = None,
         strategy_engine: StrategyEngine | None = None,
+        total_timeout: int = 1800,  # P5-02d: Total scan timeout in seconds
     ):
         """
         Initialize the smart scanner.
@@ -86,11 +91,13 @@ class SmartScanner:
             custom_rules_dir: Directory containing custom rules.
             semgrep_engine: Direct SemgrepEngine instance (takes priority over registry).
             strategy_engine: Strategy engine for priority-based auditing.
+            total_timeout: Total scan timeout in seconds (default 30 min).
         """
         self.engine_registry = engine_registry
         self.custom_rules_dir = custom_rules_dir
         self._semgrep_engine = semgrep_engine
         self._strategy_engine = strategy_engine
+        self.total_timeout = total_timeout
 
     def _get_semgrep_engine(self) -> SemgrepEngine | None:
         """Get Semgrep engine from registry or use provided instance."""
@@ -314,6 +321,7 @@ class SmartScanner:
         1. Creates or uses a strategy
         2. Executes scans in priority order
         3. Can stop early on critical findings
+        4. P5-02d: Respects total timeout
 
         Args:
             source_path: Path to the source code.
@@ -323,6 +331,42 @@ class SmartScanner:
 
         Returns:
             Combined ScanResult from all executed scans.
+        """
+        # P5-02d: Wrap entire scan with timeout
+        try:
+            return await asyncio.wait_for(
+                self._scan_with_strategy_impl(
+                    source_path=source_path,
+                    strategy=strategy,
+                    attack_surface_report=attack_surface_report,
+                    tech_stack=tech_stack,
+                ),
+                timeout=self.total_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Total scan timeout reached ({self.total_timeout}s), "
+                f"Returning partial results"
+            )
+            # Mark as timed out but return partial results
+            combined_result = ScanResult(
+                source_path=str(source_path),
+                engine="smart_scanner",
+            )
+            combined_result.metadata["timed_out"] = True
+            combined_result.metadata["timeout_seconds"] = self.total_timeout
+            return combined_result
+
+    async def _scan_with_strategy_impl(
+        self,
+        source_path: Path,
+        strategy: AuditStrategy | None = None,
+        attack_surface_report: Any | None = None,
+        tech_stack: dict[str, Any] | None = None,
+    ) -> ScanResult:
+        """Internal implementation of scan_with_strategy.
+
+        This is separated to allow timeout wrapping.
         """
         # Create strategy if not provided
         if not strategy:
@@ -352,32 +396,54 @@ class SmartScanner:
             # Get target files
             target_files = list(set(t.file_path for t in group.targets))
 
-            # Run each engine in the group
-            for allocation in group.engine_allocations:
-                if not allocation.enabled:
-                    continue
+            # P5-02a: Run engines in the group in PARALLEL instead of sequentially
+            # Collect all enabled engine allocations
+            enabled_allocations = [
+                alloc for alloc in group.engine_allocations
+                if alloc.enabled
+            ]
 
-                engine_result = await self._run_engine_allocation(
-                    source_path=source_path,
-                    allocation=allocation,
-                    target_files=target_files,
-                    tech_stack=tech_stack,
+            if enabled_allocations:
+                # Create parallel tasks for all engines in this group
+                engine_tasks = [
+                    self._run_engine_allocation(
+                        source_path=source_path,
+                        allocation=allocation,
+                        target_files=target_files,
+                        tech_stack=tech_stack,
+                    )
+                    for allocation in enabled_allocations
+                ]
+
+                # Execute all engines concurrently
+                engine_results = await asyncio.gather(
+                    *engine_tasks,
+                    return_exceptions=True,
                 )
 
-                if engine_result:
-                    combined_result.merge_results(engine_result)
+                # Process results
+                for allocation, engine_result in zip(enabled_allocations, engine_results):
+                    # Handle exceptions
+                    if isinstance(engine_result, Exception):
+                        logger.warning(
+                            f"Engine {allocation.engine} failed in group {group_name}: {engine_result}"
+                        )
+                        continue
 
-                    # Check for critical findings (stop on critical)
-                    if strategy.stop_on_critical:
-                        critical_count = engine_result.by_severity.get("critical", 0)
-                        if critical_count > 0:
-                            combined_result.metadata["stopped_early"] = True
-                            combined_result.metadata["stop_reason"] = "critical_finding"
-                            break
+                    if engine_result:
+                        combined_result.merge_results(engine_result)
 
-            # Check if we should stop
-            if combined_result.metadata.get("stopped_early"):
-                break
+                        # Check for critical findings (stop on critical)
+                        if strategy.stop_on_critical:
+                            critical_count = engine_result.by_severity.get("critical", 0)
+                            if critical_count > 0:
+                                combined_result.metadata["stopped_early"] = True
+                                combined_result.metadata["stop_reason"] = "critical_finding"
+                                break
+
+                # Check if we should stop after this group
+                if combined_result.metadata.get("stopped_early"):
+                    break
 
         # Deduplicate and sort
         combined_result.deduplicate_findings()
