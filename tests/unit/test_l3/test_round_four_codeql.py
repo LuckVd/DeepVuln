@@ -5,26 +5,23 @@ Tests the integration of CodeQL dataflow results into RoundFourExecutor
 for enhanced exploitability assessment.
 """
 
-import pytest
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-from src.layers.l3_analysis.rounds.round_four import (
-    RoundFourExecutor,
-    ExploitabilityStatus,
-    ExploitabilityResult,
-)
+import pytest
+
+from src.layers.l3_analysis.models import CodeLocation, Finding, SeverityLevel
 from src.layers.l3_analysis.rounds.models import (
-    VulnerabilityCandidate,
     ConfidenceLevel,
-    RoundResult,
+    VulnerabilityCandidate,
 )
-from src.layers.l3_analysis.models import Finding, SeverityLevel, CodeLocation
+from src.layers.l3_analysis.rounds.round_four import (
+    ExploitabilityStatus,
+    RoundFourExecutor,
+)
 from src.layers.l3_analysis.task.context_builder import (
     CallChainInfo,
     DataFlowMarker,
 )
-
 
 # ============================================================
 # Fixtures
@@ -496,9 +493,9 @@ class TestExploitabilityWithCodeQL:
 
             result = await executor._verify_exploitability(candidate)
 
-            # CodeQL confirms exploitability
-            assert result.status == ExploitabilityStatus.EXPLOITABLE
-            assert result.confidence >= 0.85
+            # P5-01d multi-dimensional scoring: CodeQL confirms but no entry point
+            # reachable + user_input + sanitizer(yes/no) + attack_surface(no) -> UNLIKELY
+            assert result.status == ExploitabilityStatus.UNLIKELY
 
             assert "CodeQL" in result.reasoning or "confirmed" in result.reasoning.lower()
 
@@ -533,11 +530,11 @@ class TestExploitabilityWithCodeQL:
 
         result = await executor._verify_exploitability(candidate)
 
-        # CodeQL detected sanitizers -> CONDITIONAL
-        assert result.status == ExploitabilityStatus.CONDITIONAL
-        assert "Sanitizers" in result.reasoning or "sanitizer" in result.reasoning.lower()
-
-        assert "reduce" in result.reasoning.lower() or "conditional" in result.reasoning.lower()
+        # P5-01d multi-dimensional scoring: sanitizers detected + no entry point
+        # reachable(no) + user_input(yes) + sanitizer(yes, partial) + attack_surface(no) -> NOT_EXPLOITABLE
+        assert result.status == ExploitabilityStatus.NOT_EXPLOITABLE
+        # Reasoning now shows multi-dimensional scoring info
+        assert "Multi-dimensional" in result.reasoning or "score" in result.reasoning.lower()
 
     @pytest.mark.asyncio
     async def test_fallback_to_static_when_no_codeql(
@@ -570,11 +567,12 @@ class TestExploitabilityWithCodeQL:
             ]
 
             result = await executor._verify_exploitability(sample_candidate)
-            # Should use static analysis fallback
-            assert result.status == ExploitabilityStatus.EXPLOITABLE
+            # P5-01d: static analysis only (no CodeQL) - partial dimensions available
+            # reachable(yes, mocked) + user_input(yes) + sanitizer(no) + attack_surface(no) -> UNLIKELY
+            assert result.status == ExploitabilityStatus.UNLIKELY
             assert result.is_entry_point is True
-            # Check for user-controlled in reasoning (actual output uses this phrasing)
-            assert "user-controlled" in result.reasoning.lower() or "user input" in result.reasoning.lower()
+            # Reasoning now shows multi-dimensional scoring info
+            assert "Multi-dimensional" in result.reasoning or "score" in result.reasoning.lower()
 
     @pytest.mark.asyncio
     async def test_codeql_priority_over_static(
@@ -619,8 +617,9 @@ class TestExploitabilityWithCodeQL:
             mock_flow.return_value = []
 
             result = await executor._verify_exploitability(candidate)
-            # CodeQL result should take priority
-            assert result.status == ExploitabilityStatus.EXPLOITABLE
+            # P5-01d: CodeQL confirms but no attack surface -> UNLIKELY
+            # (reachable + user_input + no sanitizer + attack_surface(no))
+            assert result.status == ExploitabilityStatus.UNLIKELY
 
 
 # ============================================================

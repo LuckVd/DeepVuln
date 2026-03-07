@@ -85,6 +85,7 @@ API 文件变更时：
 
 | 日期 | Commit | 描述 |
 |------|--------|------|
+| 2026-03-07 | da0d41d | test(l3): fix Round 4 integration tests for P5-01d multi-dimensional scoring |
 | 2026-03-07 | 1c8dade | docs(goal): set new goal - fix Round 4 integration tests |
 | 2026-03-07 | bb69563 | feat(l3): implement P5-01d multi-dimensional scoring system |
 | 2026-03-06 | 2b9c11c | style(l3): fix import ordering in call graph modules |
