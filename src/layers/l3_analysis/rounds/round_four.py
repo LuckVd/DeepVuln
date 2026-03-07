@@ -240,11 +240,13 @@ class RoundFourExecutor:
             self._call_graph_analyzer = CallGraphAnalyzer(
                 reachability_config=None  # Use default config
             )
+            # P5-01e C4: Detect language from source instead of hardcoding
+            detected_language = self._detect_language(source_path)
             self._taint_tracker = TaintTracker(
                 config=TaintTrackerConfig(),
-                language="python",  # TODO: detect from source
+                language=detected_language,
             )
-            self.logger.info("P5-01c: Call graph taint tracker initialized")
+            self.logger.info(f"P5-01c: Call graph taint tracker initialized (language: {detected_language})")
         except Exception as e:
             self.logger.warning(f"Failed to initialize taint tracker: {e}")
             self._call_graph_analyzer = None
@@ -253,7 +255,7 @@ class RoundFourExecutor:
         # P5-01d: Initialize multi-dimensional scorer
         self._multi_dim_scorer = None
         try:
-            from src.layers.l3_analysis.scoring import MultiDimScorer, MultiDimConfig
+            from src.layers.l3_analysis.scoring import MultiDimConfig, MultiDimScorer
 
             self._multi_dim_scorer = MultiDimScorer(
                 config=MultiDimConfig(
@@ -265,6 +267,42 @@ class RoundFourExecutor:
             self.logger.info("P5-01d: Multi-dimensional scorer initialized")
         except Exception as e:
             self.logger.warning(f"Failed to initialize multi-dim scorer: {e}")
+
+    def _detect_language(self, source_path: Path) -> str:
+        """Detect the primary programming language for taint tracking.
+
+        P5-01e C4: Language detection instead of hardcoding "python".
+
+        Args:
+            source_path: Path to the source code.
+
+        Returns:
+            Language name string (e.g., "python", "java", "go").
+        """
+        try:
+            from src.layers.l1_intelligence.tech_stack_detector.detector import TechStackDetector
+            detector = TechStackDetector()
+            result = detector.detect(source_path)
+            if result.languages:
+                lang = result.languages[0].language.value.lower()
+                # Map to supported taint tracker languages
+                lang_map = {
+                    "python": "python",
+                    "java": "java",
+                    "go": "go",
+                    "javascript": "javascript",
+                    "typescript": "javascript",
+                    "c": "c",
+                    "cpp": "cpp",
+                    "c++": "cpp",
+                }
+                detected = lang_map.get(lang, "python")
+                if detected != lang:
+                    self.logger.debug(f"Mapped detected language '{lang}' to '{detected}' for taint tracking")
+                return detected
+        except Exception as e:
+            self.logger.debug(f"Language detection failed, defaulting to python: {e}")
+        return "python"
 
     def _build_entry_point_index(self, report: AttackSurfaceReport) -> None:
         """Build an index of entry points by file for fast lookup.
@@ -653,6 +691,16 @@ class RoundFourExecutor:
             ExploitabilityResult with verification details.
         """
         finding = candidate.finding
+
+        # P5-01e C3: Add null check for location
+        if not finding.location:
+            return ExploitabilityResult(
+                finding_id=finding.id,
+                status=ExploitabilityStatus.NEEDS_REVIEW,
+                confidence=0.1,
+                reasoning="Cannot verify - missing location information",
+            )
+
         location = finding.location
 
         # Get function name - prefer location.function, fallback to extracting from snippet
@@ -1109,12 +1157,13 @@ class RoundFourExecutor:
         reasoning_base = " | ".join(reasoning_parts)
 
         # Check 3: Determine final status
+        # P5-01e C2: Changed NOT_EXPLOITABLE to NEEDS_REVIEW for ambiguous cases
         if not call_chain or (not call_chain.is_entry_point and not call_chain.callers):
-            # No entry point found
+            # Could not determine reachability - needs manual review
             return (
-                ExploitabilityStatus.NOT_EXPLOITABLE,
-                0.2,
-                reasoning_base + " | Severity should be INFO."
+                ExploitabilityStatus.NEEDS_REVIEW,
+                0.35,
+                reasoning_base + " | Could not determine reachability - needs manual review."
             )
 
         if not user_controlled:
@@ -1255,34 +1304,7 @@ class RoundFourExecutor:
     # Helper Methods
     # =========================================================================
 
-    def _get_codeql_dataflow(self, finding: Finding) -> Finding | None:
-        """Get CodeQL dataflow result for a finding.
-
-        Args:
-            finding: The finding to look up.
-
-        Returns:
-            CodeQL Finding with dataflow info, None if not found.
-        """
-        if not self._codeql_index:
-            return None
-
-        # Try exact match first
-        key = f"{finding.location.file}:{finding.location.line}"
-        if key in self._codeql_index:
-            return self._codeql_index[key]
-
-        # Try fuzzy match (within 5 lines)
-        for line_offset in range(-5, 6):
-            fuzzy_key = f"{finding.location.file}:{finding.location.line + line_offset}"
-            if fuzzy_key in self._codeql_index:
-                codeql_finding = self._codeql_index[fuzzy_key]
-                self.logger.debug(
-                    f"CodeQL fuzzy match: {fuzzy_key} for finding at {key}"
-                )
-                return codeql_finding
-
-        return None
+    # Note: _get_codeql_dataflow is defined at line 322 (P5-01e C1: removed duplicate)
 
     def _extract_codeql_dataflow_dict(self, candidate: VulnerabilityCandidate) -> dict[str, Any] | None:
         """Extract CodeQL dataflow information as a dict for the multi-dim scorer.

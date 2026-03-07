@@ -38,6 +38,7 @@ from src.cli.prompts import (
     select_source_type,
 )
 from src.layers.l1_intelligence import AssetFetcher
+from src.layers.l3_analysis.models import SeverityLevel
 from src.models.fetcher import FetchResult
 
 
@@ -499,8 +500,11 @@ async def run_full_security_scan(
     llm_full_detect = options.get("llm_full_detect", False)
     adversarial = options.get("adversarial", False)
     model = options.get("model")
-    include_low = options.get("include_low_severity", False)
-    _no_deps = options.get("no_deps", False)  # Reserved for future use
+    # P5-01e A5: Standardize include_low semantics
+    include_low_severity = options.get("include_low_severity", False)
+    skip_low_severity = not include_low_severity
+    options["skip_low_severity"] = skip_low_severity  # Unified variable
+    options.get("no_deps", False)  # P5-01e A4: Enable --no-deps
     incremental = options.get("incremental", False)
     base_ref = options.get("base_ref", "HEAD~1")
     head_ref = options.get("head_ref", "HEAD")
@@ -530,6 +534,35 @@ async def run_full_security_scan(
                 IncrementalScanner,
             )
 
+            # P5-01e B1: Create scan callback for incremental scanner
+            def create_incremental_scan_callback(project_path: Path, scan_options: dict):
+                """Create a scan callback that uses actual scanner engines."""
+                def scan_callback(files: list[str]) -> list[dict]:
+                    import asyncio
+
+                    from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
+
+                    findings = []
+                    try:
+                        engine = SemgrepEngine()
+                        # Scan the project with filtered files
+                        # Note: SemgrepEngine.scan is async, so we need asyncio.run()
+                        # Use include_patterns for file filtering (supported parameter)
+                        async def _run_scan():
+                            return await engine.scan(
+                                source_path=project_path,
+                                include_patterns=files,  # Filter to only changed files
+                                use_auto_config=True,
+                            )
+
+                        result = asyncio.run(_run_scan())
+                        if result.findings:
+                            findings.extend([f.model_dump() for f in result.findings])
+                    except Exception as e:
+                        logger.warning(f"Incremental scan callback error: {e}")
+                    return findings
+                return scan_callback
+
             # Configure incremental scanner
             inc_config = IncrementalScanConfig(
                 base_ref=base_ref,
@@ -543,6 +576,7 @@ async def run_full_security_scan(
             scanner = IncrementalScanner(
                 project_path=source_path,
                 config=inc_config,
+                scan_callback=create_incremental_scan_callback(source_path, options),
             )
 
             # Run incremental scan
@@ -791,10 +825,22 @@ async def run_full_security_scan(
     scan_tasks = []
 
     if semgrep_engine and semgrep_engine.is_available():
+        # P5-01e A8: pass tech_stack and attack_surface for rule gating and file filtering
+        # P5-01e A9: Implement include_low semantics - skip low severity when not enabled
+        if skip_low_severity:
+            severity_filter = [
+                SeverityLevel.CRITICAL,
+                SeverityLevel.HIGH,
+                SeverityLevel.MEDIUM,
+            ]
+        else:
+            severity_filter = None
         scan_tasks.append(("semgrep", semgrep_engine.scan(
             source_path=source_path,
-            severity_filter=None,
+            severity_filter=severity_filter,
             use_auto_config=True,
+            tech_stack=tech_result,
+            attack_surface=surface_report,
         )))
 
     if codeql_engine and codeql_engine.is_available():
@@ -837,7 +883,7 @@ async def run_full_security_scan(
             progress.update(task, completed=True, description="[green]All engines completed!")
 
         # Process results
-        for (engine_name, _), scan_result in zip(scan_tasks, scan_results):
+        for (engine_name, _), scan_result in zip(scan_tasks, scan_results, strict=False):
             if isinstance(scan_result, Exception):
                 console.print(f"  ✗ {engine_name.capitalize()} error: {scan_result}", markup=False)
                 result["errors"].append(f"{engine_name.capitalize()} error: {scan_result}")
@@ -862,8 +908,10 @@ async def run_full_security_scan(
     # =========================================================================
     # Phase 4: Exploitability Verification (with optional LLM) - PARALLEL
     # =========================================================================
+    # P5-01e: Fix --base semantics - only run Phase 4 when llm_verify is True
+    # This ensures --base (llm_verify=False) truly means "no LLM features"
 
-    if result["all_findings"] and (llm_verify or llm_client):
+    if result["all_findings"] and llm_verify:
         console.print("\n[bold cyan]Phase 4: Exploitability Verification (Parallel)[/]")
         console.print(f"  LLM Verification: {'✓' if llm_verify else '✗'}")
 
@@ -976,7 +1024,6 @@ async def run_full_security_scan(
             from src.layers.l3_analysis.verification import (
                 EnhancedAdversarialVerification,
                 EnhancedVerificationConfig,
-                VerdictType,
             )
 
             console.print("  [dim]Enhanced mode: Strategy evolution + Multi-round debate + Learning[/]")
@@ -988,7 +1035,7 @@ async def run_full_security_scan(
                 enable_evolution=True,
                 enable_learning=True,
                 enable_rule_extraction=True,
-                skip_low_severity=not include_low,
+                skip_low_severity=not include_low_severity,
                 skip_info_findings=True,
             )
 
@@ -1113,6 +1160,86 @@ async def run_full_security_scan(
             result["errors"].append(f"Adversarial verification error: {e}")
 
     # =========================================================================
+    # P5-01e A2: Engine Success Aggregation
+    # =========================================================================
+    # Calculate engine success rate to determine overall success
+    phases = result.get("phases", {})
+    if phases:
+        successful_engines = sum(1 for p in phases.values() if p.get("success"))
+        total_engines = len(phases)
+        if total_engines > 0:
+            if successful_engines == 0:
+                # All engines failed - mark as failure
+                result["success"] = False
+                logger.warning(f"All {total_engines} engines failed")
+            elif successful_engines < total_engines:
+                # Partial success - some engines failed
+                result["partial_success"] = True
+                result["failed_engines"] = [
+                    name for name, p in phases.items() if not p.get("success")
+                ]
+                logger.warning(
+                    f"Partial success: {successful_engines}/{total_engines} engines succeeded. "
+                    f"Failed: {result['failed_engines']}"
+                )
+            else:
+                logger.info(f"All {total_engines} engines succeeded")
+
+    # =========================================================================
+    # P5-01e E: Deduplication and Unified Adjudication
+    # =========================================================================
+    # Apply semantic deduplication and unified adjudication to all findings
+    # This ensures consistent reporting across all engines
+
+    if result["all_findings"]:
+        try:
+            from src.layers.l3_analysis.adjudication import adjudicate_findings
+
+            # Extract raw findings from the wrapped format
+            raw_findings = [
+                item["finding"] if isinstance(item, dict) and "finding" in item else item
+                for item in result["all_findings"]
+            ]
+
+            # Apply deduplication and adjudication
+            adjudicated_findings, adjudication_summary = adjudicate_findings(
+                raw_findings,
+                validate=True,
+                strict_consistency=False,  # Don't fail on consistency issues
+                enable_deduplication=True,
+            )
+
+            # Store adjudication results
+            result["adjudication"] = {
+                "total_input": len(raw_findings),
+                "total_output": len(adjudicated_findings),
+                "duplicates_removed": adjudication_summary.deduplication.get("removed_count", 0) if adjudication_summary.deduplication else 0,
+                "consistency_errors": adjudication_summary.conflicts_detected,
+                "overrides_applied": adjudication_summary.overrides_applied,
+                "report_status": adjudication_summary.report_status,
+                "by_status": adjudication_summary.by_status,
+            }
+
+            # Update all_findings with deduplicated results
+            result["all_findings"] = [
+                {"source": "adjudicated", "finding": f}
+                for f in adjudicated_findings
+            ]
+
+            dup_count = adjudication_summary.deduplication.get("removed_count", 0) if adjudication_summary.deduplication else 0
+            logger.info(
+                f"Adjudication complete: {len(raw_findings)} -> {len(adjudicated_findings)} findings "
+                f"(removed {dup_count} duplicates)"
+            )
+
+        except ImportError as e:
+            logger.warning(f"Adjudication module not available: {e}")
+            result["adjudication"] = {"error": str(e)}
+        except Exception as e:
+            logger.warning(f"Adjudication failed: {e}")
+            result["adjudication"] = {"error": str(e)}
+
+    # =========================================================================
     # Final Statistics
     # =========================================================================
 
@@ -1154,42 +1281,60 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
         if finding and hasattr(finding, "id"):
             adversarial_lookup[finding.id] = adv
 
-    # Separate verified findings from suspicious code
+    # P5-01e A3: Separate findings by exploitability status (not is_suspicious metadata)
     # Also categorize by adversarial verdict (using unified report_status)
+    EXPLOITABLE_STATUSES = {"exploitable", "conditional"}
+    REVIEW_STATUSES = {"needs_review", "unlikely"}
+
     verified_findings = []
-    suspicious_findings = []
+    review_findings = []
     adversarial_exploitable = []
     adversarial_false_positive = []
     adversarial_conditional = []
     adversarial_needs_review = []
 
     for v in result.get("verified_findings", []):
-        finding = v["finding"]
-        is_suspicious = finding.metadata.get("is_suspicious", False) if finding.metadata else False
+        finding = v.get("finding")
+        if not finding:
+            continue
 
         # Get adversarial result if available
         adv_result = adversarial_lookup.get(finding.id if hasattr(finding, "id") else None)
         v["adversarial"] = adv_result  # Attach to v for later use
 
-        if is_suspicious:
-            suspicious_findings.append(v)
+        # Categorize by exploitability status
+        exp = v.get("exploitability")
+        if exp:
+            status = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
         else:
-            verified_findings.append(v)
+            status = None
 
-            # Categorize by adversarial verdict
-            if adv_result and adv_result.get("adversarial"):
-                adv = adv_result["adversarial"]
-                if hasattr(adv, "verdict") and adv.verdict:
-                    verdict_value = adv.verdict.verdict.value if hasattr(adv.verdict.verdict, "value") else str(adv.verdict.verdict)
-                    # Map "confirmed" to "exploitable" for unified status
-                    if verdict_value in ("confirmed", "exploitable"):
-                        adversarial_exploitable.append(v)
-                    elif verdict_value == "false_positive":
-                        adversarial_false_positive.append(v)
-                    elif verdict_value == "conditional":
-                        adversarial_conditional.append(v)
-                    elif verdict_value == "needs_review":
-                        adversarial_needs_review.append(v)
+        if status in EXPLOITABLE_STATUSES:
+            verified_findings.append(v)
+        elif status in REVIEW_STATUSES:
+            review_findings.append(v)
+        elif status is None:
+            # No exploitability info - check legacy metadata
+            is_suspicious = finding.metadata.get("is_suspicious", False) if hasattr(finding, 'metadata') and finding.metadata else False
+            if is_suspicious:
+                review_findings.append(v)
+            else:
+                verified_findings.append(v)
+
+        # Categorize by adversarial verdict
+        if adv_result and adv_result.get("adversarial"):
+            adv = adv_result["adversarial"]
+            if hasattr(adv, "verdict") and adv.verdict:
+                verdict_value = adv.verdict.verdict.value if hasattr(adv.verdict.verdict, "value") else str(adv.verdict.verdict)
+                # Map "confirmed" to "exploitable" for unified status
+                if verdict_value in ("confirmed", "exploitable"):
+                    adversarial_exploitable.append(v)
+                elif verdict_value == "false_positive":
+                    adversarial_false_positive.append(v)
+                elif verdict_value == "conditional":
+                    adversarial_conditional.append(v)
+                elif verdict_value == "needs_review":
+                    adversarial_needs_review.append(v)
 
     lines = []
     lines.append("=" * 70)
@@ -1231,7 +1376,7 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     lines.append(f"  Total Findings: {stats.get('total_findings', 0)}")
     lines.append(f"  Verified: {stats.get('verified_count', 0)}")
     lines.append(f"  Exploitable Findings: {len(verified_findings)}")
-    lines.append(f"  Suspicious Code: {len(suspicious_findings)}")
+    lines.append(f"  Needs Review: {len(review_findings)}")
 
     # Token Usage
     token_usage = stats.get("token_usage")
@@ -1302,27 +1447,34 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
                     if exp.reasoning:
                         lines.append(f"   Reasoning: {exp.reasoning[:200]}...")
 
-        # Suspicious Code
-        if suspicious_findings:
+        # Review Findings (needs manual verification)
+        if review_findings:
             lines.append("")
             lines.append("=" * 70)
-            lines.append("Suspicious Code - Manual Review Required")
+            lines.append("Needs Review - Manual Verification Required")
             lines.append("=" * 70)
-            lines.append("These code patterns may indicate vulnerabilities but require human verification.")
+            lines.append("These findings require human verification to determine exploitability.")
             lines.append("")
 
-            for i, v in enumerate(suspicious_findings[:30], 1):
-                finding = v["finding"]
+            for i, v in enumerate(review_findings[:30], 1):
+                finding = v.get("finding")
+                if not finding:
+                    continue
                 metadata = finding.metadata or {}
                 vuln_type = metadata.get("potential_vulnerability", "unknown")
                 recommended_action = metadata.get("recommended_action", "manual_review")
 
-                lines.append(f"\n{i}. [SUSPICIOUS] {finding.title}")
-                lines.append(f"   Source: {v['source']}")
+                # Get exploitability status
+                exp = v.get("exploitability")
+                status_str = exp.status.value if exp and hasattr(exp, 'status') else "needs_review"
+
+                lines.append(f"\n{i}. [{status_str.upper()}] {finding.title}")
+                lines.append(f"   Source: {v.get('source', 'unknown')}")
                 lines.append(f"   Location: {finding.location.to_display()}")
                 lines.append(f"   Potential Type: {vuln_type}")
                 lines.append(f"   Confidence: {finding.confidence:.0%}")
-                lines.append(f"   Why Suspicious: {finding.description}")
+                if finding.description:
+                    lines.append(f"   Why Review: {finding.description}")
                 lines.append(f"   Recommended Action: {recommended_action}")
 
                 if finding.location.snippet:
@@ -1339,8 +1491,8 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     console.print(f"[green]Report exported to: {export_path}[/]")
     console.print(f"  Total Findings: {stats.get('total_findings', 0)}")
     console.print(f"  Verified: {stats.get('verified_count', 0)}")
-    if suspicious_findings:
-        console.print(f"  [yellow]Suspicious Code: {len(suspicious_findings)}[/]")
+    if review_findings:
+        console.print(f"  [yellow]Needs Review: {len(review_findings)}[/]")
 
 
 def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | None = None) -> None:
@@ -1374,8 +1526,9 @@ def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | N
     llm_full_detect = options.get("llm_full_detect", False)
     base_scan = options.get("base_scan", False)
 
-    # Run full scan if requested (including LLM full detect or base scan)
-    if full_scan or base_scan or engines or llm_full_detect:
+    # Run full scan if requested (including LLM full detect, LLM verify, or base scan)
+    # P5-01e A1: --llm-verify now triggers full scan pipeline
+    if full_scan or base_scan or engines or llm_full_detect or llm_verify:
         result = asyncio.run(run_full_security_scan(source_path, options))
         _display_full_scan_result_interactive(result, options)
         return
@@ -1486,34 +1639,55 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
     total = stats.get("total_findings", 0)
     verified = stats.get("verified_count", 0)
 
-    # Separate exploitable findings from suspicious code
+    # P5-01e A3: Separate findings by exploitability status (not is_suspicious metadata)
+    # EXPLOITABLE_STATUSES: findings that represent real exploitable vulnerabilities
+    # REVIEW_STATUSES: findings that need manual review but are not clearly exploitable
+    EXPLOITABLE_STATUSES = {"exploitable", "conditional"}
+    REVIEW_STATUSES = {"needs_review", "unlikely"}
+
     exploitable_findings = []
-    suspicious_findings = []
+    review_findings = []
 
     for v in result.get("verified_findings", []):
-        finding = v["finding"]
-        # Check if this is marked as suspicious in metadata
-        is_suspicious = finding.metadata.get("is_suspicious", False) if finding.metadata else False
-        if is_suspicious:
-            suspicious_findings.append(v)
+        exp = v.get("exploitability")
+        if exp:
+            status = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
         else:
+            status = None
+
+        if status in EXPLOITABLE_STATUSES:
             exploitable_findings.append(v)
+        elif status in REVIEW_STATUSES:
+            review_findings.append(v)
+        elif status is None:
+            # No exploitability info - check if marked as suspicious in metadata (legacy)
+            finding = v.get("finding")
+            is_suspicious = finding.metadata.get("is_suspicious", False) if hasattr(finding, 'metadata') and finding.metadata else False
+            if is_suspicious:
+                review_findings.append(v)
+            else:
+                # Default: treat as needs_review
+                review_findings.append(v)
+        else:
+            # not_exploitable or error - skip from main display
+            pass
 
     # Also check all_findings for suspicious code (if not verified yet)
     if not result.get("verified_findings"):
         for item in result.get("all_findings", []):
-            finding = item["finding"]
-            is_suspicious = finding.metadata.get("is_suspicious", False) if finding.metadata else False
+            finding = item.get("finding")
+            is_suspicious = finding.metadata.get("is_suspicious", False) if hasattr(finding, 'metadata') and finding.metadata else False
             if is_suspicious:
-                suspicious_findings.append(item)
+                review_findings.append(item)
 
     exploitable_count = len(exploitable_findings)
-    suspicious_count = len(suspicious_findings)
+    review_count = len(review_findings)
 
     console.print(f"[bold]Total Findings:[/] {total}")
     console.print(f"[bold]Verified:[/] {verified}")
-    if suspicious_count > 0:
-        console.print(f"[bold yellow]Suspicious Code:[/] {suspicious_count} [dim](requires manual review)[/]")
+    console.print(f"[bold red]Exploitable:[/] {exploitable_count}")
+    if review_count > 0:
+        console.print(f"[bold yellow]Needs Review:[/] {review_count} [dim](requires manual verification)[/]")
 
     # Exploitability breakdown
     if "by_exploitability" in stats:
@@ -1630,27 +1804,36 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
         if len(exploitable_findings) > 30:
             console.print(f"\n[dim]... and {len(exploitable_findings) - 30} more findings[/]")
 
-    # Suspicious Code table (separate section)
-    if suspicious_findings:
+    # Review Findings table (separate section)
+    if review_findings:
         console.print()
-        console.print("[bold yellow]⚠ Suspicious Code - Requires Manual Review[/]")
-        console.print("[dim]These code patterns may indicate vulnerabilities but require human verification.[/]")
+        console.print("[bold yellow]⚠ Needs Review - Requires Manual Verification[/]")
+        console.print("[dim]These findings require human verification to determine exploitability.[/]")
         console.print()
 
-        suspicious_table = Table(title="Suspicious Code Patterns", show_header=True)
-        suspicious_table.add_column("Type", width=18)
-        suspicious_table.add_column("Confidence", width=10)
-        suspicious_table.add_column("Source", width=10)
-        suspicious_table.add_column("Location", width=35)
-        suspicious_table.add_column("Why Suspicious", width=40)
+        review_table = Table(title="Findings Needing Review", show_header=True)
+        review_table.add_column("Status", width=15)
+        review_table.add_column("Confidence", width=10)
+        review_table.add_column("Source", width=10)
+        review_table.add_column("Location", width=35)
+        review_table.add_column("Why Review", width=40)
 
-        for v in suspicious_findings[:20]:  # Limit display
-            finding = v["finding"]
+        for v in review_findings[:20]:  # Limit display
+            finding = v.get("finding")
+            if not finding:
+                continue
             metadata = finding.metadata or {}
 
+            # Get exploitability status
+            exp = v.get("exploitability")
+            if exp:
+                status_str = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
+            else:
+                status_str = "review"
+
             # Get potential vulnerability type
-            vuln_type = metadata.get("potential_vulnerability", "unknown")
-            type_str = f"[yellow]{vuln_type}[/]"
+            metadata.get("potential_vulnerability", "unknown")
+            type_str = f"[yellow]{status_str}[/]"
 
             # Confidence with color
             conf = finding.confidence
@@ -1667,12 +1850,12 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
             if len(location) > 35:
                 location = location[:32] + "..."
 
-            # Why suspicious (from description or metadata)
-            why = finding.description[:40] if finding.description else "Pattern detected"
+            # Why review (from description or metadata)
+            why = finding.description[:40] if finding.description else "Needs verification"
             if len(why) > 40:
                 why = why[:37] + "..."
 
-            suspicious_table.add_row(
+            review_table.add_row(
                 type_str,
                 conf_str,
                 source,
@@ -1680,18 +1863,21 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
                 why,
             )
 
-        console.print(suspicious_table)
+        console.print(review_table)
 
-        if len(suspicious_findings) > 20:
-            console.print(f"\n[dim]... and {len(suspicious_findings) - 20} more suspicious patterns[/]")
+        if len(review_findings) > 20:
+            console.print(f"\n[dim]... and {len(review_findings) - 20} more findings needing review[/]")
 
         # Add recommended actions section
         console.print()
         console.print("[bold]Recommended Actions:[/]")
         action_counts = {}
-        for v in suspicious_findings:
-            metadata = v["finding"].metadata or {}
-            action = metadata.get("recommended_action", "manual_review")
+        for v in review_findings:
+            finding = v.get("finding")
+            if finding and hasattr(finding, 'metadata') and finding.metadata:
+                action = finding.metadata.get("recommended_action", "manual_review")
+            else:
+                action = "manual_review"
             action_counts[action] = action_counts.get(action, 0) + 1
 
         action_labels = {
@@ -1747,17 +1933,30 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
     console.print()
     console.rule("[bold cyan]Detailed Findings[/]")
 
-    # Separate exploitable findings from suspicious code
+    # P5-01e A3: Separate findings by exploitability status (not is_suspicious metadata)
+    EXPLOITABLE_STATUSES = {"exploitable", "conditional"}
+    REVIEW_STATUSES = {"needs_review", "unlikely"}
+
     exploitable_findings = []
-    suspicious_findings = []
+    review_findings = []
 
     for v in result.get("verified_findings", []):
-        finding = v["finding"]
-        is_suspicious = finding.metadata.get("is_suspicious", False) if finding.metadata else False
-        if is_suspicious:
-            suspicious_findings.append(v)
+        exp = v.get("exploitability")
+        if exp:
+            status = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
         else:
+            status = None
+
+        if status in EXPLOITABLE_STATUSES:
             exploitable_findings.append(v)
+        elif status in REVIEW_STATUSES:
+            review_findings.append(v)
+        elif status is None:
+            # No exploitability info - check legacy metadata
+            finding = v.get("finding")
+            is_suspicious = finding.metadata.get("is_suspicious", False) if hasattr(finding, 'metadata') and finding.metadata else False
+            if is_suspicious:
+                review_findings.append(v)
 
     # Display exploitable findings first
     if exploitable_findings:
@@ -1800,26 +1999,34 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
             if finding.fix_suggestion:
                 console.print(f"   [dim]Fix:[/] {finding.fix_suggestion[:150]}...")
 
-    # Display suspicious code separately
-    if suspicious_findings:
+    # Display review findings separately
+    if review_findings:
         console.print("\n")
-        console.rule("[bold yellow]⚠ Suspicious Code - Manual Review Required[/]")
+        console.rule("[bold yellow]⚠ Needs Review - Manual Verification Required[/]")
 
-        for i, v in enumerate(suspicious_findings[:15], 1):
-            finding = v["finding"]
+        for i, v in enumerate(review_findings[:15], 1):
+            finding = v.get("finding")
+            if not finding:
+                continue
             metadata = finding.metadata or {}
 
             vuln_type = metadata.get("potential_vulnerability", "unknown")
             recommended_action = metadata.get("recommended_action", "manual_review")
 
-            console.print(f"\n[bold yellow]{i}. [Suspicious] {finding.title}[/]")
-            console.print(f"   [dim]Source:[/] {v['source']}")
+            # Get exploitability info if available
+            exp = v.get("exploitability")
+            if exp:
+                status_str = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
+                console.print(f"\n[bold yellow]{i}. [{status_str.upper()}] {finding.title}[/]")
+            else:
+                console.print(f"\n[bold yellow]{i}. [Review] {finding.title}[/]")
+            console.print(f"   [dim]Source:[/] {v.get('source', 'unknown')}")
             console.print(f"   [dim]Location:[/] {finding.location.to_display()}")
             console.print(f"   [dim]Potential Type:[/] {vuln_type}")
             console.print(f"   [dim]Confidence:[/] {finding.confidence:.0%}")
 
             if finding.description:
-                console.print(f"   [dim]Why Suspicious:[/] {finding.description}")
+                console.print(f"   [dim]Why Review:[/] {finding.description}")
 
             # Show code snippet if available
             if finding.location.snippet:
@@ -1838,7 +2045,7 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
             console.print(f"   [dim]Action:[/] {action_label}")
 
     # Summary if no findings
-    if not exploitable_findings and not suspicious_findings:
+    if not exploitable_findings and not review_findings:
         console.print("\n[dim]No findings to display.[/]")
 
 
@@ -2139,7 +2346,7 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
 
     full_scan = options.get("full_scan", False)
     engines = options.get("engines")
-    llm_verify = options.get("llm_verify", False)
+    options.get("llm_verify", False)
     llm_full_detect = options.get("llm_full_detect", False)
     no_deps = options.get("no_deps", False)
     base_scan = options.get("base_scan", False)
@@ -2155,6 +2362,16 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
         ))
         _export_full_scan_result(result, export_path, options)
     else:
+        # P5-01e A4: Check --no-deps flag
+        no_deps = options.get("no_deps", False)
+        if no_deps:
+            console.print("[dim]Skipping dependency scan (--no-deps)[/]")
+            console.print("[dim]To scan source code for vulnerabilities, use one of:[/]")
+            console.print("[dim]  --full         Full scan with all engines (Semgrep, CodeQL, Agent)[/]")
+            console.print("[dim]  --base         Base scan: 3 engines (Semgrep + CodeQL + Agent), no LLM[/]")
+            console.print("[dim]  --engines     Specify which engines to use[/]")
+            return
+
         # Original dependency scan
         from src.layers.l1_intelligence.workflow import AutoSecurityScanner, ScanConfig
 
@@ -2422,7 +2639,7 @@ def _format_project_text(project, verbose: bool, show_call_graph: bool) -> str:
     # Functions summary
     if project.all_functions and verbose:
         output.write(f"\n[green]Functions ({len(project.all_functions)}):[/]\n")
-        for name, func in list(project.all_functions.items())[:15]:
+        for name, _func in list(project.all_functions.items())[:15]:
             output.write(f"  [bold]{name}[/]\n")
         if len(project.all_functions) > 15:
             output.write(f"  [dim]... and {len(project.all_functions) - 15} more[/]\n")
@@ -2557,10 +2774,7 @@ def _format_project_json(project) -> dict:
                 for edge in project.global_call_graph.edges
             ]
         },
-        "parse_errors": {
-            path: error
-            for path, error in project.parse_errors.items()
-        },
+        "parse_errors": dict(project.parse_errors.items()),
     }
 
 

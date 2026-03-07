@@ -158,3 +158,103 @@
 |------|------|
 | 2026-03-07 | 创建新目标：扫描编排与结果可信度修复（critical） |
 | 2026-03-07 | 完成问题清单与完整修复方案定义，进入实施阶段 |
+| 2026-03-07 | 发现运行时硬错误（6 项），暂停提交进入修复 |
+| 2026-03-07 | 修复全部 6 项运行时硬错误，L3 测试全部通过（1067 passed） |
+| 2026-03-07 | 修复问题 7：CLI 指引文案 `--base-scan` → `--base`，全部 7 项问题修复完成 |
+| 2026-03-07 | 发现问题 8-9：增量回调 async 不匹配、--base 语义不一致 |
+| 2026-03-07 | 修复问题 8-9，全部 9 项运行时错误修复完成，L3 测试通过（1067 passed） |
+
+---
+
+## 运行时硬错误（阻断提交）
+
+> 代码审查发现的 NameError/功能失效问题，必须修复后才能提交
+
+| # | 严重度 | 问题 | 位置 | 状态 |
+|---|--------|------|------|------|------|
+| 1 | **严重** | `SeverityLevel` 未导入，Semgrep 分支会 NameError | main.py:821 | ✅ 已修复 |
+| 2 | **严重** | `severity_filter` 缺少 CRITICAL，最高危结果被过滤 | main.py:819-823 | ✅ 已修复 |
+| 3 | **严重** | `SemgrepScanner` 类不存在，增量回调返回空结果 | main.py:540 | ✅ 已修复 |
+| 4 | **严重** | `include_low` 变量未定义（应为 `include_low_severity`） | main.py:1025 | ✅ 已修复 |
+| 5 | **高** | `AdjudicationSummary` 字段名与实际 API 不匹配 | main.py:1203-1207 | ✅ 已修复 |
+| 6 | **中** | `l0_common` 路径错误，语言检测退化为 python | round_four.py:283 | ✅ 已修复 |
+| 7 | **低** | CLI 指引显示 `--base-scan` 但实际参数是 `--base` | main.py:2362 | ✅ 已修复 |
+| 8 | **严重** | 增量回调 async/await 不匹配，返回 coroutine 非 ScanResult | main.py:547 | ✅ 已修复 |
+| 9 | **中** | `--base` 语义不一致，Phase 4 仍因 llm_client 存在而执行 | main.py:911 | ✅ 已修复 |
+
+---
+
+## 修复详情（2026-03-07）
+
+### Fix 1: SeverityLevel 导入
+```python
+# main.py 添加导入
+from src.layers.l3_analysis.models import SeverityLevel
+```
+
+### Fix 2: severity_filter 包含 CRITICAL
+```python
+severity_filter = [
+    SeverityLevel.CRITICAL,  # 新增
+    SeverityLevel.HIGH,
+    SeverityLevel.MEDIUM,
+]
+```
+
+### Fix 3: SemgrepScanner → SemgrepEngine
+```python
+# 增量扫描回调使用正确的引擎类
+from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
+engine = SemgrepEngine()
+result = engine.scan(source_path=project_path, files_filter=files)
+```
+
+### Fix 4: include_low → include_low_severity
+```python
+skip_low_severity=not include_low_severity,  # 修正变量名
+```
+
+### Fix 5: AdjudicationSummary 字段修正
+```python
+# 正确字段名
+"duplicates_removed": adjudication_summary.deduplication.get("removed_count", 0),
+"consistency_errors": adjudication_summary.conflicts_detected,
+"overrides_applied": adjudication_summary.overrides_applied,
+"report_status": adjudication_summary.report_status,
+```
+
+### Fix 6: l0_common → l1_intelligence
+```python
+# round_four.py 修正导入路径
+from src.layers.l1_intelligence.tech_stack_detector.detector import TechStackDetector
+```
+
+### Fix 7: --base-scan → --base
+```python
+# CLI 指引文案修正
+console.print("[dim]  --base         Base scan: 3 engines (Semgrep + CodeQL + Agent), no LLM[/]")
+```
+
+### Fix 8: 增量回调 async/await 不匹配
+```python
+# main.py:547 - 使用 asyncio.run() 调用异步 scan 方法
+def scan_callback(files: list[str]) -> list[dict]:
+    import asyncio
+    from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
+
+    async def _run_scan():
+        return await engine.scan(
+            source_path=project_path,
+            include_patterns=files,  # 使用 include_patterns（显式支持的参数）
+        )
+
+    result = asyncio.run(_run_scan())  # 正确调用异步方法
+```
+
+### Fix 9: --base 语义一致性
+```python
+# main.py:911 - Phase 4 条件只依赖 llm_verify
+# 修复前：if result["all_findings"] and (llm_verify or llm_client):
+# 修复后：
+if result["all_findings"] and llm_verify:  # 只在显式启用 LLM 验证时执行
+```

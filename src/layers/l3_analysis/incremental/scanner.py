@@ -386,9 +386,19 @@ class IncrementalScanner:
         """
         if self.scan_callback:
             # Use custom scan callback
-            return await asyncio.to_thread(self.scan_callback, files)
+            try:
+                return await asyncio.to_thread(self.scan_callback, files)
+            except Exception as e:
+                logger.error(f"Scan callback failed: {e}")
+                # P5-01e B2: Return error marker, allow caller to handle
+                raise
 
-        # Default: return placeholder findings
+        # P5-01e B2: Fail-fast when no callback provided
+        logger.warning(
+            "No scan_callback provided - returning empty results. "
+            "For production use, provide a scan_callback to IncrementalScanner."
+        )
+        # Default: return empty findings with warning
         # In production, this would call the actual scanner engines
         findings: list[dict[str, Any]] = []
 
@@ -401,7 +411,7 @@ class IncrementalScanner:
             tasks = [self._scan_single_file(f) for f in batch]
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for file_path, result in zip(batch, batch_results):
+            for file_path, result in zip(batch, batch_results, strict=False):
                 if isinstance(result, Exception):
                     logger.debug(f"Failed to scan {file_path}: {result}")
                 elif isinstance(result, list):
