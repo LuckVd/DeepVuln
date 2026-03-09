@@ -89,7 +89,15 @@
       "Bash(source .venv/bin/activate && PYTHONPATH=/opt/projects/DeepVuln:$PYTHONPATH python -m pytest tests/unit/test_l3/test_scoring/ -v --tb=short 2>&1 | tail -10)",
       "Bash(source .venv/bin/activate && PYTHONPATH=/opt/projects/DeepVuln:$PYTHONPATH python -m pytest tests/unit/test_l3/ --co -q 2>&1 | tail -20)",
       "Bash(source .venv/bin/activate && ruff check /opt/projects/DeepVuln/src/layers/l3_analysis/scoring/ /opt/projects/DeepVuln/tests/unit/test_l3/test_scoring/ 2>&1 | head -20)",
-      "Bash(source .venv/bin/activate && ruff check --fix /opt/projects/DeepVuln/src/layers/l3_analysis/scoring/ /opt/projects/DeepVuln/tests/unit/test_l3/test_scoring/ 2>&1)"
+      "Bash(source .venv/bin/activate && ruff check --fix /opt/projects/DeepVuln/src/layers/l3_analysis/scoring/ /opt/projects/DeepVuln/tests/unit/test_l3/test_scoring/ 2>&1)",
+      "Bash(pip3 install -e 2>&1 | head -5; pip3 install apscheduler tree-sitter 2>&1 | tail -5)",
+      "Bash(grep -n \"时间.*进展\" docs/CURRENT_GOAL.md |2>&1 | tail -5)",
+      "Bash(python3 -m pytest tests/ -x --tb=short 2>&1 | tail=20)",
+      "Bash(python3 -m pytest tests/unit/ -x --tb=short -q 2>&1 | tail=20)",
+      "Bash(git checkout HEAD -- src/layers/l3_analysis/engines/opencode_agent.py && echo \"✓ File restored\")",
+      "Bash(git checkout 0998d04 -- src/layers/l3_analysis/engines/opencode_agent.py && echo \"✓ File restored to 0998d04\")",
+      "Bash(echo \"=== OPENAI 相关环境变量 ===\" && env | grep -iE \"OPENAI|LLM|MODEL|API_KEY|BASE_URL\" 2>/dev/null | head -20 || echo \"未找到相关环境变量\")",
+      "Bash(ruff check src/ --quiet 2>&1 || echo \"Lint check completed\")"
     ]
   }
 }

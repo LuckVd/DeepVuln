@@ -562,7 +562,7 @@ class TestLLMFullDetector:
             MagicMock(content=batch_response),
         ]
 
-        entry_points = await detector.detect_full(tmp_path)
+        entry_points, files_analyzed = await detector.detect_full(tmp_path)
 
         assert len(entry_points) >= 1
         assert mock_llm_client.complete.call_count >= 1
@@ -999,10 +999,11 @@ class TestBatchAnalysis:
             MagicMock(content=batch_response),
         ]
 
-        entry_points = await detector.detect_full(tmp_path, batch_size=50, use_batch=True)
+        entry_points, files_analyzed = await detector.detect_full(tmp_path, batch_size=50, use_batch=True)
 
         assert len(entry_points) == 1
         assert entry_points[0].path == "/test"
+        assert files_analyzed == 1  # P5-03c Fix 9: Verify files count
 
     @pytest.mark.asyncio
     async def test_analyze_files_batch_multiple_batches(self, mock_llm_client, tmp_path):
@@ -1072,7 +1073,7 @@ class TestBatchAnalysis:
         ]
 
         # Use max_batch_chars=100 to create multiple batches (each file is ~50 chars)
-        entry_points = await detector.detect_full(tmp_path, max_batch_chars=100, use_batch=True)
+        entry_points, files_analyzed = await detector.detect_full(tmp_path, max_batch_chars=100, use_batch=True)
 
         # Should find entry points from batches
         assert len(entry_points) >= 1

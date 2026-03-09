@@ -205,7 +205,8 @@ class AttackSurfaceDetector:
 
         try:
             # Run full LLM detection with batch analysis
-            entry_points = await llm_detector.detect_full(
+            # P5-03c Fix 9: Get actual files analyzed count
+            entry_points, files_analyzed = await llm_detector.detect_full(
                 source_path,
                 batch_size=batch_size,
                 max_batch_chars=max_batch_chars,
@@ -218,7 +219,7 @@ class AttackSurfaceDetector:
                 if entry.framework and entry.framework not in report.frameworks_detected:
                     report.frameworks_detected.append(entry.framework)
 
-            report.files_scanned = len(entry_points)  # Approximate
+            report.files_scanned = files_analyzed  # P5-03c Fix 9: Use actual count
 
             self.logger.info(
                 f"Full LLM detection complete: {report.total_entry_points} entry points "

@@ -126,6 +126,8 @@ class OpenCodeAgent(BaseEngine):
 
         # Token usage tracking
         self._total_tokens = 0
+        self._files_failed = 0
+        self._files_processed = 0
 
     def _create_llm_client(
         self,
@@ -266,6 +268,10 @@ class OpenCodeAgent(BaseEngine):
         )
 
         try:
+            # Reset per-scan runtime stats
+            self._files_failed = 0
+            self._files_processed = 0
+
             # Find files to analyze
             if files:
                 target_files = [
@@ -276,51 +282,17 @@ class OpenCodeAgent(BaseEngine):
                 target_files = self._find_analyzable_files(source_path)
 
             # Limit number of files
+            if len(target_files) > self.max_files:
+                target_files = target_files[:self.max_files]
+
+            if not target_files:
+                return self.finalize_scan_result(
+                    result,
+                    success=True,
+                    error_message="No analyzable files found.",
+                )
+
             # Analyze files concurrently
-            all_findings = await asyncio.gather(*[
-                _analyze_file(f, source_path, source_path, language, vulnerability_focus, context)
-                for f in batch_results
-            ]
-
-            progress.update(task, completed=True, description=f"[green]Analyzed {len(batch_results)}/{len(target_files)} files[/]")
-
-            # Aggregate findings
-            for r in batch_results:
-                if r.get("success", False):
-                    all_findings.extend([
-                        Finding for finding in r.findings
-                        logger.warning(
-                            f"Analysis failed for {f.relative_to(source_path)}: {e}"
-                    )
-                else:
-                    logger.error(f"Analysis failed for {f}: {e}")
-
-                    all_findings.append({
-                        "source": "agent",
-                        "finding": finding,
-                    })
-
-            # P5-03b Fix 7: Track files_failed/files_analyzed
-            if files_failed:
- > 0:
-                files_analyzed += =1
-            else:
-                files_failed += 1
-
-            # Add summary statistics
-            result.metadata["agent_summary"] = {
-                "total_files": len(files),
-                "files_analyzed": files_analyzed,
-                if files_failed:
-                    "files_failed": files_failed,
-                "files_skipped": len(files) - files_analyzed,
-                "total_findings": len(all_findings),
-                "total_tokens": self._total_tokens,
-                "provider": str(self.llm.provider),
-                "model": str(self.llm.model),
-                "max_files": self.max_files,
-                "max_file_size": self.max_file_size,
-            }            # Analyze files concurrently
             all_findings = await self._analyze_files(
                 files=target_files,
                 source_path=source_path,
@@ -344,7 +316,11 @@ class OpenCodeAgent(BaseEngine):
                 result,
                 success=True,
                 raw_output={
-                    "files_analyzed": len(target_files),
+                    # files_analyzed means successful file analyses.
+                    "files_analyzed": max(0, self._files_processed - self._files_failed),
+                    "total_files": len(target_files),
+                    "files_processed": self._files_processed,
+                    "files_failed": self._files_failed,
                     "total_tokens": self._total_tokens,
                     "provider": str(self.llm.provider),
                     "model": self.llm.model,
@@ -485,6 +461,7 @@ class OpenCodeAgent(BaseEngine):
         """Analyze a single file using the LLM."""
         async with self._semaphore:  # Limit concurrency
             try:
+                self._files_processed += 1
                 # Read file content
                 code = file_path.read_text(encoding="utf-8", errors="replace")
 
@@ -534,6 +511,7 @@ class OpenCodeAgent(BaseEngine):
                 return findings
 
             except LLMTruncatedResponseError as e:
+                self._files_failed += 1
                 # Response was truncated - log detailed info
                 self.logger.warning(
                     f"LLM response truncated for {file_path}. "
@@ -544,6 +522,7 @@ class OpenCodeAgent(BaseEngine):
                 return []
 
             except LLMEmptyResponseError as e:
+                self._files_failed += 1
                 # Empty response - might be temporary
                 self.logger.warning(
                     f"LLM returned empty response for {file_path}. "
@@ -553,6 +532,7 @@ class OpenCodeAgent(BaseEngine):
                 return []
 
             except LLMError as e:
+                self._files_failed += 1
                 # Other LLM errors - log with full context
                 self.logger.warning(
                     f"LLM error analyzing {file_path}: {e}. "
@@ -563,6 +543,7 @@ class OpenCodeAgent(BaseEngine):
                 return []
 
             except Exception as e:
+                self._files_failed += 1
                 self.logger.error(
                     f"Unexpected error analyzing {file_path}: {type(e).__name__}: {e}"
                 )

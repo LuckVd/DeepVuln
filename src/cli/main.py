@@ -541,8 +541,12 @@ async def run_full_security_scan(
                 def scan_callback(files: list[str]) -> list[dict]:
                     import asyncio
 
+                    from src.core.config import get_llm_config, get_openai_config
+                    from src.layers.l1_intelligence.tech_stack_detector import TechStackDetector
                     from src.layers.l3_analysis.engines.codeql import CodeQLEngine
+                    from src.layers.l3_analysis.engines.opencode_agent import OpenCodeAgent
                     from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
+                    from src.layers.l3_analysis.llm.openai_client import OpenAIClient
 
                     findings = []
                     by_engine: dict[str, int] = {}
@@ -575,22 +579,78 @@ async def run_full_security_scan(
                             errors.append(f"Semgrep init failed: {e}")
 
                         # CodeQL engine (if available and requested)
-                        engines_requested = scan_options.get("engines", [])
+                        engines_requested = scan_options.get("engines") or []
                         if "codeql" in engines_requested or scan_options.get("full_scan"):
                             try:
                                 codeql_engine = CodeQLEngine()
                                 if codeql_engine.is_available():
-                                    # Detect primary language from project
-                                    from src.layers.l1_intelligence.tech_stack_detector import TechStackDetector
+                                    # Detect project languages from project
                                     tech_detector = TechStackDetector()
                                     tech_result = tech_detector.detect(project_path)
-                                    primary_lang = tech_result.languages[0].language.value if tech_result.languages else "python"
-                                    tasks.append(("codeql", codeql_engine.scan(
-                                        source_path=project_path,
-                                        language=primary_lang.lower(),
-                                    )))
+                                    all_languages = [
+                                        lang.language.value
+                                        for lang in (tech_result.languages or [])
+                                        if hasattr(lang, "language")
+                                    ]
+                                    codeql_supported_languages = {
+                                        "java", "python", "go", "javascript", "typescript",
+                                        "c", "cpp", "csharp", "ruby", "swift",
+                                    }
+                                    supported_detected = [
+                                        lang.lower() for lang in all_languages
+                                        if lang.lower() in codeql_supported_languages
+                                    ]
+                                    if len(supported_detected) > 1:
+                                        tasks.append(("codeql", codeql_engine.scan_multi_language(
+                                            source_path=project_path,
+                                            languages=supported_detected,
+                                        )))
+                                    else:
+                                        primary_lang = all_languages[0] if all_languages else "python"
+                                        tasks.append(("codeql", codeql_engine.scan(
+                                            source_path=project_path,
+                                            language=primary_lang.lower(),
+                                        )))
                             except Exception as e:
                                 errors.append(f"CodeQL init failed: {e}")
+
+                        # Agent engine (if available and requested)
+                        if "agent" in engines_requested or scan_options.get("full_scan"):
+                            try:
+                                llm_config = get_llm_config()
+                                openai_config = get_openai_config()
+                                api_key = openai_config.get("api_key")
+                                if api_key:
+                                    llm_client_for_agent = OpenAIClient(
+                                        model=scan_options.get("model", "gpt-4"),
+                                        api_key=api_key,
+                                        base_url=openai_config.get("base_url", "https://api.openai.com/v1"),
+                                        max_tokens=llm_config.get("max_tokens", 4096),
+                                        temperature=llm_config.get("temperature", 0.1),
+                                    )
+                                    agent_engine = OpenCodeAgent(
+                                        llm_client=llm_client_for_agent,
+                                        max_files=scan_options.get("agent_max_files", 50),
+                                    )
+                                    if agent_engine.is_available():
+                                        tasks.append(("agent", agent_engine.scan(
+                                            source_path=project_path,
+                                            files=normalized_patterns,
+                                            vulnerability_focus=[
+                                                "sql_injection",
+                                                "xss",
+                                                "command_injection",
+                                                "path_traversal",
+                                                "ssrf",
+                                                "hardcoded_secrets",
+                                                "crypto_weakness",
+                                                "auth_bypass",
+                                            ],
+                                        )))
+                                else:
+                                    errors.append("Agent skipped in incremental scan: LLM API key not configured")
+                            except Exception as e:
+                                errors.append(f"Agent init failed: {e}")
 
                         if not tasks:
                             return
@@ -660,13 +720,25 @@ async def run_full_security_scan(
             result["total_findings"] = inc_result.total_findings
             result["duration_seconds"] = inc_result.duration_seconds
 
+            # P5-03a Fix 2: Build real by_engine stats from incremental findings
+            by_engine: dict[str, int] = {}
+            for finding in inc_result.findings or []:
+                if not isinstance(finding, dict):
+                    continue
+                engine = finding.get("source_engine") or finding.get("source")
+                if isinstance(engine, str) and engine:
+                    by_engine[engine] = by_engine.get(engine, 0) + 1
+            if not by_engine:
+                by_engine = {"incremental": inc_result.total_findings}
+
             # P5-01e Fix 6: Add statistics field for incremental results (consistency with full scan)
             result["statistics"] = {
                 "total_findings": inc_result.total_findings,
                 "verified_count": len(inc_result.new_vulnerabilities) if inc_result.new_vulnerabilities else 0,
                 "by_severity": {},  # Incremental result doesn't have severity breakdown
-                "by_engine": {"incremental": inc_result.total_findings},
+                "by_engine": by_engine,
             }
+            result["incremental"]["by_engine"] = by_engine
 
             # Display summary
             console.print(f"\n{inc_result.to_summary()}")
@@ -889,7 +961,7 @@ async def run_full_security_scan(
             if is_valid_file(f) and str(f) not in entry_point_files
         ]
 
-        max_files = 50
+        max_files = options.get("agent_max_files", 50)
         agent_target_files = list(entry_point_files)[:max_files]
         remaining_slots = max_files - len(agent_target_files)
         if remaining_slots > 0 and other_files:
@@ -984,12 +1056,12 @@ async def run_full_security_scan(
 
     # Show warnings for unavailable engines
     if unavailable_engines:
-        console.print(f"\n[yellow]⚠ Engine Degradation Warning:[/]")
+        console.print("\n[yellow]⚠ Engine Degradation Warning:[/]")
         for engine in unavailable_engines:
             if engine == "agent":
-                console.print(f"  [yellow]• agent: unavailable (requires LLM API key)[/]")
+                console.print("  [yellow]• agent: unavailable (requires LLM API key)[/]")
             elif engine == "codeql":
-                console.print(f"  [yellow]• codeql: unavailable (CodeQL CLI not installed)[/]")
+                console.print("  [yellow]• codeql: unavailable (CodeQL CLI not installed)[/]")
             else:
                 console.print(f"  [yellow]• {engine}: unavailable[/]")
 
@@ -1055,6 +1127,38 @@ async def run_full_security_scan(
                         phase_info["codeql_lang"] = scan_result.metadata["codeql_languages"]
                     else:
                         phase_info["codeql_lang"] = [primary_lang.lower()]
+                if engine_name == "agent" and hasattr(scan_result, "raw_output") and scan_result.raw_output:
+                    files_failed = scan_result.raw_output.get("files_failed", 0)
+                    files_total = scan_result.raw_output.get(
+                        "total_files",
+                        scan_result.raw_output.get("files_processed", files_failed),
+                    )
+                    files_total = max(int(files_total), 1)
+                    failure_rate = files_failed / files_total
+
+                    agent_partial_failure_rate = float(options.get("agent_partial_failure_rate", 0.2))
+                    agent_fail_failure_rate = float(options.get("agent_fail_failure_rate", 0.5))
+
+                    phase_info["files_failed"] = files_failed
+                    phase_info["files_total"] = files_total
+                    phase_info["failure_rate"] = failure_rate
+
+                    if failure_rate >= agent_fail_failure_rate:
+                        phase_info["success"] = False
+                        phase_info["failed"] = True
+                        phase_info["error"] = (
+                            f"Agent failed: failure rate {failure_rate:.1%} "
+                            f">= threshold {agent_fail_failure_rate:.0%}"
+                        )
+                        result["success"] = False
+                        result["errors"].append(phase_info["error"])
+                    elif failure_rate >= agent_partial_failure_rate:
+                        phase_info["partial_success"] = True
+                        result["partial_success"] = True
+                        result["errors"].append(
+                            f"Agent partial: {files_failed}/{files_total} files failed "
+                            f"({failure_rate:.1%})"
+                        )
                 console.print(f"  ✓ {engine_name.capitalize()}: {findings_count} findings")
                 result["phases"][engine_name] = phase_info
             else:
@@ -1070,7 +1174,14 @@ async def run_full_security_scan(
 
     if result["all_findings"] and llm_verify:
         console.print("\n[bold cyan]Phase 4: Exploitability Verification (Parallel)[/]")
-        console.print(f"  LLM Verification: {'✓' if llm_verify else '✗'}")
+        # P5-03b Fix 8: Split llm_verify into requested and active status
+        llm_verify_requested = llm_verify
+        llm_verify_active = llm_client is not None
+        console.print(f"  LLM Verification: requested={'✓' if llm_verify_requested else '✗'}, active={'✓' if llm_verify_active else '✗'}")
+        result["llm_verify_status"] = {
+            "requested": llm_verify_requested,
+            "active": llm_verify_active,
+        }
 
         try:
             from src.core.llm import get_global_concurrency_manager
@@ -1441,7 +1552,7 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     # P5-01e A3: Separate findings by exploitability status (not is_suspicious metadata)
     # Also categorize by adversarial verdict (using unified report_status)
     EXPLOITABLE_STATUSES = {"exploitable", "conditional"}
-    REVIEW_STATUSES = {"needs_review", "unlikely"}
+    REVIEW_STATUSES = {"needs_review", "unlikely", "not_exploitable", "error"}
 
     verified_findings = []
     review_findings = []
@@ -1800,7 +1911,7 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
     # EXPLOITABLE_STATUSES: findings that represent real exploitable vulnerabilities
     # REVIEW_STATUSES: findings that need manual review but are not clearly exploitable
     EXPLOITABLE_STATUSES = {"exploitable", "conditional"}
-    REVIEW_STATUSES = {"needs_review", "unlikely"}
+    REVIEW_STATUSES = {"needs_review", "unlikely", "not_exploitable", "error"}
 
     exploitable_findings = []
     review_findings = []
@@ -1826,8 +1937,8 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
                 # Default: treat as needs_review
                 review_findings.append(v)
         else:
-            # not_exploitable or error - skip from main display
-            pass
+            # Keep non-exploitable/error visible in review bucket for transparency
+            review_findings.append(v)
 
     # Also check all_findings for suspicious code (if not verified yet)
     if not result.get("verified_findings"):
@@ -1878,6 +1989,7 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
             console.print(f"  {emoji} {verdict.upper()}: {count}")
 
     # P4-05: Report Status breakdown (unified status)
+    # P5-03c Fix 11: Include not_exploitable and error in main view
     if "report_status" in stats:
         console.print()
         report_emoji = {
@@ -1885,11 +1997,61 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
             "conditional": "🟡",
             "informational": "🔵",
             "suppressed": "⚫",
+            "not_exploitable": "🟢",
+            "error": "❌",
         }
         console.print("[bold]By Report Status (P4-05):[/]")
         for status, count in stats["report_status"].items():
             emoji = report_emoji.get(status, "❓")
             console.print(f"  {emoji} {status.upper()}: {count}")
+
+        # P5-03c Fix 11: Show summary of non-exploitable findings
+        not_exploitable_count = stats["report_status"].get("not_exploitable", 0)
+        error_count = stats["report_status"].get("error", 0)
+        if not_exploitable_count > 0 or error_count > 0:
+            console.print()
+            console.print("[dim]── Non-Exploitable/Error Summary ──[/]")
+            if not_exploitable_count > 0:
+                console.print(f"  [green]🟢 {not_exploitable_count} findings verified as not exploitable[/]")
+            if error_count > 0:
+                console.print(f"  [red]❌ {error_count} findings had analysis errors[/]")
+
+            # P5-03c Fix 11: Expandable-style details (top N) for transparency
+            detail_rows = []
+            for item in result.get("verified_findings", []):
+                if not isinstance(item, dict):
+                    continue
+                finding = item.get("finding")
+                exploitability = item.get("exploitability")
+                status = None
+                if exploitability and hasattr(exploitability, "status"):
+                    status = exploitability.status.value if hasattr(exploitability.status, "value") else str(exploitability.status)
+                if status not in {"not_exploitable", "error"}:
+                    continue
+
+                title = getattr(finding, "title", "Unknown finding")
+                location = getattr(getattr(finding, "location", None), "file", "unknown")
+                line = getattr(getattr(finding, "location", None), "line", None)
+                if line:
+                    location = f"{location}:{line}"
+
+                reason = ""
+                if exploitability and hasattr(exploitability, "reasoning"):
+                    reason = str(exploitability.reasoning or "")
+                if not reason and isinstance(item.get("error"), str):
+                    reason = item["error"]
+                if not reason:
+                    reason = "No additional details provided"
+
+                detail_rows.append((status, title, location, reason))
+
+            if detail_rows:
+                console.print()
+                console.print("[bold]Non-Exploitable/Error Details (Top 10):[/]")
+                for status, title, location, reason in detail_rows[:10]:
+                    icon = "🟢" if status == "not_exploitable" else "❌"
+                    console.print(f"  {icon} {title} [dim]({location})[/]")
+                    console.print(f"     [dim]{reason[:180]}[/]")
 
     # Token Usage
     token_usage = stats.get("token_usage")
@@ -2092,7 +2254,7 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
 
     # P5-01e A3: Separate findings by exploitability status (not is_suspicious metadata)
     EXPLOITABLE_STATUSES = {"exploitable", "conditional"}
-    REVIEW_STATUSES = {"needs_review", "unlikely"}
+    REVIEW_STATUSES = {"needs_review", "unlikely", "not_exploitable", "error"}
 
     exploitable_findings = []
     review_findings = []

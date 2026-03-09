@@ -1,5 +1,6 @@
 """Security analyzer for automated vulnerability detection."""
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,8 @@ class DependencyVuln(BaseModel):
     highest_severity: SeverityLevel = SeverityLevel.INFO
     has_kev: bool = False
     kev_cves: list[str] = Field(default_factory=list)
+    match_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    cve_confidence: dict[str, float] = Field(default_factory=dict)
 
     @property
     def cve_count(self) -> int:
@@ -48,6 +51,8 @@ class FrameworkVuln(BaseModel):
     highest_severity: SeverityLevel = SeverityLevel.INFO
     has_kev: bool = False
     kev_cves: list[str] = Field(default_factory=list)
+    match_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    cve_confidence: dict[str, float] = Field(default_factory=dict)
 
     @property
     def cve_count(self) -> int:
@@ -442,12 +447,18 @@ class SecurityAnalyzer:
                         relevant_cves = self._filter_relevant_cves(all_cves, dep)
 
                         if relevant_cves:
+                            cve_confidence = {
+                                c.cve_id: self._estimate_dependency_cve_confidence(dep, c)
+                                for c in relevant_cves
+                            }
                             dep_vuln = DependencyVuln(
                                 dependency=dep,
                                 cves=relevant_cves,
                                 highest_severity=self._get_highest_severity(relevant_cves),
                                 has_kev=any(c.kev for c in relevant_cves),
                                 kev_cves=[c.cve_id for c in relevant_cves if c.kev],
+                                match_confidence=sum(cve_confidence.values()) / len(cve_confidence),
+                                cve_confidence=cve_confidence,
                             )
                             vulns.append(dep_vuln)
 
@@ -491,12 +502,18 @@ class SecurityAnalyzer:
                     relevant_cves = self._filter_framework_cves(cves, framework)
 
                     if relevant_cves:
+                        cve_confidence = {
+                            c.cve_id: self._estimate_framework_cve_confidence(framework, c)
+                            for c in relevant_cves
+                        }
                         fw_vuln = FrameworkVuln(
                             framework=framework,
                             cves=relevant_cves,
                             highest_severity=self._get_highest_severity(relevant_cves),
                             has_kev=any(c.kev for c in relevant_cves),
                             kev_cves=[c.cve_id for c in relevant_cves if c.kev],
+                            match_confidence=sum(cve_confidence.values()) / len(cve_confidence),
+                            cve_confidence=cve_confidence,
                         )
                         vulns.append(fw_vuln)
 
@@ -561,11 +578,9 @@ class SecurityAnalyzer:
         # For Maven packages, extract artifact ID for matching
         # Format: "groupId:artifactId" -> extract "artifactId"
         maven_artifact_id = None
-        maven_group_id = None
         if dep.ecosystem == Ecosystem.MAVEN and ":" in dep.name:
             parts = dep.name.split(":")
             if len(parts) == 2:
-                maven_group_id = parts[0].lower()
                 maven_artifact_id = parts[1].lower()
 
         for cve in cves:
@@ -638,20 +653,41 @@ class SecurityAnalyzer:
         Returns:
             Filtered list of relevant CVEs.
         """
+        from src.layers.l1_intelligence.security_analyzer.version_utils import (
+            is_version_vulnerable,
+        )
+
         relevant: list[CVEInfo] = []
-        fw_name_lower = framework.name.lower()
+        fw_name_lower = framework.name.lower().strip()
+        fw_name_pattern = re.compile(rf"\b{re.escape(fw_name_lower)}\b")
+        fw_version = framework.version.strip() if framework.version else None
 
         for cve in cves:
             desc_lower = cve.description.lower()
 
-            # Check for framework name in description or affected products
-            name_match = fw_name_lower in desc_lower
-            product_match = any(
-                fw_name_lower in p.lower() for p in cve.affected_products
-            )
+            # Use token boundary matching to avoid accidental substring hits.
+            name_match = bool(fw_name_pattern.search(desc_lower))
 
-            if name_match or product_match:
-                relevant.append(cve)
+            products = [p.lower() for p in cve.affected_products]
+            product_match = any(bool(fw_name_pattern.search(p)) for p in products)
+            product_exact = any(p == fw_name_lower or p.endswith(f"/{fw_name_lower}") for p in products)
+
+            if not (name_match or product_match):
+                continue
+
+            # If framework version is known and CVE has affected version ranges,
+            # require version to actually fall in vulnerable range.
+            if fw_version and cve.affected_versions:
+                if is_version_vulnerable(fw_version, cve.affected_versions):
+                    relevant.append(cve)
+                continue
+
+            # If framework version is unknown but CVE has strict version ranges,
+            # keep only high-confidence product matches to reduce false positives.
+            if not fw_version and cve.affected_versions and not product_exact:
+                continue
+
+            relevant.append(cve)
 
         return relevant
 
@@ -677,6 +713,60 @@ class SecurityAnalyzer:
                 return severity
 
         return SeverityLevel.INFO
+
+    def _estimate_dependency_cve_confidence(self, dep: Dependency, cve: CVEInfo) -> float:
+        """Estimate confidence for dependency-CVE matching."""
+        from src.layers.l1_intelligence.security_analyzer.version_utils import (
+            is_version_vulnerable,
+        )
+
+        score = 0.6
+        tags = {tag.lower() for tag in (cve.tags or [])}
+        advisory_tags = {"github-advisory", "go-vulndb", "osv"}
+        if tags & advisory_tags:
+            score = 0.9
+
+        dep_name = dep.name.lower()
+        if any(dep_name in p.lower() for p in (cve.affected_products or [])):
+            score += 0.05
+
+        if dep.version and cve.affected_versions:
+            if is_version_vulnerable(dep.version, cve.affected_versions):
+                score += 0.1
+            else:
+                score -= 0.2
+
+        if dep.version_confidence < 0.7:
+            score -= 0.1
+
+        return max(0.0, min(1.0, score))
+
+    def _estimate_framework_cve_confidence(self, framework: Framework, cve: CVEInfo) -> float:
+        """Estimate confidence for framework-CVE matching."""
+        from src.layers.l1_intelligence.security_analyzer.version_utils import (
+            is_version_vulnerable,
+        )
+
+        fw_name = framework.name.lower().strip()
+        products = [p.lower() for p in (cve.affected_products or [])]
+        desc = cve.description.lower()
+
+        score = 0.5
+        if any(fw_name == p or p.endswith(f"/{fw_name}") for p in products):
+            score += 0.3
+        elif any(fw_name in p for p in products):
+            score += 0.2
+        elif fw_name in desc:
+            score += 0.1
+
+        fw_version = framework.version.strip() if framework.version else None
+        if fw_version and cve.affected_versions:
+            if is_version_vulnerable(fw_version, cve.affected_versions):
+                score += 0.1
+            else:
+                score -= 0.2
+
+        return max(0.0, min(1.0, score))
 
     def _calculate_statistics(self, report: SecurityReport) -> None:
         """Calculate vulnerability statistics.

@@ -524,8 +524,10 @@ class LLMFullDetector:
         batch_size: int = 20,
         max_batch_chars: int = 25000,  # Reduced from 30000 to avoid empty responses
         use_batch: bool = True,
-    ) -> list[EntryPoint]:
+    ) -> tuple[list[EntryPoint], int]:
         """Run full two-phase LLM detection.
+
+        P5-03c Fix 9: Return actual files analyzed count.
 
         Args:
             source_path: Path to source code.
@@ -534,19 +536,43 @@ class LLMFullDetector:
             use_batch: Use batch analysis mode (default: True).
 
         Returns:
-            List of detected entry points.
+            Tuple of (list of detected entry points, files analyzed count).
         """
         self.logger.info(f"Starting full LLM detection for {source_path}")
 
         all_entry_points: list[EntryPoint] = []
+        files_analyzed = 0
 
         # Phase 1: Analyze project structure
         self.logger.info("Phase 1: Analyzing project structure...")
         analysis = await self._analyze_project_structure(source_path)
 
         if not analysis.target_files and not analysis.target_dirs:
-            self.logger.warning("Phase 1: No target files identified by LLM")
-            return all_entry_points
+            # Fail-open: do not silently return empty results when Phase 1 fails.
+            self.logger.warning(
+                "Phase 1: No target files identified by LLM, falling back to all source files"
+            )
+            target_files = self._tree_generator.get_source_files(source_path)
+            if len(target_files) > self.max_files_to_analyze:
+                target_files = target_files[:self.max_files_to_analyze]
+            files_analyzed = len(target_files)
+
+            if not target_files:
+                return all_entry_points, files_analyzed
+
+            if use_batch and len(target_files) > 1:
+                all_entry_points = await self._analyze_files_batch(
+                    target_files, source_path, max_batch_chars=max_batch_chars
+                )
+            else:
+                for file_path in target_files:
+                    try:
+                        result = await self._analyze_file(file_path, source_path)
+                        if result.entry_points:
+                            all_entry_points.extend(result.entry_points)
+                    except Exception as e:
+                        self.logger.error(f"Phase 2 fallback failed to analyze {file_path}: {e}")
+            return all_entry_points, files_analyzed
 
         self.logger.info(
             f"Phase 1: LLM identified {len(analysis.target_files)} files, "
@@ -565,6 +591,8 @@ class LLMFullDetector:
                 f"(out of {len(target_files)} identified)"
             )
             target_files = target_files[:self.max_files_to_analyze]
+
+        files_analyzed = len(target_files)  # P5-03c Fix 9: Track actual files
 
         # Phase 2: Analyze files (batch or individual)
         if use_batch and len(target_files) > 1:
@@ -591,7 +619,7 @@ class LLMFullDetector:
                     self.logger.error(f"Phase 2: Failed to analyze {file_path}: {e}")
 
         self.logger.info(f"Full LLM detection complete: {len(all_entry_points)} entry points found")
-        return all_entry_points
+        return all_entry_points, files_analyzed
 
     async def _analyze_files_batch(
         self,
@@ -1116,7 +1144,7 @@ Language: {language}
                 is_retryable=True,
                 context={**context, "error_type": type(e).__name__},
                 suggestion="Check LLM service availability and configuration.",
-            )
+            ) from e
 
     def _parse_structure_response(self, response: str) -> ProjectStructureAnalysis:
         """Parse LLM response for project structure analysis.

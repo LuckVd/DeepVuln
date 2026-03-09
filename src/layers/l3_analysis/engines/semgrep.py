@@ -198,6 +198,8 @@ class SemgrepEngine(BaseEngine):
         # Apply rule gating if enabled and tech_stack available
         gating_result = None
         excluded_rule_ids = []
+        effective_rule_sets = list(rule_sets) if rule_sets else None
+        effective_disabled_packs: list[str] = []
 
         if use_rule_gating and (tech_stack or attack_surface):
             try:
@@ -210,9 +212,20 @@ class SemgrepEngine(BaseEngine):
                 gating_result = gating_engine.evaluate()
                 excluded_rule_ids = gating_result.disabled_rule_ids
 
+                # Enforce disabled packs only when explicit rule_sets are provided.
+                # For --config auto we cannot selectively disable packs reliably.
+                if effective_rule_sets and gating_result.disabled_packs:
+                    before = set(effective_rule_sets)
+                    effective_rule_sets = [
+                        rs for rs in effective_rule_sets
+                        if rs not in set(gating_result.disabled_packs)
+                    ]
+                    effective_disabled_packs = sorted(before - set(effective_rule_sets))
+
                 self.logger.info(
                     f"Rule gating applied: mode={gating_result.mode}, "
                     f"disabled_packs={len(gating_result.disabled_packs)}, "
+                    f"effective_disabled_packs={len(effective_disabled_packs)}, "
                     f"excluded_rules={len(excluded_rule_ids)}, "
                     f"reduction={gating_result.get_reduction_percentage():.1f}%"
                 )
@@ -281,7 +294,7 @@ class SemgrepEngine(BaseEngine):
         cmd = await self._build_scan_command(
             source_path=source_path,
             rules=rules,
-            rule_sets=rule_sets,
+            rule_sets=effective_rule_sets,
             languages=final_languages,
             exclude_patterns=final_exclude_patterns,
             include_patterns=final_include_patterns,
@@ -293,7 +306,7 @@ class SemgrepEngine(BaseEngine):
         # Track rules used
         rules_used = self._get_rules_used(
             rules=rules,
-            rule_sets=rule_sets,
+            rule_sets=effective_rule_sets,
             use_auto_config=use_auto_config,
         )
 
@@ -303,6 +316,10 @@ class SemgrepEngine(BaseEngine):
         # Store gating info in metadata
         if gating_result:
             result.metadata["rule_gating"] = gating_result.to_dict()
+            result.metadata["rule_gating_effective"] = {
+                "effective_disabled_packs": effective_disabled_packs,
+                "pack_enforcement_active": bool(effective_rule_sets),
+            }
 
         # Store file filtering info in metadata
         if filtering_result:

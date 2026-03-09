@@ -821,6 +821,9 @@ class CodeQLEngine(BaseEngine):
                 f"CodeQL scan completed: {len(findings)} findings in {total_duration:.1f}s"
             )
 
+            # P5-03a Fix 1: Add codeql_languages metadata for single-language scan
+            result.metadata["codeql_languages"] = [codeql_lang] if codeql_lang else [language]
+
             return self.finalize_scan_result(
                 result,
                 success=True,
@@ -944,6 +947,9 @@ class CodeQLEngine(BaseEngine):
                         f"Exception scanning {language} in {subdir.name}: {escape(str(e))}"
                     )
                     failed_languages.append(f"{language} ({subdir.name})")
+
+        # P5-03a Fix 1: Add codeql_languages metadata for tracking scanned languages
+        combined_result.metadata["codeql_languages"] = languages
 
         # Determine overall success
         if successful_scans > 0:

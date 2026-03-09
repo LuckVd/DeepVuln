@@ -92,7 +92,31 @@ class AttackSurfaceReport(BaseModel):
     errors: list[str] = Field(default_factory=list, description="Analysis errors")
 
     def add_entry_point(self, entry: EntryPoint) -> None:
-        """Add an entry point and update statistics."""
+        """Add an entry point and update statistics.
+
+        P5-03c Fix 10: Deduplicate by type+file+line+path+handler.
+        """
+        # P5-03c Fix 10: Check for duplicates before adding
+        dedup_key = (
+            entry.type.value,
+            entry.file,
+            entry.line,
+            entry.path,
+            entry.handler,
+        )
+
+        # Check if this entry already exists
+        for existing in self.entry_points:
+            existing_key = (
+                existing.type.value,
+                existing.file,
+                existing.line,
+                existing.path,
+                existing.handler,
+            )
+            if existing_key == dedup_key:
+                return  # Skip duplicate
+
         self.entry_points.append(entry)
 
         # Update statistics

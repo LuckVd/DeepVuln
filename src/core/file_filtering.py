@@ -325,7 +325,7 @@ class FileFilteringEngine:
             if semgrep_lang:
                 lang_flags.add(semgrep_lang)
 
-        result.lang_flags = sorted(list(lang_flags))
+        result.lang_flags = sorted(lang_flags)
         result.filtering_reasons.append(
             f"Language filtering: {result.lang_flags}"
         )
@@ -387,6 +387,26 @@ class FileFilteringEngine:
     def _apply_attack_surface_filtering(self, result: FileFilteringResult) -> None:
         """Apply attack surface-based filtering."""
         if not self.attack_surface:
+            return
+
+        # Fail-open: only apply aggressive filtering when attack surface confidence is high.
+        confidence = 0.5
+        files_scanned = getattr(self.attack_surface, "files_scanned", 0) or 0
+        entry_points = getattr(self.attack_surface, "entry_points", []) or []
+        errors = getattr(self.attack_surface, "errors", []) or []
+
+        if files_scanned > 0:
+            confidence += min(0.2, files_scanned / 1000 * 0.2)
+        if entry_points:
+            confidence += 0.2
+        if errors:
+            confidence -= 0.2
+        confidence = min(1.0, max(0.0, confidence))
+
+        if confidence < 0.7:
+            result.filtering_reasons.append(
+                f"Attack surface confidence low ({confidence:.2f}), skip HTTP-based directory exclusions"
+            )
             return
 
         # Check HTTP endpoints
