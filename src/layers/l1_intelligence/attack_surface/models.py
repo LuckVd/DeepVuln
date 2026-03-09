@@ -18,6 +18,14 @@ class EntryPointType(str, Enum):
     CLI = "cli"  # Command line interface
 
 
+class DetectionSource(str, Enum):
+    """Source of entry point detection."""
+
+    STATIC = "static"  # Detected by static analyzers (AST/regex)
+    LLM = "llm"  # Detected by LLM
+    BOTH = "both"  # Detected by both static and LLM
+
+
 class HTTPMethod(str, Enum):
     """HTTP methods."""
 
@@ -53,6 +61,12 @@ class EntryPoint(BaseModel):
     framework: str | None = Field(default=None, description="Framework name (gin, spring, flask)")
     middleware: list[str] = Field(default_factory=list, description="Middleware names")
     metadata: dict = Field(default_factory=dict, description="Additional metadata")
+
+    # P5-04: Detection source tracking
+    detection_source: DetectionSource = Field(
+        default=DetectionSource.STATIC,
+        description="Source of detection (static/llm/both)"
+    )
 
     def to_display(self) -> str:
         """Generate display string for this entry point."""
@@ -91,10 +105,16 @@ class AttackSurfaceReport(BaseModel):
     files_scanned: int = Field(default=0, description="Number of files scanned")
     errors: list[str] = Field(default_factory=list, description="Analysis errors")
 
+    # P5-04: Detection source statistics
+    static_found: int = Field(default=0, description="Entry points found by static detection")
+    llm_found: int = Field(default=0, description="Entry points found by LLM detection")
+    both_found: int = Field(default=0, description="Entry points found by both methods")
+
     def add_entry_point(self, entry: EntryPoint) -> None:
         """Add an entry point and update statistics.
 
         P5-03c Fix 10: Deduplicate by type+file+line+path+handler.
+        P5-04: Track detection source and update source statistics.
         """
         # P5-03c Fix 10: Check for duplicates before adding
         dedup_key = (
@@ -115,9 +135,28 @@ class AttackSurfaceReport(BaseModel):
                 existing.handler,
             )
             if existing_key == dedup_key:
+                # P5-04: If found by another source, mark as "both"
+                if existing.detection_source != entry.detection_source:
+                    # Save original source before modifying
+                    original_source = existing.detection_source
+                    existing.detection_source = DetectionSource.BOTH
+                    # Update statistics: remove from single source, add to both
+                    if original_source == DetectionSource.STATIC:
+                        self.static_found -= 1
+                    elif original_source == DetectionSource.LLM:
+                        self.llm_found -= 1
+                    self.both_found += 1
                 return  # Skip duplicate
 
         self.entry_points.append(entry)
+
+        # P5-04: Update source statistics
+        if entry.detection_source == DetectionSource.STATIC:
+            self.static_found += 1
+        elif entry.detection_source == DetectionSource.LLM:
+            self.llm_found += 1
+        elif entry.detection_source == DetectionSource.BOTH:
+            self.both_found += 1
 
         # Update statistics
         if entry.type == EntryPointType.HTTP:
@@ -167,4 +206,8 @@ class AttackSurfaceReport(BaseModel):
             "frameworks": self.frameworks_detected,
             "files_scanned": self.files_scanned,
             "unauthenticated": len(self.get_unauthenticated()),
+            # P5-04: Detection source statistics
+            "static_found": self.static_found,
+            "llm_found": self.llm_found,
+            "both_found": self.both_found,
         }

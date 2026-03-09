@@ -213,8 +213,10 @@ class AttackSurfaceDetector:
                 use_batch=True,
             )
 
-            # Add entry points to report
+            # Add entry points to report (P5-04: mark as LLM source)
+            from src.layers.l1_intelligence.attack_surface.models import DetectionSource
             for entry in entry_points:
+                entry.detection_source = DetectionSource.LLM
                 report.add_entry_point(entry)
                 if entry.framework and entry.framework not in report.frameworks_detected:
                     report.frameworks_detected.append(entry.framework)
@@ -295,6 +297,104 @@ class AttackSurfaceDetector:
                 await self._llm_enhance(report, source_path)
             except Exception as e:
                 self.logger.warning(f"LLM enhancement failed: {e}")
+
+        return report
+
+    async def detect_parallel(
+        self,
+        source_path: Path,
+        frameworks: list[str] | None = None,
+        batch_size: int = 50,
+        max_batch_chars: int = 30000,
+        max_files: int = 50,
+    ) -> AttackSurfaceReport:
+        """Detect attack surface with static and LLM running in parallel.
+
+        P5-04: Both static and LLM detection run independently, results are merged.
+
+        This method:
+        1. Runs static detection (synchronous, fast)
+        2. Runs LLM detection in parallel (asynchronous)
+        3. Merges results with deduplication
+        4. Tracks detection source for each entry point
+
+        Args:
+            source_path: Path to source code.
+            frameworks: Optional list of known frameworks.
+            batch_size: Number of files per LLM batch.
+            max_batch_chars: Maximum characters per batch.
+            max_files: Maximum files for LLM to analyze.
+
+        Returns:
+            Attack surface report with merged results.
+        """
+        import asyncio
+
+        from src.layers.l1_intelligence.attack_surface.models import DetectionSource
+
+        self.logger.info(f"Starting parallel detection (static + LLM) for {source_path}")
+
+        report = AttackSurfaceReport(source_path=str(source_path))
+
+        # Define async task for static detection (wrap sync method)
+        async def run_static_detection():
+            return self.detect(source_path, frameworks)
+
+        # Define async task for LLM detection
+        async def run_llm_detection():
+            if not self._llm_detector or not self.llm_client:
+                self.logger.info("LLM detection skipped: no LLM client configured")
+                return None
+            try:
+                return await self.detect_llm_full(
+                    source_path,
+                    max_files=max_files,
+                    batch_size=batch_size,
+                    max_batch_chars=max_batch_chars,
+                )
+            except Exception as e:
+                self.logger.warning(f"LLM detection failed: {e}")
+                return None
+
+        # Run both detections in parallel
+        static_task = asyncio.create_task(run_static_detection())
+        llm_task = asyncio.create_task(run_llm_detection())
+
+        static_report, llm_report = await asyncio.gather(
+            static_task, llm_task, return_exceptions=True
+        )
+
+        # Process static detection results
+        if isinstance(static_report, AttackSurfaceReport):
+            for entry in static_report.entry_points:
+                entry.detection_source = DetectionSource.STATIC
+                report.add_entry_point(entry)
+            report.files_scanned = static_report.files_scanned
+            for fw in static_report.frameworks_detected:
+                if fw not in report.frameworks_detected:
+                    report.frameworks_detected.append(fw)
+            report.errors.extend(static_report.errors)
+            self.logger.info(
+                f"Static detection found {static_report.total_entry_points} entry points"
+            )
+
+        # Process LLM detection results (will auto-deduplicate and mark as BOTH)
+        if isinstance(llm_report, AttackSurfaceReport):
+            for entry in llm_report.entry_points:
+                # detection_source already set to LLM in detect_llm_full
+                report.add_entry_point(entry)
+            for fw in llm_report.frameworks_detected:
+                if fw not in report.frameworks_detected:
+                    report.frameworks_detected.append(fw)
+            report.errors.extend(llm_report.errors)
+            self.logger.info(
+                f"LLM detection found {llm_report.total_entry_points} entry points"
+            )
+
+        self.logger.info(
+            f"Parallel detection complete: {report.total_entry_points} total entry points "
+            f"(static: {report.static_found}, llm: {report.llm_found}, both: {report.both_found})"
+        )
 
         return report
 

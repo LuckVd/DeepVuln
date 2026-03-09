@@ -782,8 +782,18 @@ async def run_full_security_scan(
     result["detected_languages"] = all_languages
 
     # Attack Surface Detection
+    # P5-04: New detection mode logic
+    # - static_only: Static detection only
+    # - llm_full_detect: Pure LLM detection only
+    # - default (no flags): Static + LLM parallel detection
+    static_only = options.get("static_only", False)
     llm_client_for_detect = None
-    if llm_detect or llm_full_detect:
+
+    # Determine if we need LLM client
+    need_llm_for_detect = (not static_only) and (not llm_full_detect or llm_full_detect)
+
+    # Initialize LLM client if needed (default behavior now includes LLM)
+    if need_llm_for_detect or llm_full_detect:
         try:
             from src.core.config import get_llm_config, get_openai_config
             from src.layers.l3_analysis.llm.openai_client import OpenAIClient
@@ -796,38 +806,49 @@ async def run_full_security_scan(
                 base_url=openai_config.get("base_url"),
                 max_tokens=llm_config.get("max_tokens", 4096),
             )
-            if llm_full_detect:
-                console.print("  [dim]Full LLM-driven detection enabled (any language/framework)[/]")
-            else:
-                console.print("  [dim]LLM-assisted detection enabled[/]")
         except Exception as e:
             console.print(f"  [yellow]Warning: Failed to initialize LLM client for detection: {e}[/]")
+            console.print("  [dim]Falling back to static-only detection[/]")
 
     surface_detector = AttackSurfaceDetector(
         llm_client=llm_client_for_detect,
-        enable_llm=llm_detect or llm_full_detect,
+        enable_llm=True,  # P5-04: Always enable LLM capability if client available
         llm_model=model,
     )
 
     # Get batch settings from options
     batch_size = options.get("batch_size", 20)
     batch_max_chars = options.get("batch_max_chars", 30000)
+    agent_max_files = options.get("agent_max_files", 50)
 
-    # Use appropriate detection method
-    if llm_full_detect and llm_client_for_detect:
+    # P5-04: Choose detection method based on mode
+    detected_frameworks = [fw.name for fw in tech_result.frameworks] if tech_result.frameworks else None
+
+    if static_only:
+        # Static detection only (user explicitly requested)
+        console.print("  [dim]Static-only detection mode (no LLM)[/]")
+        surface_report = surface_detector.detect(source_path, frameworks=detected_frameworks)
+    elif llm_full_detect and llm_client_for_detect:
         # Full LLM-driven detection (no static detectors)
+        console.print("  [dim]Full LLM-driven detection enabled (any language/framework)[/]")
         surface_report = await surface_detector.detect_llm_full(
             source_path,
             batch_size=batch_size,
             max_batch_chars=batch_max_chars,
         )
-    elif llm_detect and llm_client_for_detect:
-        # LLM-enhanced detection (static + LLM fallback) - pass detected frameworks
-        detected_frameworks = [fw.name for fw in tech_result.frameworks] if tech_result.frameworks else None
-        surface_report = await surface_detector.detect_async(source_path, frameworks=detected_frameworks)
+    elif llm_client_for_detect:
+        # P5-04: Default - Static + LLM parallel detection
+        console.print("  [dim]Parallel detection: Static + LLM[/]")
+        surface_report = await surface_detector.detect_parallel(
+            source_path,
+            frameworks=detected_frameworks,
+            batch_size=batch_size,
+            max_batch_chars=batch_max_chars,
+            max_files=agent_max_files,
+        )
     else:
-        # Static detection only - pass detected frameworks for better accuracy
-        detected_frameworks = [fw.name for fw in tech_result.frameworks] if tech_result.frameworks else None
+        # Fallback: Static detection only (no LLM client available)
+        console.print("  [dim]Static-only detection (no LLM client)[/]")
         surface_report = surface_detector.detect(source_path, frameworks=detected_frameworks)
 
     total_endpoints = (
@@ -837,11 +858,23 @@ async def run_full_security_scan(
         surface_report.cron_jobs +
         surface_report.file_inputs
     )
-    console.print(f"  Entry Points: {total_endpoints}")
+
+    # P5-04: Show detection source statistics
+    if hasattr(surface_report, 'static_found') and hasattr(surface_report, 'llm_found'):
+        console.print(
+            f"  Entry Points: {total_endpoints} "
+            f"(static: {surface_report.static_found}, llm: {surface_report.llm_found}, both: {surface_report.both_found})"
+        )
+    else:
+        console.print(f"  Entry Points: {total_endpoints}")
+
     result["attack_surface"] = {
         "http_endpoints": surface_report.http_endpoints,
         "rpc_services": surface_report.rpc_services,
         "total_entry_points": total_endpoints,
+        "static_found": getattr(surface_report, 'static_found', 0),
+        "llm_found": getattr(surface_report, 'llm_found', 0),
+        "both_found": getattr(surface_report, 'both_found', 0),
     }
 
     # =========================================================================
@@ -2482,8 +2515,9 @@ def clean() -> None:
 @click.option("--base", "-b", "base_scan", is_flag=True, help="Base scan: 3 engines only (semgrep + codeql + agent), no LLM verification")
 @click.option("--engines", multiple=True, type=click.Choice(["semgrep", "codeql", "agent"]), help="Specify engines for code analysis")
 @click.option("--llm-verify", is_flag=True, help="Enable LLM-assisted exploitability verification (Round 4)")
-@click.option("--llm-detect", is_flag=True, help="Enable LLM-assisted attack surface detection")
+@click.option("--llm-detect", is_flag=True, help="Enable LLM-assisted attack surface detection (default: enabled, use --static-only to disable)")
 @click.option("--llm-full-detect", is_flag=True, help="Enable FULL LLM-driven attack surface detection (no static detectors, any language/framework)")
+@click.option("--static-only", is_flag=True, help="Use only static detection for attack surface (no LLM), saves tokens")
 @click.option("--adversarial", is_flag=True, help="Enable L3.5 adversarial verification (attacker vs defender debate)")
 @click.option("--batch-size", default=None, type=int, help="Files per LLM batch for entry point detection (deprecated, use --batch-max-chars)")
 @click.option("--batch-max-chars", default=None, type=int, help="Maximum characters per batch for LLM entry point detection (default: from config or 30000)")
@@ -2504,6 +2538,7 @@ def scan(
     llm_verify: bool,
     llm_detect: bool,
     llm_full_detect: bool,
+    static_only: bool,
     adversarial: bool,
     batch_size: int | None,
     batch_max_chars: int | None,
@@ -2522,12 +2557,12 @@ def scan(
     - --full: Complete experience with all engines + LLM verification + adversarial debate
     - --engines: Custom engine selection
 
+    Attack Surface Detection Modes (P5-04):
+    - Default: Static + LLM parallel detection (both run independently, results merged)
+    - --static-only: Static detection only (no LLM, saves tokens)
+    - --llm-full-detect: Pure LLM detection only (no static, any language/framework)
+
     With --llm-verify, findings are verified with LLM for exploitability.
-
-    With --llm-detect, LLM assists static detection for unknown frameworks.
-
-    With --llm-full-detect, LLM performs full attack surface detection
-    (no static detectors, supports any language/framework).
 
     With --adversarial, findings go through L3.5 enhanced adversarial verification
     (strategy evolution + multi-round attacker vs defender debate + learning).
@@ -2546,14 +2581,14 @@ def scan(
         # Full scan: all engines + LLM verification + adversarial (recommended)
         deepvuln scan -p . --full
 
-        # Specific engines only
-        deepvuln scan -p . --engines semgrep --engines agent
-
-        # Full scan with LLM-assisted attack surface detection
-        deepvuln scan -p . --full --llm-detect
+        # Full scan with static-only detection (saves tokens)
+        deepvuln scan -p . --full --static-only
 
         # Full scan with pure LLM attack surface detection (any language)
         deepvuln scan -p . --full --llm-full-detect
+
+        # Specific engines only
+        deepvuln scan -p . --engines semgrep --engines agent
 
         # Incremental scan (only changed files, 70%+ faster)
         deepvuln scan -p . --full --incremental
@@ -2637,6 +2672,8 @@ def scan(
         "llm_verify": llm_verify,
         "llm_detect": llm_detect,
         "llm_full_detect": llm_full_detect,
+        "static_only": static_only,
+        "agent_max_files": agent_max_files,
         "batch_size": resolved_batch_size,
         "batch_max_chars": resolved_batch_max_chars,
         "model": resolved_model,
