@@ -91,7 +91,7 @@ class OpenCodeAgent(BaseEngine):
         model: str | None = None,
         max_file_size: int = 100000,  # 100KB max per file
         max_files: int = 50,
-        max_concurrent: int = 2,
+        max_concurrent: int | None = None,  # P5-05: None = use global config
         timeout: int = 600,
         **llm_options,
     ):
@@ -104,7 +104,7 @@ class OpenCodeAgent(BaseEngine):
             model: Model name. Uses provider default if not specified.
             max_file_size: Maximum file size to analyze (bytes).
             max_files: Maximum number of files to analyze.
-            max_concurrent: Maximum concurrent LLM requests.
+            max_concurrent: Maximum concurrent LLM requests. None = use global config.
             timeout: Total scan timeout in seconds.
             **llm_options: Additional LLM client options.
         """
@@ -112,7 +112,18 @@ class OpenCodeAgent(BaseEngine):
 
         self.max_file_size = max_file_size
         self.max_files = max_files
-        self.max_concurrent = max_concurrent
+
+        # P5-05: Use global concurrency config if not specified
+        if max_concurrent is None:
+            try:
+                from src.core.config import get_llm_config
+                llm_config = get_llm_config()
+                self.max_concurrent = llm_config.get("max_concurrent", 7)
+            except Exception:
+                self.max_concurrent = 7  # Fallback default
+        else:
+            self.max_concurrent = max_concurrent
+
         self.logger = logging.getLogger(__name__)
 
         # Initialize LLM client

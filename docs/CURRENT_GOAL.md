@@ -1,56 +1,109 @@
 # 当前目标
 
-> P5-04 攻击面检测模式重构 - 静态+LLM 双轨并行
+> P5-05 LLM 并发配置统一化
 ---
 
 ## 目标信息
 
 | 字段 | 值 |
 |------|-----|
-| **任务** | P5-04 攻击面检测模式重构 |
+| **任务** | P5-05 LLM 并发配置统一化 |
 | **状态** | completed ✅ |
-| **优先级** | high |
+| **优先级** | medium |
 | **创建日期** | 2026-03-09 |
 | **完成日期** | 2026-03-09 |
 | **所属阶段** | Phase 5 - 精度深化 |
 
 ---
 
-## 完成内容
+## 问题背景
 
-### P5-04a 模式重构 ✅
+### 之前的问题
 
-| 子任务 | 描述 | 状态 |
-|--------|------|------|
-| 新增 `detect_parallel` 方法 | 静态和 LLM 独立并行执行 | ✅ 完成 |
-| 默认启用并行检测 | 无参数时静态+LLM 并行 | ✅ 完成 |
-| 结果合并去重 | 两路结果合并到同一报告 | ✅ 完成 |
+各模块 LLM 并发配置不一致，部分硬编码：
 
-### P5-04b 结果去重 ✅
+| 模块 | 之前 | 问题 |
+|------|------|------|
+| Agent | 硬编码 2 | 不读取配置 |
+| 全局管理器 | 硬编码 5 | 不读取配置 |
+| CLI agent 命令 | 硬编码 3 | 不读取配置 |
+| 配置文件 | 7 | 被忽略 |
 
-| 子任务 | 描述 | 状态 |
-|--------|------|------|
-| 新增 `DetectionSource` 枚举 | STATIC/LLM/BOTH 三种来源 | ✅ 完成 |
-| EntryPoint 添加来源字段 | `detection_source` 属性 | ✅ 完成 |
-| 报告统计来源数量 | `static_found/llm_found/both_found` | ✅ 完成 |
+### 修改后
 
-### P5-04c CLI 集成 ✅
+所有模块统一从 `config.local.toml` 读取 `max_concurrent`：
 
-| 子任务 | 描述 | 状态 |
-|--------|------|------|
-| 新增 `--static-only` 参数 | 仅静态检测，节省 Token | ✅ 完成 |
-| 更新帮助文档 | 各模式说明已更新 | ✅ 完成 |
-| CLI 显示来源统计 | 显示 static/llm/both 数量 | ✅ 完成 |
+| 模块 | 之后 | 说明 |
+|------|------|------|
+| Agent | 配置值 (7) | None 时读取配置 |
+| 全局管理器 | 配置值 (7) | 初始化时读取配置 |
+| CLI agent 命令 | 配置值 (7) | None 时读取配置 |
+| Round 4 | 配置值 (7) | 使用全局管理器 |
+| 对抗式验证 | 配置值 (7) | 使用全局管理器 |
 
 ---
 
-## 最终行为
+## 修改内容
 
-| 模式 | 静态检测 | LLM 检测 | 结果处理 |
-|------|---------|----------|----------|
-| 默认 (无参数) | ✅ 并行 | ✅ 并行 | 合并去重 |
-| `--static-only` | ✅ | ❌ | 仅静态结果 |
-| `--llm-full-detect` | ❌ | ✅ | 仅 LLM 结果 |
+### 1. 全局并发管理器 (`src/core/llm/concurrency.py`)
+
+```python
+# 之前
+_global_manager = LLMConcurrencyManager(max_concurrent=5)
+
+# 之后
+max_concurrent = llm_config.get("max_concurrent", 7)
+_global_manager = LLMConcurrencyManager(max_concurrent=max_concurrent)
+```
+
+### 2. OpenCodeAgent (`src/layers/l3_analysis/engines/opencode_agent.py`)
+
+```python
+# 之前
+def __init__(self, ..., max_concurrent: int = 2, ...):
+
+# 之后
+def __init__(self, ..., max_concurrent: int | None = None, ...):
+    if max_concurrent is None:
+        max_concurrent = llm_config.get("max_concurrent", 7)
+```
+
+### 3. CLI agent 命令 (`src/cli/main.py`)
+
+```python
+# 之前
+@click.option("--max-concurrent", type=int, default=3, ...)
+
+# 之后
+@click.option("--max-concurrent", type=int, default=None, ...)
+# None 时从配置读取
+```
+
+---
+
+## 配置说明
+
+用户只需在 `config.local.toml` 中配置一次：
+
+```toml
+[llm]
+max_concurrent = 7  # 所有 LLM 模块统一使用此值
+```
+
+---
+
+## 测试验证
+
+```bash
+# 全局管理器读取配置
+assert manager.max_concurrent == 7  ✓
+
+# Agent 默认读取配置
+assert agent.max_concurrent == 7    ✓
+
+# Agent 显式指定仍生效
+assert agent2.max_concurrent == 3   ✓
+```
 
 ---
 
@@ -58,5 +111,4 @@
 
 | 时间 | 进展 |
 |------|------|
-| 2026-03-09 10:30 | 创建 P5-04 攻击面检测模式重构目标 |
-| 2026-03-09 11:45 | 完成 P5-04a/P5-04b/P5-04c 全部任务 |
+| 2026-03-09 13:45 | 完成 P5-05 LLM 并发配置统一化 |

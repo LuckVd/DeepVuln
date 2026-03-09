@@ -3547,7 +3547,7 @@ def _export_codeql_result(result, output_path: str, output_format: str) -> None:
 @click.option("--output", "-o", type=click.Path(), help="Output file for report")
 @click.option("--format", "output_format", type=click.Choice(["text", "json", "markdown"]), default="text", help="Output format")
 @click.option("--max-files", type=int, default=50, help="Maximum number of files to analyze")
-@click.option("--max-concurrent", type=int, default=3, help="Maximum concurrent LLM requests")
+@click.option("--max-concurrent", type=int, default=None, help="Maximum concurrent LLM requests (default: from config)")
 def agent_scan(
     path: str,
     provider: str,
@@ -3559,7 +3559,7 @@ def agent_scan(
     output: str | None,
     output_format: str,
     max_files: int,
-    max_concurrent: int,
+    max_concurrent: int | None,
 ) -> None:
     """Run AI-powered deep security audit using LLM.
 
@@ -3598,15 +3598,25 @@ def agent_scan(
     show_banner()
     source_path = Path(path)
 
+    # P5-05: Get max_concurrent from config if not specified
+    resolved_max_concurrent = max_concurrent
+    if resolved_max_concurrent is None:
+        try:
+            from src.core.config import get_llm_config
+            llm_config = get_llm_config()
+            resolved_max_concurrent = llm_config.get("max_concurrent", 7)
+        except Exception:
+            resolved_max_concurrent = 7  # Fallback default
+
     console.print(f"[cyan]Running AI security audit on {source_path}...[/]")
-    console.print(f"[dim]Provider: {provider} | Model: {model or 'default'}[/]\n")
+    console.print(f"[dim]Provider: {provider} | Model: {model or 'default'} | Max concurrent: {resolved_max_concurrent}[/]\n")
 
     # Create engine
     engine = OpenCodeAgent(
         provider=provider,
         model=model,
         max_files=max_files,
-        max_concurrent=max_concurrent,
+        max_concurrent=resolved_max_concurrent,
     )
 
     # Check availability
