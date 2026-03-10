@@ -11,6 +11,48 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+class ScanStatus(str, Enum):
+    """
+    P6-01: Top-level status for full scan results.
+
+    This enum provides clear result boundaries so users can immediately
+    understand the completeness of a scan without reading the entire report.
+    """
+
+    COMPLETE_SUCCESS = "complete_success"      # All requested engines succeeded
+    PARTIAL_SUCCESS = "partial_success"        # Non-core capabilities failed, main results still complete
+    DEGRADED_SUCCESS = "degraded_success"      # Core evidence engine (codeql) failed, but other engines have results
+    FAILED = "failed"                          # All core scan engines failed or no valid results
+
+
+class FailedEngineInfo(BaseModel):
+    """
+    P6-01: Structured information about a failed engine.
+
+    This model provides actionable diagnostics when an engine fails,
+    replacing the previous simple string-based error messages.
+    """
+
+    name: str = Field(..., description="Engine name (semgrep/codeql/agent)")
+    error_type: str = Field(
+        ...,
+        description="Error type: unavailable/exception/engine_failed/build_failed/analyze_failed/timeout/unknown",
+    )
+    message: str = Field(..., description="Human-readable error message")
+    languages: list[str] | None = Field(
+        default=None,
+        description="Languages that failed (for multi-language CodeQL scans)",
+    )
+    is_core_engine: bool = Field(
+        default=False,
+        description="Whether this is a core evidence engine (codeql is core)",
+    )
+    phase: str | None = Field(
+        default=None,
+        description="Which phase this engine was running in",
+    )
+
+
 class FindingType(str, Enum):
     """Type of finding."""
 

@@ -460,6 +460,167 @@ def run_intel_stats_interactive() -> None:
     show_stats(stats)
 
 
+# =============================================================================
+# P6-01: Scan Status Helper Functions
+# =============================================================================
+
+# Core engines that provide strong evidence for vulnerability assessment
+CORE_EVIDENCE_ENGINES = {"codeql"}
+MAIN_SCAN_ENGINES = {"semgrep", "agent", "codeql"}
+
+
+def _collect_failed_engines(
+    phases: dict[str, Any],
+    unavailable_engines: list[str],
+    requested_engines: list[str],
+) -> list[dict[str, Any]]:
+    """
+    P6-01: Collect structured information about failed engines.
+
+    This function aggregates failure information from multiple sources:
+    - phases: engines that executed but failed
+    - unavailable_engines: engines that couldn't be initialized
+    - requested_engines: engines the user requested (to determine is_core_engine)
+
+    Returns:
+        List of structured failed engine information dicts.
+    """
+    failed_engines: list[dict[str, Any]] = []
+
+    # Process engines that executed but failed
+    for engine_name, phase_info in phases.items():
+        if not phase_info.get("success"):
+            error_msg = phase_info.get("error", "Unknown error")
+
+            # Determine error type based on error message patterns
+            error_type = "unknown"
+            error_lower = error_msg.lower()
+            if "not installed" in error_lower or "not available" in error_lower:
+                error_type = "unavailable"
+            elif "timeout" in error_lower:
+                error_type = "timeout"
+            elif "build" in error_lower:
+                error_type = "build_failed"
+            elif "analyze" in error_lower or "all language scans failed" in error_lower:
+                error_type = "analyze_failed"
+            elif "exception" in error_lower:
+                error_type = "exception"
+            elif "failed" in error_lower:
+                error_type = "engine_failed"
+
+            # Extract languages for CodeQL
+            languages = None
+            if engine_name == "codeql":
+                codeql_lang = phase_info.get("codeql_lang")
+                if codeql_lang:
+                    languages = codeql_lang if isinstance(codeql_lang, list) else [codeql_lang]
+                else:
+                    # Try to extract from error message
+                    if "languages attempted:" in error_lower:
+                        lang_part = error_msg.lower().split("languages attempted:")[-1].strip()
+                        languages = [l.strip() for l in lang_part.split(",")]
+
+            failed_engines.append({
+                "name": engine_name,
+                "error_type": error_type,
+                "message": error_msg,
+                "languages": languages,
+                "is_core_engine": engine_name in CORE_EVIDENCE_ENGINES,
+                "phase": engine_name,
+            })
+
+    # Process unavailable engines
+    for engine_name in unavailable_engines:
+        # Don't duplicate if already in failed_engines
+        if any(fe["name"] == engine_name for fe in failed_engines):
+            continue
+
+        failed_engines.append({
+            "name": engine_name,
+            "error_type": "unavailable",
+            "message": f"{engine_name.capitalize()} is not available",
+            "languages": None,
+            "is_core_engine": engine_name in CORE_EVIDENCE_ENGINES,
+            "phase": None,
+        })
+
+    return failed_engines
+
+
+def _determine_scan_status(
+    phases: dict[str, Any],
+    failed_engines: list[dict[str, Any]],
+    has_valid_findings: bool,
+    requested_engines: list[str],
+) -> str:
+    """
+    P6-01: Determine the top-level scan status.
+
+    Status determination rules:
+    1. COMPLETE_SUCCESS: All requested engines succeeded
+    2. PARTIAL_SUCCESS: Non-core capabilities failed, main results still complete
+    3. DEGRADED_SUCCESS: Core evidence engine (codeql) failed, but other engines have results
+    4. FAILED: All core scan engines failed or no valid results
+
+    Args:
+        phases: Phase execution results
+        failed_engines: Structured list of failed engines
+        has_valid_findings: Whether there are valid findings in the result
+        requested_engines: Engines the user requested
+
+    Returns:
+        ScanStatus value as string.
+    """
+    from src.layers.l3_analysis.models import ScanStatus
+
+    # If no phases executed at all
+    if not phases and not requested_engines:
+        return ScanStatus.FAILED.value
+
+    # Check if all requested engines succeeded
+    successful_engines = {name for name, info in phases.items() if info.get("success")}
+    requested_set = set(requested_engines)
+
+    # All requested engines succeeded
+    if requested_set and requested_set.issubset(successful_engines):
+        return ScanStatus.COMPLETE_SUCCESS.value
+
+    # No engines succeeded at all
+    if not successful_engines:
+        return ScanStatus.FAILED.value
+
+    # Check for core engine failures
+    core_engine_failures = [fe for fe in failed_engines if fe.get("is_core_engine")]
+    core_engine_success = any(
+        phases.get(name, {}).get("success")
+        for name in CORE_EVIDENCE_ENGINES
+    )
+
+    # Core evidence engine failed but other main engines have results
+    if core_engine_failures and not core_engine_success:
+        # Check if at least one main scan engine succeeded
+        main_engine_success = any(
+            phases.get(name, {}).get("success")
+            for name in MAIN_SCAN_ENGINES
+        )
+        if main_engine_success and has_valid_findings:
+            return ScanStatus.DEGRADED_SUCCESS.value
+
+    # Some engines failed but core engines are fine
+    if failed_engines and core_engine_success:
+        return ScanStatus.PARTIAL_SUCCESS.value
+
+    # Default: if we have some success and some findings, it's partial
+    if successful_engines and has_valid_findings:
+        return ScanStatus.PARTIAL_SUCCESS.value
+
+    # If we have no valid findings, it's failed
+    if not has_valid_findings:
+        return ScanStatus.FAILED.value
+
+    return ScanStatus.PARTIAL_SUCCESS.value
+
+
 async def run_full_security_scan(
     source_path: Path,
     options: dict[str, Any],
@@ -627,6 +788,7 @@ async def run_full_security_scan(
                                         base_url=openai_config.get("base_url", "https://api.openai.com/v1"),
                                         max_tokens=llm_config.get("max_tokens", 4096),
                                         temperature=llm_config.get("temperature", 0.1),
+                                        timeout=llm_config.get("timeout", 120),
                                     )
                                     agent_engine = OpenCodeAgent(
                                         llm_client=llm_client_for_agent,
@@ -805,6 +967,7 @@ async def run_full_security_scan(
                 api_key=openai_config.get("api_key"),
                 base_url=openai_config.get("base_url"),
                 max_tokens=llm_config.get("max_tokens", 4096),
+                timeout=llm_config.get("timeout", 120),
             )
         except Exception as e:
             console.print(f"  [yellow]Warning: Failed to initialize LLM client for detection: {e}[/]")
@@ -898,6 +1061,7 @@ async def run_full_security_scan(
                 base_url=base_url,
                 max_tokens=llm_config.get("max_tokens", 4096),
                 temperature=llm_config.get("temperature", 0.1),
+                timeout=llm_config.get("timeout", 120),
             )
             console.print(f"  LLM Client: ✓ ({model})")
         else:
@@ -1460,11 +1624,69 @@ async def run_full_security_scan(
             console.print(f"  ✗ Adversarial verification error: {e}", markup=False)
             result["errors"].append(f"Adversarial verification error: {e}")
 
+    # Backfill verification/adversarial state onto canonical findings so
+    # adjudication, deduplication, and report export all use the same source.
+    for verified in result.get("verified_findings", []):
+        finding = verified.get("finding")
+        exploitability = verified.get("exploitability")
+        if not finding or not exploitability:
+            continue
+
+        finding.exploitability = (
+            exploitability.status.value
+            if hasattr(exploitability.status, "value")
+            else str(exploitability.status)
+        )
+        if isinstance(getattr(finding, "metadata", None), dict):
+            finding.metadata["exploitability_confidence"] = exploitability.confidence
+            finding.metadata["exploitability_reasoning"] = exploitability.reasoning
+
+    verdict_to_exploitability = {
+        "confirmed": "exploitable",
+        "exploitable": "exploitable",
+        "conditional": "conditional",
+        "false_positive": "not_exploitable",
+        "needs_review": "needs_review",
+    }
+    for adversarial_result in result.get("adversarial_results", []):
+        finding = adversarial_result.get("finding")
+        verification = adversarial_result.get("adversarial")
+        if (
+            not finding
+            or not verification
+            or not getattr(verification, "verdict", None)
+        ):
+            continue
+
+        verdict = verification.verdict
+        verdict_value = (
+            verdict.verdict.value
+            if hasattr(verdict.verdict, "value")
+            else str(verdict.verdict)
+        )
+        if isinstance(getattr(finding, "metadata", None), dict):
+            finding.metadata["adversarial_verdict"] = verdict_value
+            finding.metadata["adversarial_confidence"] = verdict.confidence
+            finding.metadata["adversarial_reasoning"] = verdict.reasoning
+
+        mapped_status = verdict_to_exploitability.get(verdict_value)
+        if mapped_status:
+            finding.exploitability = mapped_status
+
     # =========================================================================
-    # P5-01e A2: Engine Success Aggregation
+    # P5-01e A2: Engine Success Aggregation (Enhanced by P6-01)
     # =========================================================================
     # Calculate engine success rate to determine overall success
+    # P6-01: Now also collect structured failed_engines and determine status
     phases = result.get("phases", {})
+
+    # P6-01: Collect structured failed engine information
+    failed_engines_structured = _collect_failed_engines(
+        phases=phases,
+        unavailable_engines=list(unavailable_engines),
+        requested_engines=engines,
+    )
+
     if phases:
         successful_engines = sum(1 for p in phases.values() if p.get("success"))
         total_engines = len(phases)
@@ -1476,15 +1698,30 @@ async def run_full_security_scan(
             elif successful_engines < total_engines:
                 # Partial success - some engines failed
                 result["partial_success"] = True
-                result["failed_engines"] = [
-                    name for name, p in phases.items() if not p.get("success")
-                ]
                 logger.warning(
                     f"Partial success: {successful_engines}/{total_engines} engines succeeded. "
-                    f"Failed: {result['failed_engines']}"
+                    f"Failed: {[fe['name'] for fe in failed_engines_structured]}"
                 )
             else:
                 logger.info(f"All {total_engines} engines succeeded")
+
+    # =========================================================================
+    # P6-01: Determine Scan Status and Set Structured failed_engines
+    # =========================================================================
+    has_valid_findings = len(result.get("all_findings", [])) > 0
+
+    scan_status = _determine_scan_status(
+        phases=phases,
+        failed_engines=failed_engines_structured,
+        has_valid_findings=has_valid_findings,
+        requested_engines=engines,
+    )
+
+    result["status"] = scan_status
+    result["failed_engines"] = failed_engines_structured
+
+    # Log the final status for debugging
+    logger.info(f"Scan status: {scan_status}, failed engines: {len(failed_engines_structured)}")
 
     # =========================================================================
     # P5-01e E: Deduplication and Unified Adjudication
@@ -1545,8 +1782,41 @@ async def run_full_security_scan(
     # =========================================================================
 
     result["end_time"] = datetime.now(UTC).isoformat()
-    result["statistics"]["total_findings"] = len(result["all_findings"])
-    result["statistics"]["verified_count"] = len(result["verified_findings"])
+
+    canonical_findings = [
+        item["finding"] if isinstance(item, dict) and "finding" in item else item
+        for item in result["all_findings"]
+    ]
+
+    exploitability_counts: dict[str, int] = {}
+    adversarial_counts: dict[str, int] = {}
+    report_status_counts: dict[str, int] = {}
+    for finding in canonical_findings:
+        exploitability = getattr(finding, "exploitability", None)
+        if exploitability:
+            exploitability_counts[str(exploitability)] = (
+                exploitability_counts.get(str(exploitability), 0) + 1
+            )
+
+        report_status = getattr(finding, "report_status", None)
+        if report_status:
+            report_status_counts[str(report_status)] = (
+                report_status_counts.get(str(report_status), 0) + 1
+            )
+
+        metadata = getattr(finding, "metadata", None)
+        if isinstance(metadata, dict):
+            verdict = metadata.get("adversarial_verdict")
+            if verdict:
+                adversarial_counts[str(verdict)] = adversarial_counts.get(str(verdict), 0) + 1
+
+    result["statistics"]["total_findings"] = len(canonical_findings)
+    result["statistics"]["verified_count"] = len(canonical_findings)
+    result["statistics"]["by_exploitability"] = exploitability_counts
+    if adversarial_counts:
+        result["statistics"]["by_adversarial_verdict"] = adversarial_counts
+    if report_status_counts:
+        result["statistics"]["report_status"] = report_status_counts
 
     # Collect token usage from LLM client
     if llm_client:
@@ -1566,99 +1836,115 @@ async def run_full_security_scan(
     return result
 
 
-def _export_full_scan_result(result: dict[str, Any], export_path: str, options: dict[str, Any]) -> None:
-    """Export full scan result to file.
-
-    Args:
-        result: Full scan result dictionary.
-        export_path: Path to export file.
-        options: Scan options.
-    """
-
-    # Build adversarial lookup: finding_id -> adversarial result
-    adversarial_lookup = {}
-    for adv in result.get("adversarial_results", []):
-        finding = adv.get("finding")
-        if finding and hasattr(finding, "id"):
-            adversarial_lookup[finding.id] = adv
-
-    # P5-01e A3: Separate findings by exploitability status (not is_suspicious metadata)
-    # Also categorize by adversarial verdict (using unified report_status)
-    EXPLOITABLE_STATUSES = {"exploitable", "conditional"}
-    REVIEW_STATUSES = {"needs_review", "unlikely", "not_exploitable", "error"}
-
-    verified_findings = []
-    review_findings = []
-    adversarial_exploitable = []
-    adversarial_false_positive = []
-    adversarial_conditional = []
-    adversarial_needs_review = []
-
-    for v in result.get("verified_findings", []):
-        finding = v.get("finding")
+def _build_full_scan_report_view(result: dict[str, Any]) -> dict[str, Any]:
+    """Build a canonical report view from adjudicated findings."""
+    entries: list[dict[str, Any]] = []
+    for item in result.get("all_findings", []):
+        finding = item.get("finding") if isinstance(item, dict) else item
         if not finding:
             continue
 
-        # Get adversarial result if available
-        adv_result = adversarial_lookup.get(finding.id if hasattr(finding, "id") else None)
-        v["adversarial"] = adv_result  # Attach to v for later use
+        metadata = finding.metadata or {}
+        report_status = getattr(finding, "report_status", None) or "conditional"
+        exploitability = getattr(finding, "exploitability", None)
+        adversarial_verdict = metadata.get("adversarial_verdict")
+        source = getattr(finding, "source", None)
+        if not source and isinstance(item, dict):
+            source = item.get("source")
 
-        # Categorize by exploitability status
-        exp = v.get("exploitability")
-        if exp:
-            status = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
-        else:
-            status = None
+        entries.append(
+            {
+                "finding": finding,
+                "source": str(source or "unknown"),
+                "report_status": str(report_status),
+                "exploitability": str(exploitability) if exploitability else None,
+                "adversarial_verdict": str(adversarial_verdict) if adversarial_verdict else None,
+                "reasoning": metadata.get("adversarial_reasoning")
+                or metadata.get("exploitability_reasoning")
+                or "",
+            }
+        )
 
-        if status in EXPLOITABLE_STATUSES:
-            verified_findings.append(v)
-        elif status in REVIEW_STATUSES:
-            review_findings.append(v)
-        elif status is None:
-            # No exploitability info - check legacy metadata
-            is_suspicious = finding.metadata.get("is_suspicious", False) if hasattr(finding, 'metadata') and finding.metadata else False
-            if is_suspicious:
-                review_findings.append(v)
-            else:
-                verified_findings.append(v)
+    return {
+        "all": entries,
+        "exploitable": [e for e in entries if e["report_status"] == "exploitable"],
+        "review": [e for e in entries if e["report_status"] == "conditional"],
+        "informational": [e for e in entries if e["report_status"] == "informational"],
+        "suppressed": [e for e in entries if e["report_status"] == "suppressed"],
+    }
 
-        # Categorize by adversarial verdict
-        if adv_result and adv_result.get("adversarial"):
-            adv = adv_result["adversarial"]
-            if hasattr(adv, "verdict") and adv.verdict:
-                verdict_value = adv.verdict.verdict.value if hasattr(adv.verdict.verdict, "value") else str(adv.verdict.verdict)
-                # Map "confirmed" to "exploitable" for unified status
-                if verdict_value in ("confirmed", "exploitable"):
-                    adversarial_exploitable.append(v)
-                elif verdict_value == "false_positive":
-                    adversarial_false_positive.append(v)
-                elif verdict_value == "conditional":
-                    adversarial_conditional.append(v)
-                elif verdict_value == "needs_review":
-                    adversarial_needs_review.append(v)
+
+def _export_full_scan_result(result: dict[str, Any], export_path: str, options: dict[str, Any]) -> None:
+    """Export full scan result to file."""
+    stats = result.get("statistics", {})
+    view = _build_full_scan_report_view(result)
+
+    # P6-01: Get status and failed engines
+    scan_status = result.get("status", "unknown")
+    failed_engines = result.get("failed_engines", [])
 
     lines = []
+
+    # P6-01: Add status indicator to title
+    status_suffix = ""
+    if scan_status == "degraded_success":
+        status_suffix = " (Degraded - Core Engine Failed)"
+    elif scan_status == "partial_success":
+        status_suffix = " (Partial Coverage)"
+    elif scan_status == "failed":
+        status_suffix = " (Failed)"
+
     lines.append("=" * 70)
-    lines.append("DeepVuln Full Security Scan Report")
+    lines.append(f"DeepVuln Full Security Scan Report{status_suffix}")
     lines.append("=" * 70)
+
+    # P6-01: Show status prominently
+    lines.append(f"Status: {scan_status.upper().replace('_', ' ')}")
+    lines.append("")
+
+    # P6-01: Coverage Warning for non-complete status
+    if scan_status != "complete_success":
+        lines.append("!" * 70)
+        if scan_status == "degraded_success":
+            lines.append("COVERAGE WARNING: Core evidence engine (CodeQL) failed.")
+            lines.append("Results are based on reduced evidence. Manual verification recommended.")
+        elif scan_status == "partial_success":
+            lines.append("COVERAGE WARNING: Some engines failed to complete.")
+            lines.append("Full coverage was not achieved for this scan.")
+        elif scan_status == "failed":
+            lines.append("SCAN FAILED: No valid results were produced.")
+        lines.append("!" * 70)
+        lines.append("")
+
     lines.append(f"Source: {result['source_path']}")
     lines.append(f"Start Time: {result['start_time']}")
     lines.append(f"End Time: {result['end_time']}")
     lines.append(f"Primary Language: {result.get('primary_language', 'Unknown')}")
     lines.append("")
 
-    # Attack Surface
+    # P6-01: Failed Engines section (before Attack Surface)
+    if failed_engines:
+        lines.append("-" * 70)
+        lines.append("Failed Engines")
+        lines.append("-" * 70)
+        for fe in failed_engines:
+            core_marker = " [CORE]" if fe.get("is_core_engine") else ""
+            lines.append(f"  • {fe['name']}{core_marker}: {fe['error_type']}")
+            lines.append(f"    Message: {fe['message']}")
+            if fe.get("languages"):
+                lines.append(f"    Languages: {', '.join(fe['languages'])}")
+        lines.append("")
+
     if "attack_surface" in result:
+        as_info = result["attack_surface"]
         lines.append("-" * 70)
         lines.append("Attack Surface")
         lines.append("-" * 70)
-        as_info = result["attack_surface"]
         lines.append(f"  HTTP Endpoints: {as_info.get('http_endpoints', 0)}")
         lines.append(f"  RPC Services: {as_info.get('rpc_services', 0)}")
         lines.append(f"  Total Entry Points: {as_info.get('total_entry_points', 0)}")
         lines.append("")
 
-    # Phases
     lines.append("-" * 70)
     lines.append("Scan Phases")
     lines.append("-" * 70)
@@ -1669,17 +1955,15 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
             lines.append(f"  {phase}: FAILED - {info.get('error', 'Unknown')}")
     lines.append("")
 
-    # Statistics
     lines.append("-" * 70)
     lines.append("Statistics")
     lines.append("-" * 70)
-    stats = result.get("statistics", {})
     lines.append(f"  Total Findings: {stats.get('total_findings', 0)}")
     lines.append(f"  Verified: {stats.get('verified_count', 0)}")
-    lines.append(f"  Exploitable Findings: {len(verified_findings)}")
-    lines.append(f"  Needs Review: {len(review_findings)}")
+    lines.append(f"  Exploitable Findings: {len(view['exploitable'])}")
+    lines.append(f"  Needs Review: {len(view['review'])}")
+    lines.append(f"  Informational: {len(view['informational'])}")
 
-    # Token Usage
     token_usage = stats.get("token_usage")
     if token_usage:
         lines.append("  Token Usage:")
@@ -1692,17 +1976,18 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
         for status, count in stats["by_exploitability"].items():
             lines.append(f"    - {status}: {count}")
 
-    # Adversarial Verification Statistics
-    if result.get("adversarial_results"):
+    if "by_adversarial_verdict" in stats:
         lines.append("  By Adversarial Verdict:")
-        lines.append(f"    - EXPLOITABLE: {len(adversarial_exploitable)}")
-        lines.append(f"    - CONDITIONAL: {len(adversarial_conditional)}")
-        lines.append(f"    - FALSE_POSITIVE: {len(adversarial_false_positive)}")
-        lines.append(f"    - NEEDS_REVIEW: {len(adversarial_needs_review)}")
+        for verdict, count in stats["by_adversarial_verdict"].items():
+            lines.append(f"    - {verdict.upper()}: {count}")
+
+    if "report_status" in stats:
+        lines.append("  By Report Status:")
+        for status, count in stats["report_status"].items():
+            lines.append(f"    - {status}: {count}")
 
     lines.append("")
 
-    # Errors
     if result.get("errors"):
         lines.append("-" * 70)
         lines.append("Errors")
@@ -1711,75 +1996,62 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
             lines.append(f"  - {err}")
         lines.append("")
 
-    # Detailed Findings (if requested)
     if options.get("detailed"):
-        # Exploitable Findings
-        if verified_findings:
+        if view["exploitable"]:
             lines.append("=" * 70)
             lines.append("Exploitable Findings")
             lines.append("=" * 70)
-
-            for i, v in enumerate(verified_findings[:50], 1):
-                finding = v["finding"]
-                exp = v.get("exploitability")
-                adv = v.get("adversarial")
-
-                lines.append(f"\n{i}. {finding.title}")
-                lines.append(f"   Source: {v['source']}")
+            for i, entry in enumerate(view["exploitable"], 1):
+                finding = entry["finding"]
+                lines.append(f"\n{i}. [{entry['report_status'].upper()}] {finding.title}")
+                lines.append(f"   Source: {entry['source']}")
                 lines.append(f"   Location: {finding.location.to_display()}")
                 lines.append(f"   Severity: {finding.severity.value.upper()}")
+                if entry["exploitability"]:
+                    lines.append(f"   Exploitability: {entry['exploitability'].upper()}")
+                if entry["adversarial_verdict"]:
+                    lines.append(f"   Adversarial Verdict: {entry['adversarial_verdict'].upper()}")
+                if entry["reasoning"]:
+                    lines.append(f"   Reasoning: {entry['reasoning'][:300]}...")
 
-                # Prefer adversarial verification result over exploitability
-                if adv and adv.get("adversarial"):
-                    adv_result = adv["adversarial"]
-                    if hasattr(adv_result, "verdict") and adv_result.verdict:
-                        verdict = adv_result.verdict
-                        verdict_value = verdict.verdict.value if hasattr(verdict.verdict, "value") else str(verdict.verdict)
-                        confidence = verdict.confidence if hasattr(verdict, "confidence") else 0.5
-                        reasoning = verdict.reasoning if hasattr(verdict, "reasoning") else ""
-
-                        lines.append(f"   Adversarial Verdict: {verdict_value.upper()}")
-                        lines.append(f"   Confidence: {confidence:.0%}")
-                        if reasoning:
-                            lines.append(f"   Reasoning: {reasoning[:300]}...")
-                elif exp:
-                    lines.append(f"   Exploitability: {exp.status.value.upper()}")
-                    lines.append(f"   Confidence: {exp.confidence:.0%}")
-                    if exp.reasoning:
-                        lines.append(f"   Reasoning: {exp.reasoning[:200]}...")
-
-        # Review Findings (needs manual verification)
-        if review_findings:
+        if view["review"]:
             lines.append("")
             lines.append("=" * 70)
             lines.append("Needs Review - Manual Verification Required")
             lines.append("=" * 70)
             lines.append("These findings require human verification to determine exploitability.")
             lines.append("")
-
-            for i, v in enumerate(review_findings[:30], 1):
-                finding = v.get("finding")
-                if not finding:
-                    continue
+            for i, entry in enumerate(view["review"], 1):
+                finding = entry["finding"]
                 metadata = finding.metadata or {}
-                vuln_type = metadata.get("potential_vulnerability", "unknown")
-                recommended_action = metadata.get("recommended_action", "manual_review")
-
-                # Get exploitability status
-                exp = v.get("exploitability")
-                status_str = exp.status.value if exp and hasattr(exp, 'status') else "needs_review"
-
-                lines.append(f"\n{i}. [{status_str.upper()}] {finding.title}")
-                lines.append(f"   Source: {v.get('source', 'unknown')}")
+                lines.append(f"\n{i}. [{entry['report_status'].upper()}] {finding.title}")
+                lines.append(f"   Source: {entry['source']}")
                 lines.append(f"   Location: {finding.location.to_display()}")
-                lines.append(f"   Potential Type: {vuln_type}")
+                lines.append(f"   Potential Type: {metadata.get('potential_vulnerability', 'unknown')}")
                 lines.append(f"   Confidence: {finding.confidence:.0%}")
                 if finding.description:
                     lines.append(f"   Why Review: {finding.description}")
-                lines.append(f"   Recommended Action: {recommended_action}")
-
+                if entry["exploitability"]:
+                    lines.append(f"   Exploitability: {entry['exploitability'].upper()}")
+                if entry["adversarial_verdict"]:
+                    lines.append(f"   Adversarial Verdict: {entry['adversarial_verdict'].upper()}")
+                lines.append(f"   Recommended Action: {metadata.get('recommended_action', 'manual_review')}")
                 if finding.location.snippet:
                     lines.append(f"   Code: {finding.location.snippet[:100]}")
+
+        if view["informational"]:
+            lines.append("")
+            lines.append("=" * 70)
+            lines.append("Informational Findings")
+            lines.append("=" * 70)
+            for i, entry in enumerate(view["informational"], 1):
+                finding = entry["finding"]
+                lines.append(f"\n{i}. [{entry['report_status'].upper()}] {finding.title}")
+                lines.append(f"   Source: {entry['source']}")
+                lines.append(f"   Location: {finding.location.to_display()}")
+                lines.append(f"   Severity: {finding.severity.value.upper()}")
+                if entry["exploitability"]:
+                    lines.append(f"   Exploitability: {entry['exploitability'].upper()}")
 
     lines.append("")
     lines.append("=" * 70)
@@ -1792,8 +2064,9 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     console.print(f"[green]Report exported to: {export_path}[/]")
     console.print(f"  Total Findings: {stats.get('total_findings', 0)}")
     console.print(f"  Verified: {stats.get('verified_count', 0)}")
-    if review_findings:
-        console.print(f"  [yellow]Needs Review: {len(review_findings)}[/]")
+    console.print(f"  [red]Exploitable: {len(view['exploitable'])}[/]")
+    if view["review"]:
+        console.print(f"  [yellow]Needs Review: {len(view['review'])}[/]")
 
 
 def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | None = None) -> None:
@@ -1937,49 +2210,12 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
 
     # Statistics
     stats = result.get("statistics", {})
+    view = _build_full_scan_report_view(result)
     total = stats.get("total_findings", 0)
     verified = stats.get("verified_count", 0)
-
-    # P5-01e A3: Separate findings by exploitability status (not is_suspicious metadata)
-    # EXPLOITABLE_STATUSES: findings that represent real exploitable vulnerabilities
-    # REVIEW_STATUSES: findings that need manual review but are not clearly exploitable
-    EXPLOITABLE_STATUSES = {"exploitable", "conditional"}
-    REVIEW_STATUSES = {"needs_review", "unlikely", "not_exploitable", "error"}
-
-    exploitable_findings = []
-    review_findings = []
-
-    for v in result.get("verified_findings", []):
-        exp = v.get("exploitability")
-        if exp:
-            status = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
-        else:
-            status = None
-
-        if status in EXPLOITABLE_STATUSES:
-            exploitable_findings.append(v)
-        elif status in REVIEW_STATUSES:
-            review_findings.append(v)
-        elif status is None:
-            # No exploitability info - check if marked as suspicious in metadata (legacy)
-            finding = v.get("finding")
-            is_suspicious = finding.metadata.get("is_suspicious", False) if hasattr(finding, 'metadata') and finding.metadata else False
-            if is_suspicious:
-                review_findings.append(v)
-            else:
-                # Default: treat as needs_review
-                review_findings.append(v)
-        else:
-            # Keep non-exploitable/error visible in review bucket for transparency
-            review_findings.append(v)
-
-    # Also check all_findings for suspicious code (if not verified yet)
-    if not result.get("verified_findings"):
-        for item in result.get("all_findings", []):
-            finding = item.get("finding")
-            is_suspicious = finding.metadata.get("is_suspicious", False) if hasattr(finding, 'metadata') and finding.metadata else False
-            if is_suspicious:
-                review_findings.append(item)
+    exploitable_findings = view["exploitable"]
+    review_findings = view["review"]
+    informational_findings = view["informational"]
 
     exploitable_count = len(exploitable_findings)
     review_count = len(review_findings)
@@ -2051,32 +2287,21 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
 
             # P5-03c Fix 11: Expandable-style details (top N) for transparency
             detail_rows = []
-            for item in result.get("verified_findings", []):
-                if not isinstance(item, dict):
+            for entry in informational_findings:
+                if entry["exploitability"] not in {"not_exploitable", "error"}:
                     continue
-                finding = item.get("finding")
-                exploitability = item.get("exploitability")
-                status = None
-                if exploitability and hasattr(exploitability, "status"):
-                    status = exploitability.status.value if hasattr(exploitability.status, "value") else str(exploitability.status)
-                if status not in {"not_exploitable", "error"}:
-                    continue
-
+                finding = entry["finding"]
                 title = getattr(finding, "title", "Unknown finding")
                 location = getattr(getattr(finding, "location", None), "file", "unknown")
                 line = getattr(getattr(finding, "location", None), "line", None)
                 if line:
                     location = f"{location}:{line}"
 
-                reason = ""
-                if exploitability and hasattr(exploitability, "reasoning"):
-                    reason = str(exploitability.reasoning or "")
-                if not reason and isinstance(item.get("error"), str):
-                    reason = item["error"]
+                reason = str(entry["reasoning"] or "")
                 if not reason:
                     reason = "No additional details provided"
 
-                detail_rows.append((status, title, location, reason))
+                detail_rows.append((entry["exploitability"], title, location, reason))
 
             if detail_rows:
                 console.print()
@@ -2123,14 +2348,9 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
 
         for v in exploitable_findings[:30]:  # Limit display
             finding = v["finding"]
-            exp = v.get("exploitability")
-
-            if exp:
-                status = exp.status.value
-                status_color = status_colors.get(status, "white")
-                status_str = f"[{status_color}]{status.upper()}[/{status_color}]"
-            else:
-                status_str = "[dim]ERROR[/dim]"
+            status = v["exploitability"] or v["report_status"]
+            status_color = status_colors.get(status, "white")
+            status_str = f"[{status_color}]{status.upper()}[/{status_color}]"
 
             sev_color = severity_colors.get(finding.severity.value, "white")
             sev_str = f"[{sev_color}]{finding.severity.value.upper()}[/{sev_color}]"
@@ -2171,17 +2391,10 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
         review_table.add_column("Why Review", width=40)
 
         for v in review_findings[:20]:  # Limit display
-            finding = v.get("finding")
-            if not finding:
-                continue
+            finding = v["finding"]
             metadata = finding.metadata or {}
 
-            # Get exploitability status
-            exp = v.get("exploitability")
-            if exp:
-                status_str = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
-            else:
-                status_str = "review"
+            status_str = v["exploitability"] or v["report_status"] or "review"
 
             # Get potential vulnerability type
             metadata.get("potential_vulnerability", "unknown")
@@ -2195,7 +2408,7 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
                 conf_str = f"[dim]{conf:.0%}[/]"
 
             # Source
-            source = v.get("source", "unknown")
+            source = v["source"]
 
             # Location
             location = finding.location.to_display()
@@ -2225,7 +2438,7 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
         console.print("[bold]Recommended Actions:[/]")
         action_counts = {}
         for v in review_findings:
-            finding = v.get("finding")
+            finding = v["finding"]
             if finding and hasattr(finding, 'metadata') and finding.metadata:
                 action = finding.metadata.get("recommended_action", "manual_review")
             else:
@@ -2285,64 +2498,36 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
     console.print()
     console.rule("[bold cyan]Detailed Findings[/]")
 
-    # P5-01e A3: Separate findings by exploitability status (not is_suspicious metadata)
-    EXPLOITABLE_STATUSES = {"exploitable", "conditional"}
-    REVIEW_STATUSES = {"needs_review", "unlikely", "not_exploitable", "error"}
-
-    exploitable_findings = []
-    review_findings = []
-
-    for v in result.get("verified_findings", []):
-        exp = v.get("exploitability")
-        if exp:
-            status = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
-        else:
-            status = None
-
-        if status in EXPLOITABLE_STATUSES:
-            exploitable_findings.append(v)
-        elif status in REVIEW_STATUSES:
-            review_findings.append(v)
-        elif status is None:
-            # No exploitability info - check legacy metadata
-            finding = v.get("finding")
-            is_suspicious = finding.metadata.get("is_suspicious", False) if hasattr(finding, 'metadata') and finding.metadata else False
-            if is_suspicious:
-                review_findings.append(v)
+    view = _build_full_scan_report_view(result)
+    exploitable_findings = view["exploitable"]
+    review_findings = view["review"]
 
     # Display exploitable findings first
     if exploitable_findings:
         console.print("\n[bold green]✓ Exploitable Findings[/]")
         for i, v in enumerate(exploitable_findings[:20], 1):
             finding = v["finding"]
-            exp = v.get("exploitability")
 
             console.print(f"\n[bold]{i}. {finding.title}[/]")
             console.print(f"   [dim]Source:[/] {v['source']}")
             console.print(f"   [dim]Location:[/] {finding.location.to_display()}")
             console.print(f"   [dim]Severity:[/] {finding.severity.value.upper()}")
 
-            if exp:
-                status_emoji = {
-                    "exploitable": "🔴",
-                    "conditional": "🟠",
-                    "needs_review": "⚪",
-                    "unlikely": "🟡",
-                    "not_exploitable": "🟢",
-                }
-                emoji = status_emoji.get(exp.status.value, "⚪")
-                console.print(f"   [dim]Exploitability:[/] {emoji} {exp.status.value.upper()}")
-                console.print(f"   [dim]Confidence:[/] {exp.confidence:.0%}")
-
-                if exp.reasoning:
-                    reasoning = exp.reasoning[:300]
-                    console.print(f"   [dim]Reasoning:[/] {reasoning}...")
-
-                if exp.severity_adjustment:
-                    orig = exp.severity_adjustment.original_severity.value.upper()
-                    adj = exp.severity_adjustment.adjusted_severity.value.upper()
-                    if orig != adj:
-                        console.print(f"   [dim]Adjusted:[/] {orig} → {adj}")
+            status_emoji = {
+                "exploitable": "🔴",
+                "conditional": "🟠",
+                "needs_review": "⚪",
+                "unlikely": "🟡",
+                "not_exploitable": "🟢",
+            }
+            if v["exploitability"]:
+                emoji = status_emoji.get(v["exploitability"], "⚪")
+                console.print(f"   [dim]Exploitability:[/] {emoji} {v['exploitability'].upper()}")
+            console.print(f"   [dim]Confidence:[/] {finding.confidence:.0%}")
+            if v["adversarial_verdict"]:
+                console.print(f"   [dim]Adversarial Verdict:[/] {v['adversarial_verdict'].upper()}")
+            if v["reasoning"]:
+                console.print(f"   [dim]Reasoning:[/] {v['reasoning'][:300]}...")
 
             if finding.description:
                 desc = finding.description[:200]
@@ -2357,25 +2542,22 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
         console.rule("[bold yellow]⚠ Needs Review - Manual Verification Required[/]")
 
         for i, v in enumerate(review_findings[:15], 1):
-            finding = v.get("finding")
-            if not finding:
-                continue
+            finding = v["finding"]
             metadata = finding.metadata or {}
 
             vuln_type = metadata.get("potential_vulnerability", "unknown")
             recommended_action = metadata.get("recommended_action", "manual_review")
 
-            # Get exploitability info if available
-            exp = v.get("exploitability")
-            if exp:
-                status_str = exp.status.value if hasattr(exp.status, 'value') else str(exp.status)
-                console.print(f"\n[bold yellow]{i}. [{status_str.upper()}] {finding.title}[/]")
-            else:
-                console.print(f"\n[bold yellow]{i}. [Review] {finding.title}[/]")
-            console.print(f"   [dim]Source:[/] {v.get('source', 'unknown')}")
+            status_str = v["exploitability"] or v["report_status"] or "review"
+            console.print(f"\n[bold yellow]{i}. [{status_str.upper()}] {finding.title}[/]")
+            console.print(f"   [dim]Source:[/] {v['source']}")
             console.print(f"   [dim]Location:[/] {finding.location.to_display()}")
             console.print(f"   [dim]Potential Type:[/] {vuln_type}")
             console.print(f"   [dim]Confidence:[/] {finding.confidence:.0%}")
+            if v["adversarial_verdict"]:
+                console.print(f"   [dim]Adversarial Verdict:[/] {v['adversarial_verdict'].upper()}")
+            if v["reasoning"]:
+                console.print(f"   [dim]Reasoning:[/] {v['reasoning'][:240]}...")
 
             if finding.description:
                 console.print(f"   [dim]Why Review:[/] {finding.description}")
@@ -2542,6 +2724,7 @@ def scan(
     adversarial: bool,
     batch_size: int | None,
     batch_max_chars: int | None,
+    agent_max_files: int,
     model: str,
     no_deps: bool,
     incremental: bool,

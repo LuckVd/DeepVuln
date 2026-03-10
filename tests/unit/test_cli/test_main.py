@@ -281,3 +281,282 @@ class TestRunInteractiveFetch:
         mock_config.return_value = {}
         result = run_interactive_fetch()
         assert result is None
+
+
+# =============================================================================
+# P6-01: Scan Status Model Tests
+# =============================================================================
+
+
+class TestScanStatusModel:
+    """Test P6-01 scan status model and helper functions."""
+
+    def test_scan_status_enum_values(self) -> None:
+        """Test ScanStatus enum has correct values."""
+        from src.layers.l3_analysis.models import ScanStatus
+
+        assert ScanStatus.COMPLETE_SUCCESS.value == "complete_success"
+        assert ScanStatus.PARTIAL_SUCCESS.value == "partial_success"
+        assert ScanStatus.DEGRADED_SUCCESS.value == "degraded_success"
+        assert ScanStatus.FAILED.value == "failed"
+
+    def test_failed_engine_info_model(self) -> None:
+        """Test FailedEngineInfo model."""
+        from src.layers.l3_analysis.models import FailedEngineInfo
+
+        info = FailedEngineInfo(
+            name="codeql",
+            error_type="analyze_failed",
+            message="All language scans failed",
+            languages=["typescript", "javascript"],
+            is_core_engine=True,
+        )
+
+        assert info.name == "codeql"
+        assert info.error_type == "analyze_failed"
+        assert info.languages == ["typescript", "javascript"]
+        assert info.is_core_engine is True
+
+    def test_collect_failed_engines_all_success(self) -> None:
+        """Test _collect_failed_engines when all engines succeed."""
+        from src.cli.main import _collect_failed_engines
+
+        phases = {
+            "semgrep": {"success": True, "findings_count": 10},
+            "codeql": {"success": True, "findings_count": 5},
+            "agent": {"success": True, "findings_count": 3},
+        }
+
+        result = _collect_failed_engines(
+            phases=phases,
+            unavailable_engines=[],
+            requested_engines=["semgrep", "codeql", "agent"],
+        )
+
+        assert result == []
+
+    def test_collect_failed_engines_codeql_failed(self) -> None:
+        """Test _collect_failed_engines when CodeQL fails."""
+        from src.cli.main import _collect_failed_engines
+
+        phases = {
+            "semgrep": {"success": True, "findings_count": 10},
+            "codeql": {
+                "success": False,
+                "error": "All language scans failed. Languages attempted: typescript, javascript",
+                "codeql_lang": ["typescript", "javascript"],
+            },
+            "agent": {"success": True, "findings_count": 3},
+        }
+
+        result = _collect_failed_engines(
+            phases=phases,
+            unavailable_engines=[],
+            requested_engines=["semgrep", "codeql", "agent"],
+        )
+
+        assert len(result) == 1
+        assert result[0]["name"] == "codeql"
+        assert result[0]["is_core_engine"] is True
+        assert result[0]["languages"] == ["typescript", "javascript"]
+        assert result[0]["error_type"] == "analyze_failed"
+
+    def test_collect_failed_engines_unavailable(self) -> None:
+        """Test _collect_failed_engines with unavailable engines."""
+        from src.cli.main import _collect_failed_engines
+
+        phases = {
+            "semgrep": {"success": True, "findings_count": 10},
+        }
+
+        result = _collect_failed_engines(
+            phases=phases,
+            unavailable_engines=["codeql"],
+            requested_engines=["semgrep", "codeql"],
+        )
+
+        # Should include codeql as unavailable
+        assert len(result) == 1
+        assert result[0]["name"] == "codeql"
+        assert result[0]["error_type"] == "unavailable"
+
+    def test_determine_scan_status_complete_success(self) -> None:
+        """Test _determine_scan_status returns complete_success when all succeed."""
+        from src.cli.main import _determine_scan_status
+
+        phases = {
+            "semgrep": {"success": True},
+            "codeql": {"success": True},
+            "agent": {"success": True},
+        }
+
+        result = _determine_scan_status(
+            phases=phases,
+            failed_engines=[],
+            has_valid_findings=True,
+            requested_engines=["semgrep", "codeql", "agent"],
+        )
+
+        assert result == "complete_success"
+
+    def test_determine_scan_status_degraded_success(self) -> None:
+        """Test _determine_scan_status returns degraded_success when CodeQL fails but others succeed."""
+        from src.cli.main import _determine_scan_status
+
+        phases = {
+            "semgrep": {"success": True, "findings_count": 10},
+            "codeql": {"success": False, "error": "Failed"},
+            "agent": {"success": True, "findings_count": 3},
+        }
+
+        failed_engines = [{
+            "name": "codeql",
+            "error_type": "analyze_failed",
+            "message": "Failed",
+            "is_core_engine": True,
+        }]
+
+        result = _determine_scan_status(
+            phases=phases,
+            failed_engines=failed_engines,
+            has_valid_findings=True,
+            requested_engines=["semgrep", "codeql", "agent"],
+        )
+
+        assert result == "degraded_success"
+
+    def test_determine_scan_status_failed(self) -> None:
+        """Test _determine_scan_status returns failed when all engines fail."""
+        from src.cli.main import _determine_scan_status
+
+        phases = {
+            "semgrep": {"success": False, "error": "Failed"},
+            "codeql": {"success": False, "error": "Failed"},
+            "agent": {"success": False, "error": "Failed"},
+        }
+
+        failed_engines = [
+            {"name": "semgrep", "error_type": "engine_failed", "is_core_engine": False},
+            {"name": "codeql", "error_type": "engine_failed", "is_core_engine": True},
+            {"name": "agent", "error_type": "engine_failed", "is_core_engine": False},
+        ]
+
+        result = _determine_scan_status(
+            phases=phases,
+            failed_engines=failed_engines,
+            has_valid_findings=False,
+            requested_engines=["semgrep", "codeql", "agent"],
+        )
+
+        assert result == "failed"
+
+    def test_determine_scan_status_no_phases(self) -> None:
+        """Test _determine_scan_status returns failed when no phases executed."""
+        from src.cli.main import _determine_scan_status
+
+        result = _determine_scan_status(
+            phases={},
+            failed_engines=[],
+            has_valid_findings=False,
+            requested_engines=[],
+        )
+
+        assert result == "failed"
+
+
+class TestExportFullScanResult:
+    """Test P6-01 export function includes status."""
+
+    def test_export_includes_status_complete(self, tmp_path: Path) -> None:
+        """Test export includes status for complete success."""
+        from src.cli.main import _export_full_scan_result
+
+        result = {
+            "status": "complete_success",
+            "source_path": "/test/path",
+            "start_time": "2026-03-11T00:00:00",
+            "end_time": "2026-03-11T00:01:00",
+            "primary_language": "python",
+            "phases": {"semgrep": {"success": True, "findings_count": 5}},
+            "statistics": {"total_findings": 5, "verified_count": 5},
+            "failed_engines": [],
+            "all_findings": [],
+            "errors": [],
+        }
+
+        export_file = tmp_path / "report.txt"
+        _export_full_scan_result(result, str(export_file), {})
+
+        content = export_file.read_text()
+        assert "Status: COMPLETE SUCCESS" in content
+        assert "COVERAGE WARNING" not in content
+
+    def test_export_includes_status_degraded(self, tmp_path: Path) -> None:
+        """Test export includes status for degraded success with warning."""
+        from src.cli.main import _export_full_scan_result
+
+        result = {
+            "status": "degraded_success",
+            "source_path": "/test/path",
+            "start_time": "2026-03-11T00:00:00",
+            "end_time": "2026-03-11T00:01:00",
+            "primary_language": "typescript",
+            "phases": {
+                "semgrep": {"success": True, "findings_count": 10},
+                "codeql": {"success": False, "error": "Failed"},
+            },
+            "statistics": {"total_findings": 10, "verified_count": 10},
+            "failed_engines": [{
+                "name": "codeql",
+                "error_type": "analyze_failed",
+                "message": "All language scans failed",
+                "languages": ["typescript"],
+                "is_core_engine": True,
+            }],
+            "all_findings": [],
+            "errors": [],
+        }
+
+        export_file = tmp_path / "report.txt"
+        _export_full_scan_result(result, str(export_file), {})
+
+        content = export_file.read_text()
+        assert "Status: DEGRADED SUCCESS" in content
+        assert "COVERAGE WARNING" in content
+        assert "Core evidence engine" in content
+        assert "Failed Engines" in content
+        assert "codeql" in content
+
+    def test_export_includes_failed_engines_details(self, tmp_path: Path) -> None:
+        """Test export includes detailed failed engine info."""
+        from src.cli.main import _export_full_scan_result
+
+        result = {
+            "status": "degraded_success",
+            "source_path": "/test/path",
+            "start_time": "2026-03-11T00:00:00",
+            "end_time": "2026-03-11T00:01:00",
+            "primary_language": "javascript",
+            "phases": {
+                "semgrep": {"success": True, "findings_count": 5},
+                "codeql": {"success": False, "error": "Failed"},
+            },
+            "statistics": {"total_findings": 5, "verified_count": 5},
+            "failed_engines": [{
+                "name": "codeql",
+                "error_type": "analyze_failed",
+                "message": "All language scans failed. Languages attempted: typescript, javascript",
+                "languages": ["typescript", "javascript"],
+                "is_core_engine": True,
+            }],
+            "all_findings": [],
+            "errors": [],
+        }
+
+        export_file = tmp_path / "report.txt"
+        _export_full_scan_result(result, str(export_file), {})
+
+        content = export_file.read_text()
+        assert "Failed Engines" in content
+        assert "codeql [CORE]" in content
+        assert "Languages: typescript, javascript" in content
