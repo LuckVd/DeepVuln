@@ -53,6 +53,127 @@ class FailedEngineInfo(BaseModel):
     )
 
 
+# =============================================================================
+# P6-02: CodeQL Structured Error Diagnostics
+# =============================================================================
+
+
+class CodeQLErrorType(str, Enum):
+    """
+    P6-02: Structured error types for CodeQL failures.
+
+    These error types map directly to P6-01's FailedEngineInfo.error_type field,
+    providing fine-grained diagnostics for CodeQL failures.
+    """
+
+    NOT_INSTALLED = "not_installed"
+    """CodeQL CLI is not installed or not in PATH."""
+
+    UNSUPPORTED_LANGUAGE = "unsupported_language"
+    """The language is not supported by CodeQL."""
+
+    DB_CREATE_FAILED = "db_create_failed"
+    """Failed to create CodeQL database (extraction failed)."""
+
+    BUILD_FAILED = "build_failed"
+    """Build process failed during database creation."""
+
+    ANALYZE_FAILED = "analyze_failed"
+    """Analysis phase failed (query execution)."""
+
+    TIMEOUT = "timeout"
+    """Operation timed out."""
+
+    PACK_ERROR = "pack_error"
+    """Query pack error (missing or invalid pack)."""
+
+    RESOURCE_ERROR = "resource_error"
+    """Resource error (memory, disk, etc.)."""
+
+    UNKNOWN = "unknown"
+    """Unknown or unclassified error."""
+
+
+# Mapping from CodeQLErrorType to human-readable suggestions
+# Defined here (before CodeQLLanguageStatus) so the validator can use it
+CODEQL_ERROR_SUGGESTIONS: dict[CodeQLErrorType, str] = {
+    CodeQLErrorType.NOT_INSTALLED: (
+        "Install CodeQL CLI from https://github.com/github/codeql-cli-binaries/releases"
+    ),
+    CodeQLErrorType.UNSUPPORTED_LANGUAGE: (
+        "Check if the language is in CodeQL's supported languages list"
+    ),
+    CodeQLErrorType.DB_CREATE_FAILED: (
+        "Ensure the project has valid source files for the target language"
+    ),
+    CodeQLErrorType.BUILD_FAILED: (
+        "Check build configuration and ensure project can be compiled"
+    ),
+    CodeQLErrorType.ANALYZE_FAILED: (
+        "Check CodeQL query packs are installed (run 'codeql pack download')"
+    ),
+    CodeQLErrorType.TIMEOUT: (
+        "Consider increasing timeout or scanning a smaller scope"
+    ),
+    CodeQLErrorType.PACK_ERROR: (
+        "Install missing query packs or check pack configuration"
+    ),
+    CodeQLErrorType.RESOURCE_ERROR: (
+        "Increase available memory or reduce parallel operations"
+    ),
+    CodeQLErrorType.UNKNOWN: (
+        "Check logs for details and consider reporting this issue"
+    ),
+}
+
+
+class CodeQLLanguageStatus(BaseModel):
+    """
+    P6-02: Status for a single language in a multi-language CodeQL scan.
+
+    For multi-language projects, each language has its own status,
+    allowing users to see which specific languages failed.
+    """
+
+    language: str = Field(..., description="Language name (e.g., 'java', 'python')")
+    status: Literal["success", "failed", "skipped"] = Field(
+        ...,
+        description="Scan status for this language",
+    )
+    stage: str | None = Field(
+        default=None,
+        description="Stage where the operation stopped (availability_check/language_check/build/db_create/analyze)",
+    )
+    error_type: CodeQLErrorType | None = Field(
+        default=None,
+        description="Structured error type if failed",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Human-readable error message",
+    )
+    suggestion: str | None = Field(
+        default=None,
+        description="Suggested action to resolve the issue",
+    )
+    findings_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of findings for this language",
+    )
+    duration_seconds: float | None = Field(
+        default=None,
+        description="Duration of the scan for this language",
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        """Auto-fill suggestion from error_type after model is initialized."""
+        if self.suggestion is None and self.error_type is not None and self.status != "success":
+            if self.error_type in CODEQL_ERROR_SUGGESTIONS:
+                # Use object.__setattr__ to bypass frozen model
+                object.__setattr__(self, "suggestion", CODEQL_ERROR_SUGGESTIONS[self.error_type])
+
+
 class FindingType(str, Enum):
     """Type of finding."""
 

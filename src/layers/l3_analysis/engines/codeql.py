@@ -31,6 +31,9 @@ from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
 from src.layers.l3_analysis.models import (
     CodeLocation,
+    CodeQLErrorType,
+    CodeQLLanguageStatus,
+    CODEQL_ERROR_SUGGESTIONS,
     Finding,
     FindingType,
     ScanResult,
@@ -232,6 +235,193 @@ class CodeQLEngine(BaseEngine):
         """
         lang_lower = language.lower()
         return CODEQL_LANGUAGE_MAP.get(lang_lower)
+
+    # =========================================================================
+    # P6-02: Structured Error Diagnostics
+    # =========================================================================
+
+    @staticmethod
+    def _map_status_to_error_type(status: CodeQLStatus) -> CodeQLErrorType:
+        """
+        Map CodeQLStatus from health module to CodeQLErrorType.
+
+        Args:
+            status: CodeQLStatus from health check.
+
+        Returns:
+            Corresponding CodeQLErrorType.
+        """
+        mapping = {
+            CodeQLStatus.SUCCESS: CodeQLErrorType.UNKNOWN,  # Should not happen
+            CodeQLStatus.BUILD_FAILED: CodeQLErrorType.BUILD_FAILED,
+            CodeQLStatus.QUERY_FAILED: CodeQLErrorType.ANALYZE_FAILED,
+            CodeQLStatus.TIMEOUT: CodeQLErrorType.TIMEOUT,
+            CodeQLStatus.UNSUPPORTED_LANGUAGE: CodeQLErrorType.UNSUPPORTED_LANGUAGE,
+            CodeQLStatus.RESOURCE_ERROR: CodeQLErrorType.RESOURCE_ERROR,
+            CodeQLStatus.SUBPROCESS_ERROR: CodeQLErrorType.UNKNOWN,
+            CodeQLStatus.NOT_INSTALLED: CodeQLErrorType.NOT_INSTALLED,
+            CodeQLStatus.DATABASE_ERROR: CodeQLErrorType.DB_CREATE_FAILED,
+        }
+        return mapping.get(status, CodeQLErrorType.UNKNOWN)
+
+    def _create_language_status(
+        self,
+        language: str,
+        status: str,
+        stage: str | None = None,
+        error_type: CodeQLErrorType | None = None,
+        error_message: str | None = None,
+        findings_count: int = 0,
+        duration_seconds: float | None = None,
+    ) -> CodeQLLanguageStatus:
+        """
+        Create a CodeQLLanguageStatus instance.
+
+        Args:
+            language: Language name.
+            status: Status string (success/failed/skipped).
+            stage: Stage where operation stopped.
+            error_type: Error type if failed.
+            error_message: Error message if failed.
+            findings_count: Number of findings.
+            duration_seconds: Duration of the scan.
+
+        Returns:
+            CodeQLLanguageStatus instance.
+        """
+        suggestion = None
+        if error_type and status == "failed":
+            suggestion = CODEQL_ERROR_SUGGESTIONS.get(error_type)
+
+        return CodeQLLanguageStatus(
+            language=language,
+            status=status,
+            stage=stage,
+            error_type=error_type,
+            error_message=error_message,
+            suggestion=suggestion,
+            findings_count=findings_count,
+            duration_seconds=duration_seconds,
+        )
+
+    @staticmethod
+    def _merge_language_status(
+        existing: dict[str, Any] | None,
+        incoming: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Merge multiple subdirectory scan results into a single language summary.
+
+        Status priority:
+        failed > success > skipped
+        """
+        if existing is None:
+            return dict(incoming)
+
+        priority = {"failed": 3, "success": 2, "skipped": 1}
+        existing_status = existing.get("status", "skipped")
+        incoming_status = incoming.get("status", "skipped")
+
+        merged = dict(existing)
+
+        # Accumulate findings and duration across subdirectories
+        merged["findings_count"] = int(existing.get("findings_count", 0)) + int(
+            incoming.get("findings_count", 0)
+        )
+
+        existing_duration = existing.get("duration_seconds")
+        incoming_duration = incoming.get("duration_seconds")
+        if existing_duration is not None or incoming_duration is not None:
+            merged["duration_seconds"] = float(existing_duration or 0.0) + float(incoming_duration or 0.0)
+
+        # Keep the highest-priority status summary
+        if priority.get(incoming_status, 0) >= priority.get(existing_status, 0):
+            merged["status"] = incoming_status
+            merged["stage"] = incoming.get("stage")
+            merged["error_type"] = incoming.get("error_type")
+            merged["error_message"] = incoming.get("error_message")
+            merged["suggestion"] = incoming.get("suggestion")
+
+        return merged
+
+    def _create_error_result_from_health(
+        self,
+        source_path: Path,
+        health_result: CodeQLHealthResult,
+        language: str | None = None,
+    ) -> ScanResult:
+        """
+        Create a ScanResult with structured error information.
+
+        P6-02: This method creates a scan result with structured error diagnostics
+        including language_status for multi-language projects.
+
+        Args:
+            source_path: Path to the source code.
+            health_result: CodeQLHealthResult from a failed operation.
+            language: Language that was being scanned (optional).
+
+        Returns:
+            ScanResult with error information.
+        """
+        result = self.create_scan_result(source_path, [])
+        result.metadata["codeql_health"] = health_result.to_dict()
+
+        # P6-02: Add structured error type
+        error_type = self._map_status_to_error_type(health_result.status)
+        result.metadata["codeql_error_type"] = error_type.value
+
+        # P6-02: Add language status if language is specified
+        if language:
+            lang_status = self._create_language_status(
+                language=language,
+                status="failed",
+                stage=health_result.operation,
+                error_type=error_type,
+                error_message=health_result.message,
+                duration_seconds=health_result.duration,
+            )
+            result.metadata["language_status"] = {language: lang_status.model_dump()}
+
+        return self.finalize_scan_result(
+            result,
+            success=False,
+            error_message=health_result.message,
+        )
+
+    def _add_structured_error_to_result(
+        self,
+        result: ScanResult,
+        health_result: CodeQLHealthResult,
+        language: str,
+    ) -> None:
+        """
+        P6-02: Add structured error metadata to an existing result.
+
+        This method is used for errors that occur after the result object
+        has already been created (e.g., during build or database creation).
+
+        Args:
+            result: Existing ScanResult to update.
+            health_result: Health result from the failed operation.
+            language: Language that was being scanned.
+        """
+        result.metadata["codeql_health"] = health_result.to_dict()
+
+        # Add structured error type
+        error_type = self._map_status_to_error_type(health_result.status)
+        result.metadata["codeql_error_type"] = error_type.value
+
+        # Add language status
+        lang_status = self._create_language_status(
+            language=language,
+            status="failed",
+            stage=health_result.operation,
+            error_type=error_type,
+            error_message=health_result.message,
+            duration_seconds=health_result.duration,
+        )
+        result.metadata["language_status"] = {language: lang_status.model_dump()}
 
     def _compute_source_hash(self, source_path: Path, language: str) -> str:
         """
@@ -441,6 +631,8 @@ class CodeQLEngine(BaseEngine):
         Fail-Safe: If any phase fails, returns an empty result with
         health status metadata. Never raises exceptions.
 
+        P6-02: All error paths now return structured error types and language_status.
+
         Args:
             source_path: Path to the source code to scan.
             language: Programming language (auto-detected if not specified).
@@ -464,30 +656,22 @@ class CodeQLEngine(BaseEngine):
         try:
             self.validate_source_path(source_path)
         except Exception as e:
-            result = self.create_scan_result(source_path, [])
             health_result = CodeQLHealthResult(
                 status=CodeQLStatus.SUBPROCESS_ERROR,
                 message=f"Invalid source path: {e}",
                 fallback_triggered=True,
                 operation="validation",
             )
-            result.metadata["codeql_health"] = health_result.to_dict()
-            return self.finalize_scan_result(
-                result,
-                success=False,
-                error_message=health_result.message,
+            return self._create_error_result_from_health(
+                source_path, health_result, language
             )
 
         # Check if CodeQL is available
         if not self.is_available():
-            result = self.create_scan_result(source_path, [])
             health_result = self.health_manager.create_not_installed_result()
-            result.metadata["codeql_health"] = health_result.to_dict()
             logger.warning(f"CodeQL not available: {health_result.message}")
-            return self.finalize_scan_result(
-                result,
-                success=False,
-                error_message=health_result.message,
+            return self._create_error_result_from_health(
+                source_path, health_result, language
             )
 
         # Detect language if not specified
@@ -495,47 +679,38 @@ class CodeQLEngine(BaseEngine):
             language = await self._detect_language(source_path)
 
         if not language:
-            result = self.create_scan_result(source_path, [])
             health_result = CodeQLHealthResult(
                 status=CodeQLStatus.UNSUPPORTED_LANGUAGE,
                 message="Could not detect programming language",
                 fallback_triggered=True,
                 operation="language_detection",
             )
-            result.metadata["codeql_health"] = health_result.to_dict()
-            return self.finalize_scan_result(
-                result,
-                success=False,
-                error_message=health_result.message + ". Please specify --language option.",
+            result = self._create_error_result_from_health(
+                source_path, health_result, None
             )
+            # Add hint to error message
+            result.error_message = health_result.message + ". Please specify --language option."
+            return result
 
         # Check language support using health manager
         if not self.health_manager.is_language_supported(language):
-            result = self.create_scan_result(source_path, [])
             health_result = self.health_manager.create_unsupported_language_result(language)
-            result.metadata["codeql_health"] = health_result.to_dict()
             logger.info(f"Language '{language}' not supported by CodeQL: {health_result.message}")
-            return self.finalize_scan_result(
-                result,
-                success=False,
-                error_message=health_result.message,
+            return self._create_error_result_from_health(
+                source_path, health_result, language
             )
 
         # Normalize language
         codeql_lang = self.normalize_language(language)
         if not codeql_lang:
-            result = self.create_scan_result(source_path, [])
             health_result = CodeQLHealthResult(
                 status=CodeQLStatus.UNSUPPORTED_LANGUAGE,
                 message=f"Language '{language}' is not supported by CodeQL",
                 fallback_triggered=True,
                 operation="language_normalization",
             )
-            result.metadata["codeql_health"] = health_result.to_dict()
-            return self.finalize_scan_result(
-                result,
-                success=False,
-                error_message=health_result.message,
+            return self._create_error_result_from_health(
+                source_path, health_result, language
             )
 
         # P5-01e Fix 2: Track rules used - include ALL default suites
@@ -614,7 +789,7 @@ class CodeQLEngine(BaseEngine):
                         duration=build_duration,
                         timeout_seconds=self.build_timeout,
                     )
-                    result.metadata["codeql_health"] = health_result.to_dict()
+                    self._add_structured_error_to_result(result, health_result, codeql_lang)
                     logger.warning(f"CodeQL build timeout after {self.build_timeout}s")
                     return self.finalize_scan_result(
                         result,
@@ -629,7 +804,7 @@ class CodeQLEngine(BaseEngine):
                         fallback_triggered=True,
                         operation="build",
                     )
-                    result.metadata["codeql_health"] = health_result.to_dict()
+                    self._add_structured_error_to_result(result, health_result, codeql_lang)
                     logger.error("CodeQL build failed: memory exhausted")
                     return self.finalize_scan_result(
                         result,
@@ -645,7 +820,7 @@ class CodeQLEngine(BaseEngine):
                         error_details={"error_type": type(e).__name__},
                         operation="build",
                     )
-                    result.metadata["codeql_health"] = health_result.to_dict()
+                    self._add_structured_error_to_result(result, health_result, codeql_lang)
                     logger.error(f"CodeQL build subprocess error: {e}")
                     return self.finalize_scan_result(
                         result,
@@ -677,7 +852,7 @@ class CodeQLEngine(BaseEngine):
                         duration=db_duration,
                         timeout_seconds=self.build_timeout,
                     )
-                    result.metadata["codeql_health"] = health_result.to_dict()
+                    self._add_structured_error_to_result(result, health_result, codeql_lang)
                     logger.warning(f"CodeQL database creation timeout after {self.build_timeout}s")
                     return self.finalize_scan_result(
                         result,
@@ -692,7 +867,7 @@ class CodeQLEngine(BaseEngine):
                         fallback_triggered=True,
                         operation="database_create",
                     )
-                    result.metadata["codeql_health"] = health_result.to_dict()
+                    self._add_structured_error_to_result(result, health_result, codeql_lang)
                     logger.error("CodeQL database creation failed: memory exhausted")
                     return self.finalize_scan_result(
                         result,
@@ -716,7 +891,7 @@ class CodeQLEngine(BaseEngine):
                     fallback_triggered=True,
                     operation="database_create",
                 )
-                result.metadata["codeql_health"] = health_result.to_dict()
+                self._add_structured_error_to_result(result, health_result, codeql_lang)
                 logger.warning(f"CodeQL database creation failed: {error_msg}")
                 return self.finalize_scan_result(
                     result,
@@ -774,7 +949,7 @@ class CodeQLEngine(BaseEngine):
                     fallback_triggered=True,
                     operation="analyze",
                 )
-                result.metadata["codeql_health"] = health_result.to_dict()
+                self._add_structured_error_to_result(result, health_result, codeql_lang)
                 logger.warning("All CodeQL analysis suites failed")
                 return self.finalize_scan_result(
                     result,
@@ -824,6 +999,16 @@ class CodeQLEngine(BaseEngine):
             # P5-03a Fix 1: Add codeql_languages metadata for single-language scan
             result.metadata["codeql_languages"] = [codeql_lang] if codeql_lang else [language]
 
+            # P6-02: Add language_status for successful scan
+            lang_status = self._create_language_status(
+                language=codeql_lang,
+                status="success",
+                stage="scan",
+                findings_count=len(findings),
+                duration_seconds=total_duration,
+            )
+            result.metadata["language_status"] = {codeql_lang: lang_status.model_dump()}
+
             return self.finalize_scan_result(
                 result,
                 success=True,
@@ -841,7 +1026,11 @@ class CodeQLEngine(BaseEngine):
                 error_details={"error_type": type(e).__name__, "error_message": str(e)},
                 operation="scan",
             )
-            result.metadata["codeql_health"] = health_result.to_dict()
+            # P6-02: Add structured error info if we have a language
+            if "codeql_lang" in dir():
+                self._add_structured_error_to_result(result, health_result, codeql_lang)
+            else:
+                result.metadata["codeql_health"] = health_result.to_dict()
             logger.error(f"CodeQL scan unexpected error: {type(e).__name__}: {e}")
             return self.finalize_scan_result(
                 result,
@@ -870,6 +1059,8 @@ class CodeQLEngine(BaseEngine):
         This method detects all languages in the project and creates separate
         CodeQL databases for each, combining the results.
 
+        P6-02: Returns language_status for each language scanned.
+
         Args:
             source_path: Path to the source code.
             languages: Specific languages to scan (auto-detected if not specified).
@@ -877,17 +1068,16 @@ class CodeQLEngine(BaseEngine):
             **options: Additional options passed to scan().
 
         Returns:
-            Combined ScanResult from all language scans.
+            Combined ScanResult from all language scans with language_status metadata.
         """
         self.validate_source_path(source_path)
 
         # Check if CodeQL is available
         if not self.is_available():
             result = self.create_scan_result(source_path, [])
-            return self.finalize_scan_result(
-                result,
-                success=False,
-                error_message="CodeQL CLI is not installed or not in PATH.",
+            health_result = self.health_manager.create_not_installed_result()
+            return self._create_error_result_from_health(
+                source_path, health_result, None
             )
 
         # Detect languages if not specified
@@ -897,10 +1087,14 @@ class CodeQLEngine(BaseEngine):
 
         if not languages:
             result = self.create_scan_result(source_path, [])
-            return self.finalize_scan_result(
-                result,
-                success=False,
-                error_message="No supported languages detected in the project.",
+            health_result = CodeQLHealthResult(
+                status=CodeQLStatus.UNSUPPORTED_LANGUAGE,
+                message="No supported languages detected in the project.",
+                fallback_triggered=True,
+                operation="language_detection",
+            )
+            return self._create_error_result_from_health(
+                source_path, health_result, None
             )
 
         logger.info(f"Multi-language scan: detected languages: {languages}")
@@ -910,10 +1104,25 @@ class CodeQLEngine(BaseEngine):
         successful_scans = 0
         failed_languages = []
 
+        # P6-02: Track language status for each language
+        language_status_dict: dict[str, dict[str, Any]] = {}
+
         for language in languages:
             codeql_lang = self.normalize_language(language)
             if not codeql_lang:
                 logger.warning(f"Language '{language}' is not supported by CodeQL, skipping.")
+                # P6-02: Record skipped language
+                lang_status = self._create_language_status(
+                    language=language,
+                    status="skipped",
+                    stage="language_check",
+                    error_type=CodeQLErrorType.UNSUPPORTED_LANGUAGE,
+                    error_message=f"Language '{language}' is not supported by CodeQL",
+                )
+                language_status_dict[language] = self._merge_language_status(
+                    language_status_dict.get(language),
+                    lang_status.model_dump(),
+                )
                 continue
 
             logger.info(f"Scanning language: {language} (CodeQL: {codeql_lang})")
@@ -936,20 +1145,56 @@ class CodeQLEngine(BaseEngine):
                         # Combine findings
                         for finding in result.findings:
                             combined_result.add_finding(finding)
+                        # P6-02: Extract language status from result
+                        if "language_status" in result.metadata:
+                            for lang_name, status in result.metadata["language_status"].items():
+                                language_status_dict[lang_name] = self._merge_language_status(
+                                    language_status_dict.get(lang_name),
+                                    status,
+                                )
                     else:
                         logger.warning(
                             f"Scan failed for {language} in {subdir.name}: "
                             f"{escape(str(result.error_message))}"
                         )
+                        # P6-02: Extract language status from failed result
+                        if "language_status" in result.metadata:
+                            for lang_name, status in result.metadata["language_status"].items():
+                                language_status_dict[lang_name] = self._merge_language_status(
+                                    language_status_dict.get(lang_name),
+                                    status,
+                                )
+                        failed_languages.append(f"{language} ({subdir.name})")
 
                 except Exception as e:
                     logger.error(
                         f"Exception scanning {language} in {subdir.name}: {escape(str(e))}"
                     )
+                    # P6-02: Create language status for exception
+                    lang_status = self._create_language_status(
+                        language=codeql_lang,
+                        status="failed",
+                        stage="scan",
+                        error_type=CodeQLErrorType.UNKNOWN,
+                        error_message=str(e),
+                    )
+                    language_status_dict[codeql_lang] = self._merge_language_status(
+                        language_status_dict.get(codeql_lang),
+                        lang_status.model_dump(),
+                    )
                     failed_languages.append(f"{language} ({subdir.name})")
 
         # P5-03a Fix 1: Add codeql_languages metadata for tracking scanned languages
         combined_result.metadata["codeql_languages"] = languages
+
+        # P6-02: Add language_status for multi-language scan
+        combined_result.metadata["language_status"] = language_status_dict
+
+        # P6-02: Add structured error type for overall result
+        if successful_scans == 0:
+            combined_result.metadata["codeql_error_type"] = CodeQLErrorType.ANALYZE_FAILED.value
+        elif failed_languages:
+            combined_result.metadata["codeql_error_type"] = CodeQLErrorType.ANALYZE_FAILED.value
 
         # Determine overall success
         if successful_scans > 0:

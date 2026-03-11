@@ -45,9 +45,14 @@ from src.layers.l3_analysis.incremental import (
 )
 from src.layers.l3_analysis.models import (
     CodeLocation,
+    CodeQLErrorType,
+    CodeQLLanguageStatus,
+    CODEQL_ERROR_SUGGESTIONS,
+    FailedEngineInfo,
     Finding,
     FindingType,
     ScanResult,
+    ScanStatus,
     SeverityLevel,
 )
 from src.layers.l3_analysis.rounds import (
@@ -94,6 +99,13 @@ __all__ = [
     "SeverityLevel",
     "CodeLocation",
     "ScanResult",
+    # P6-01: Scan Status
+    "ScanStatus",
+    "FailedEngineInfo",
+    # P6-02: CodeQL Structured Diagnostics
+    "CodeQLErrorType",
+    "CodeQLLanguageStatus",
+    "CODEQL_ERROR_SUGGESTIONS",
     # Engines
     "BaseEngine",
     "EngineRegistry",

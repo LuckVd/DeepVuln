@@ -417,3 +417,223 @@ class TestCodeQLDefaultSuites:
         for lang in expected_languages:
             assert lang in DEFAULT_QUERY_SUITES
             assert len(DEFAULT_QUERY_SUITES[lang]) > 0
+
+
+# =============================================================================
+# P6-02: CodeQL Structured Error Diagnostics Tests
+# =============================================================================
+
+
+class TestCodeQLErrorType:
+    """Tests for CodeQLErrorType enum (P6-02)."""
+
+    def test_error_type_values(self):
+        """Test all error type values are defined."""
+        from src.layers.l3_analysis import CodeQLErrorType
+
+        assert CodeQLErrorType.NOT_INSTALLED.value == "not_installed"
+        assert CodeQLErrorType.UNSUPPORTED_LANGUAGE.value == "unsupported_language"
+        assert CodeQLErrorType.DB_CREATE_FAILED.value == "db_create_failed"
+        assert CodeQLErrorType.BUILD_FAILED.value == "build_failed"
+        assert CodeQLErrorType.ANALYZE_FAILED.value == "analyze_failed"
+        assert CodeQLErrorType.TIMEOUT.value == "timeout"
+        assert CodeQLErrorType.PACK_ERROR.value == "pack_error"
+        assert CodeQLErrorType.RESOURCE_ERROR.value == "resource_error"
+        assert CodeQLErrorType.UNKNOWN.value == "unknown"
+
+    def test_error_type_count(self):
+        """Test we have expected number of error types."""
+        from src.layers.l3_analysis import CodeQLErrorType
+
+        assert len(CodeQLErrorType) == 9
+
+
+class TestCodeQLLanguageStatus:
+    """Tests for CodeQLLanguageStatus model (P6-02)."""
+
+    def test_success_status(self):
+        """Test creating a success language status."""
+        from src.layers.l3_analysis import CodeQLLanguageStatus
+
+        status = CodeQLLanguageStatus(
+            language="python",
+            status="success",
+            stage="scan",
+            findings_count=10,
+            duration_seconds=30.5,
+        )
+        assert status.language == "python"
+        assert status.status == "success"
+        assert status.findings_count == 10
+        assert status.duration_seconds == 30.5
+        assert status.error_type is None
+        assert status.suggestion is None
+
+    def test_failed_status(self):
+        """Test creating a failed language status."""
+        from src.layers.l3_analysis import CodeQLErrorType, CodeQLLanguageStatus
+
+        status = CodeQLLanguageStatus(
+            language="java",
+            status="failed",
+            stage="database_create",
+            error_type=CodeQLErrorType.DB_CREATE_FAILED,
+            error_message="Database creation failed",
+        )
+        assert status.language == "java"
+        assert status.status == "failed"
+        assert status.error_type == CodeQLErrorType.DB_CREATE_FAILED
+        # Suggestion should be auto-populated from error type
+        assert status.suggestion is not None
+
+    def test_skipped_status(self):
+        """Test creating a skipped language status."""
+        from src.layers.l3_analysis import CodeQLErrorType, CodeQLLanguageStatus
+
+        status = CodeQLLanguageStatus(
+            language="ruby",
+            status="skipped",
+            stage="language_check",
+            error_type=CodeQLErrorType.UNSUPPORTED_LANGUAGE,
+        )
+        assert status.status == "skipped"
+        assert status.suggestion is not None
+
+
+class TestCodeQLErrorSuggestions:
+    """Tests for error suggestions mapping (P6-02)."""
+
+    def test_all_error_types_have_suggestions(self):
+        """Test all error types have corresponding suggestions."""
+        from src.layers.l3_analysis import CODEQL_ERROR_SUGGESTIONS, CodeQLErrorType
+
+        for error_type in CodeQLErrorType:
+            assert error_type in CODEQL_ERROR_SUGGESTIONS, f"Missing suggestion for {error_type}"
+
+    def test_suggestions_are_helpful(self):
+        """Test suggestions contain actionable guidance."""
+        from src.layers.l3_analysis import CODEQL_ERROR_SUGGESTIONS, CodeQLErrorType
+
+        # Check key suggestions
+        assert "Install" in CODEQL_ERROR_SUGGESTIONS[CodeQLErrorType.NOT_INSTALLED]
+        assert "timeout" in CODEQL_ERROR_SUGGESTIONS[CodeQLErrorType.TIMEOUT].lower()
+        assert "memory" in CODEQL_ERROR_SUGGESTIONS[CodeQLErrorType.RESOURCE_ERROR].lower()
+
+
+class TestCodeQLEngineStructuredErrors:
+    """Tests for CodeQL engine structured error output (P6-02)."""
+
+    @pytest.fixture
+    def engine(self):
+        """Create a CodeQLEngine instance."""
+        return CodeQLEngine()
+
+    def test_map_status_to_error_type(self, engine):
+        """Test mapping CodeQLStatus to CodeQLErrorType."""
+        from src.core.codeql_health import CodeQLStatus
+
+        # Test key mappings
+        assert engine._map_status_to_error_type(CodeQLStatus.BUILD_FAILED).value == "build_failed"
+        assert engine._map_status_to_error_type(CodeQLStatus.TIMEOUT).value == "timeout"
+        assert engine._map_status_to_error_type(CodeQLStatus.NOT_INSTALLED).value == "not_installed"
+        assert engine._map_status_to_error_type(CodeQLStatus.UNSUPPORTED_LANGUAGE).value == "unsupported_language"
+
+    def test_create_language_status_success(self, engine):
+        """Test creating a success language status via helper."""
+        status = engine._create_language_status(
+            language="python",
+            status="success",
+            stage="scan",
+            findings_count=5,
+            duration_seconds=10.0,
+        )
+        assert status.language == "python"
+        assert status.status == "success"
+        assert status.findings_count == 5
+        assert status.suggestion is None  # No suggestion for success
+
+    def test_create_language_status_failed(self, engine):
+        """Test creating a failed language status via helper."""
+        from src.layers.l3_analysis import CodeQLErrorType
+
+        status = engine._create_language_status(
+            language="java",
+            status="failed",
+            stage="build",
+            error_type=CodeQLErrorType.BUILD_FAILED,
+            error_message="Build failed",
+        )
+        assert status.status == "failed"
+        assert status.error_type == CodeQLErrorType.BUILD_FAILED
+        assert status.suggestion is not None  # Should have auto-suggestion
+
+    @pytest.mark.asyncio
+    async def test_scan_not_available_returns_structured_error(self, engine, tmp_path):
+        """Test that when CodeQL is not available, structured error is returned."""
+        # Mock is_available to return False to simulate CodeQL not installed
+        with patch.object(engine, 'is_available', return_value=False):
+            result = await engine.scan(tmp_path, language="python")
+
+            assert result.success is False
+            assert "codeql_health" in result.metadata
+            assert "codeql_error_type" in result.metadata
+            assert result.metadata["codeql_error_type"] == "not_installed"
+            # P6-02: Should have language_status
+            assert "language_status" in result.metadata
+            assert "python" in result.metadata["language_status"]
+
+    @pytest.mark.asyncio
+    async def test_scan_unsupported_language_returns_structured_error(self, engine, tmp_path):
+        """Test that unsupported language returns structured error."""
+        # Mock is_available to return True
+        with patch.object(engine, 'is_available', return_value=True):
+            result = await engine.scan(tmp_path, language="unsupported_lang")
+
+            assert result.success is False
+            assert "codeql_error_type" in result.metadata
+            assert result.metadata["codeql_error_type"] == "unsupported_language"
+            # P6-02: Should have language_status
+            assert "language_status" in result.metadata
+            assert "unsupported_lang" in result.metadata["language_status"]
+
+    @pytest.mark.asyncio
+    async def test_scan_returns_language_status_on_failure(self, engine, tmp_path):
+        """Test that scan returns language_status in metadata on failure."""
+        from src.layers.l3_analysis import CodeQLErrorType
+
+        # Mock is_available to return False to trigger error path
+        with patch.object(engine, 'is_available', return_value=False):
+            result = await engine.scan(tmp_path, language="python")
+
+            assert "language_status" in result.metadata
+            lang_status = result.metadata["language_status"]
+            assert "python" in lang_status
+            assert lang_status["python"]["status"] == "failed"
+            assert lang_status["python"]["error_type"] == CodeQLErrorType.NOT_INSTALLED.value
+
+    def test_merge_language_status_prefers_failed_and_accumulates_counts(self, engine):
+        """Test language status merge avoids overwrite and preserves failure."""
+        existing = {
+            "language": "javascript",
+            "status": "success",
+            "stage": "scan",
+            "findings_count": 3,
+            "duration_seconds": 10.0,
+        }
+        incoming = {
+            "language": "javascript",
+            "status": "failed",
+            "stage": "database_create",
+            "error_type": "db_create_failed",
+            "error_message": "Database creation failed",
+            "suggestion": "Check source files",
+            "findings_count": 0,
+            "duration_seconds": 2.5,
+        }
+
+        merged = engine._merge_language_status(existing, incoming)
+
+        assert merged["status"] == "failed"
+        assert merged["error_type"] == "db_create_failed"
+        assert merged["findings_count"] == 3
+        assert merged["duration_seconds"] == 12.5
