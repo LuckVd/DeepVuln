@@ -1,178 +1,190 @@
 # DeepVuln Docker Image
-# 多语言漏洞扫描平台 - 包含所有分析引擎依赖
-#
-# 构建命令:
-#   docker build -t deepvuln:latest .
-#
-# 运行命令:
-#   docker run --rm -v /path/to/code:/target -e OPENAI_API_KEY=xxx deepvuln:latest /target
+# Multi-language security scanning runtime with CodeQL-oriented toolchains.
 
-# =============================================================================
-# Stage 1: Builder - 安装构建工具和下载依赖
-# =============================================================================
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim
 
-# 设置环境变量
-ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG=C.UTF-8
-ENV LC_ALL=C.UTF-8
-
-# 配置国内镜像源（阿里云）
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
-
-# 安装基础构建工具
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    wget \
-    gnupg \
-    ca-certificates \
-    git \
-    unzip \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 Go 1.22（使用国内镜像）
-ENV GOLANG_VERSION=1.22.0
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-RUN wget -e use_proxy=yes -e https_proxy=${HTTPS_PROXY:-http://host.docker.internal:7890} \
-    https://go.dev/dl/go${GOLANG_VERSION}.linux-amd64.tar.gz \
-    && tar -C /usr/local -xzf go${GOLANG_VERSION}.linux-amd64.tar.gz \
-    && rm go${GOLANG_VERSION}.linux-amd64.tar.gz
-ENV PATH="/usr/local/go/bin:${PATH}"
-ENV GOPATH="/go"
-ENV PATH="${GOPATH}/bin:${PATH}"
-
-# 安装 Node.js 20（使用镜像）
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 Java JDK 21
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    openjdk-21-jdk \
-    maven \
-    gradle \
-    && rm -rf /var/lib/apt/lists/*
-ENV JAVA_HOME="/usr/lib/jvm/java-21-openjdk-amd64"
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
-
-# 下载 CodeQL CLI（使用代理）- 使用最新稳定版
-# 查询包 1.5.6 需要 CodeQL 2.24.2+
-ENV CODEQL_VERSION=2.24.2
-ARG HTTPS_PROXY
-RUN mkdir -p /opt/codeql \
-    && curl -x ${HTTPS_PROXY:-http://host.docker.internal:7890} -L \
-    "https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip" \
-    -o /tmp/codeql.zip \
-    && unzip /tmp/codeql.zip -d /opt/codeql \
-    && rm /tmp/codeql.zip
-ENV PATH="/opt/codeql/codeql:${PATH}"
-
-# 下载 CodeQL 查询包（使用代理）
-# 注意：CodeQL 使用 HTTPS_PROXY 环境变量
-ARG HTTPS_PROXY
-ENV HTTPS_PROXY=${HTTPS_PROXY:-http://host.docker.internal:7890}
-RUN codeql pack download codeql/go-queries \
-    && codeql pack download codeql/java-queries \
-    && codeql pack download codeql/python-queries \
-    && codeql pack download codeql/javascript-queries \
-    && codeql pack download codeql/cpp-queries \
-    && codeql pack download codeql/ruby-queries \
-    && codeql pack download codeql/csharp-queries
-
-# 复制项目文件并安装 Python 依赖
-WORKDIR /build
-COPY pyproject.toml uv.lock* ./
-RUN pip install uv && uv sync --no-dev
-
-# =============================================================================
-# Stage 2: Runtime - 最终运行镜像
-# =============================================================================
-FROM python:3.12-slim AS runtime
-
-# 设置环境变量
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV PYTHONUNBUFFERED=1
+ENV GOPATH=/go
+ENV CODEQL_VERSION=2.24.2
+ENV CODEQL_HOME=/opt/codeql
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ENV MAVEN_HOME=/usr/share/maven
+ENV GRADLE_HOME=/usr/share/gradle
+ENV DOTNET_ROOT=/usr/share/dotnet
+ENV PATH=/app/.venv/bin:/usr/local/go/bin:/go/bin:/opt/codeql/codeql:/usr/share/maven/bin:/usr/share/gradle/bin:/usr/share/dotnet:${JAVA_HOME}/bin:${PATH}
 
-# 配置国内镜像源（阿里云）
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
+ARG APT_MIRROR=
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+ARG NO_PROXY=
+ARG GO_DOWNLOAD_URL=https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
+ARG GO_DOWNLOAD_FALLBACK_URL=https://dl.google.com/go/go1.22.0.linux-amd64.tar.gz
+ARG CODEQL_DOWNLOAD_URL=
+ARG CODEQL_DOWNLOAD_FALLBACK_URL=https://ghproxy.net/https://github.com/github/codeql-cli-binaries/releases/download/v2.24.2/codeql-linux64.zip
+ARG DOWNLOAD_CONNECT_TIMEOUT=15
+ARG DOWNLOAD_MAX_TIME=90
+ARG CODEQL_DOWNLOAD_MAX_TIME=1800
+ARG PRELOAD_CODEQL_PACKS=true
 
-# 安装运行时依赖
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    wget \
-    ca-certificates \
-    libc6-dev \
-    build-essential \
-    make \
+RUN if [ -n "${APT_MIRROR}" ]; then \
+        sed -i "s|http://deb.debian.org/debian|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources && \
+        sed -i "s|http://security.debian.org/debian-security|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+
+RUN env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy \
+    apt-get update \
+    && env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy \
+        apt-get install -y --no-install-recommends \
+        bash \
+        build-essential \
+        ca-certificates \
+        clang \
+        curl \
+        gcc \
+        g++ \
+        git \
+        gnupg \
+        libc6-dev \
+        libicu-dev \
+        make \
+        maven \
+        gradle \
+        nodejs \
+        npm \
+        openjdk-21-jdk \
+        ruby-full \
+        unzip \
+        wget \
     && rm -rf /var/lib/apt/lists/*
 
-# 从 builder 复制 Go
-COPY --from=builder /usr/local/go /usr/local/go
-ENV PATH="/usr/local/go/bin:${PATH}"
-ENV GOPATH="/go"
-ENV PATH="${GOPATH}/bin:${PATH}"
-RUN mkdir -p ${GOPATH} && chmod -R 777 ${GOPATH}
+RUN mkdir -p /etc/apt/keyrings \
+    && env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy \
+        curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+        | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+        > /etc/apt/sources.list.d/microsoft-prod.list \
+    && env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy \
+        apt-get update \
+    && env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy \
+        apt-get install -y --no-install-recommends dotnet-sdk-8.0 \
+    && rm -rf /var/lib/apt/lists/*
 
-# 从 builder 复制 Node.js
-COPY --from=builder /usr/bin/node /usr/bin/node
-COPY --from=builder /usr/lib/node_modules /usr/lib/node_modules
-RUN ln -s /usr/lib/node_modules/npm/bin/npm-cli.js /usr/bin/npm \
-    && ln -s /usr/lib/node_modules/npm/bin/npx-cli.js /usr/bin/npx
+RUN set -eu; \
+    fetch() { \
+        url="$1"; \
+        if [ -z "$url" ]; then \
+            return 1; \
+        fi; \
+        echo "Attempting download: $url"; \
+        wget -q \
+            --tries=1 \
+            --dns-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
+            --connect-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
+            --read-timeout="${DOWNLOAD_MAX_TIME}" \
+            "$url" -O /tmp/go.tar.gz; \
+    }; \
+    fetch_with_proxy() { \
+        url="$1"; \
+        if [ -z "$url" ] || [ -z "${HTTP_PROXY}" ] || [ -z "${HTTPS_PROXY}" ]; then \
+            return 1; \
+        fi; \
+        echo "Attempting download via proxy: $url"; \
+        env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+            wget -q \
+                --tries=1 \
+                --dns-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
+                --connect-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
+                --read-timeout="${DOWNLOAD_MAX_TIME}" \
+                "$url" -O /tmp/go.tar.gz; \
+    }; \
+    fetch "${GO_DOWNLOAD_URL}" \
+    || fetch "${GO_DOWNLOAD_FALLBACK_URL}" \
+    || fetch_with_proxy "${GO_DOWNLOAD_URL}" \
+    || fetch_with_proxy "${GO_DOWNLOAD_FALLBACK_URL}"; \
+    tar -C /usr/local -xzf /tmp/go.tar.gz; \
+    rm /tmp/go.tar.gz
 
-# 从 builder 复制 Java
-COPY --from=builder /usr/lib/jvm/java-21-openjdk-amd64 /usr/lib/jvm/java-21-openjdk-amd64
-ENV JAVA_HOME="/usr/lib/jvm/java-21-openjdk-amd64"
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
+RUN set -eu; \
+    if [ -n "${CODEQL_DOWNLOAD_URL}" ]; then \
+        codeql_url="${CODEQL_DOWNLOAD_URL}"; \
+    else \
+        codeql_url="https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip"; \
+    fi; \
+    codeql_fallback_url="${CODEQL_DOWNLOAD_FALLBACK_URL}"; \
+    mkdir -p /opt/codeql; \
+    fetch() { \
+        url="$1"; \
+        if [ -z "$url" ]; then \
+            return 1; \
+        fi; \
+        echo "Attempting download: $url"; \
+        curl -fsSL \
+            --connect-timeout "${DOWNLOAD_CONNECT_TIMEOUT}" \
+            --max-time "${CODEQL_DOWNLOAD_MAX_TIME}" \
+            --retry 0 \
+            "$url" -o /tmp/codeql.zip; \
+    }; \
+    fetch_with_proxy() { \
+        url="$1"; \
+        if [ -z "$url" ] || [ -z "${HTTP_PROXY}" ] || [ -z "${HTTPS_PROXY}" ]; then \
+            return 1; \
+        fi; \
+        echo "Attempting download via proxy: $url"; \
+        env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+            curl -fsSL \
+                --connect-timeout "${DOWNLOAD_CONNECT_TIMEOUT}" \
+                --max-time "${CODEQL_DOWNLOAD_MAX_TIME}" \
+                --retry 0 \
+                "$url" -o /tmp/codeql.zip; \
+    }; \
+    fetch "${codeql_url}" \
+    || fetch "${codeql_fallback_url}" \
+    || fetch_with_proxy "${codeql_url}" \
+    || fetch_with_proxy "${codeql_fallback_url}"; \
+    unzip -q /tmp/codeql.zip -d /opt/codeql; \
+    rm /tmp/codeql.zip
 
-# 从 builder 复制 Maven 和 Gradle
-COPY --from=builder /usr/share/maven /usr/share/maven
-ENV MAVEN_HOME="/usr/share/maven"
-ENV PATH="${MAVEN_HOME}/bin:${PATH}"
-COPY --from=builder /usr/share/gradle /usr/share/gradle
-ENV GRADLE_HOME="/usr/share/gradle"
-ENV PATH="${GRADLE_HOME}/bin:${PATH}"
-
-# 从 builder 复制 CodeQL
-COPY --from=builder /opt/codeql /opt/codeql
-ENV PATH="/opt/codeql/codeql:${PATH}"
-ENV CODEQL_HOME="/opt/codeql"
-
-# 从 builder 复制 CodeQL 查询包（下载到 root 用户目录）
-COPY --from=builder /root/.codeql /home/deepvuln/.codeql
-
-# 创建非 root 用户
-RUN useradd -m -s /bin/bash deepvuln \
-    && mkdir -p /app /target /home/deepvuln/.cache \
-    && chown -R deepvuln:deepvuln /app /target /home/deepvuln /home/deepvuln/.codeql
-
-# 复制 Python 虚拟环境
-COPY --from=builder /build/.venv /app/.venv
-ENV PATH="/app/.venv/bin:${PATH}"
-ENV VIRTUAL_ENV="/app/.venv"
-ENV PYTHONPATH="/app"
-
-# 安装 Semgrep（使用 uv）
-RUN pip install uv && uv pip install --python /app/.venv/bin/python semgrep
-
-# 复制项目代码
 WORKDIR /app
-COPY --chown=deepvuln:deepvuln . .
+COPY pyproject.toml requirements.txt uv.lock* ./
 
-# 设置工作目录
+COPY . /app
+
+RUN python -m pip install --no-cache-dir uv \
+    && uv venv /app/.venv \
+    && uv pip install --python /app/.venv/bin/python -e ".[analysis]" semgrep
+
+RUN useradd -m -s /bin/bash deepvuln \
+    && mkdir -p /target /tmp/codeql_cache /home/deepvuln/.cache /home/deepvuln/.codeql /go \
+    && chown -R deepvuln:deepvuln /app /target /tmp/codeql_cache /home/deepvuln /go
+
+USER deepvuln
+ENV HOME=/home/deepvuln
+WORKDIR /app
+
+RUN if [ "${PRELOAD_CODEQL_PACKS}" = "true" ]; then \
+        env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+            codeql pack download codeql/go-queries \
+        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+            codeql pack download codeql/java-queries \
+        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+            codeql pack download codeql/python-queries \
+        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+            codeql pack download codeql/javascript-queries \
+        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+            codeql pack download codeql/cpp-queries \
+        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+            codeql pack download codeql/ruby-queries \
+        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+            codeql pack download codeql/csharp-queries; \
+    fi
+
 WORKDIR /target
 
-# 切换到非 root 用户
-USER deepvuln
-
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "print('healthy')" || exit 1
+    CMD python -c "import shutil; assert shutil.which('codeql'); print('healthy')" || exit 1
 
-# 默认入口点
 ENTRYPOINT ["python", "-m", "src.cli.main"]
 CMD ["--help"]

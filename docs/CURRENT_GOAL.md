@@ -1,151 +1,44 @@
-# 当前目标
+# Current Goal
 
-> P6-02 CodeQL 失败结构化诊断
----
+## Status
 
-## 目标信息
+Completed on 2026-03-17.
 
-| 字段 | 值 |
-|------|-----|
-| **任务** | P6-02 CodeQL 失败结构化诊断 |
-| **状态** | pending |
-| **优先级** | P0 |
-| **创建日期** | 2026-03-11 |
-| **所属阶段** | Phase 6 - 扫描结果可信度 |
+## Goal
 
----
+Stabilize CodeQL execution by standardizing its runtime environment and reducing environment-dependent failures in containerized scans.
 
-## 问题背景
+## Why
 
-P6-01 已完成，现在 full scan 结果有了顶层 `status` 和 `failed_engines` 字段。但 CodeQL 失败时的诊断信息仍然不够详细：
+CodeQL currently degrades too often on projects that require external build tools such as Maven, Gradle, `dotnet`, C/C++ toolchains, or language package managers. The project already has structured failure reporting, but the default runtime still lacks a guaranteed, reproducible toolchain baseline.
 
-当前输出：
-```
-FAILED - All language scans failed. Languages attempted: typescript, javascript
-```
+## Scope
 
-期望输出：
-```
-codeql [CORE]: db_create_failed
-  Message: Database creation failed for typescript
-  Stage: database creation
-  Suggestion: Check if the project has valid TypeScript source files
-```
+- Provide a container image with the core CodeQL execution prerequisites preinstalled.
+- Ensure Docker Compose mounts align with the runtime paths used by the application.
+- Document the supported toolchains and the expected way to run CodeQL-heavy scans.
+- Keep the main scan workflow stable when CodeQL prerequisites are unavailable.
 
----
+## Deliverables
 
-## P6-02 子任务
+- Hardened [Dockerfile](/opt/projects/DeepVuln/Dockerfile) for CodeQL-oriented scans.
+- Updated [docker-compose.yml](/opt/projects/DeepVuln/docker-compose.yml) with correct cache mounts and build args.
+- Updated [docs/docker.md](/opt/projects/DeepVuln/docs/docker.md) describing the containerized CodeQL environment.
 
-### P6-02a：失败原因拆分
+## Success Criteria
 
-**修改文件**：`src/layers/l3_analysis/engines/codeql.py`
+- The default container image includes CodeQL plus the common build environments required by DeepVuln-supported languages.
+- CodeQL cache persists across Compose runs at the path the engine actually uses.
+- Docker documentation clearly states what is preinstalled and what remains project-specific.
 
-**新增错误类型枚举**：
-```python
-class CodeQLErrorType(Enum):
-    NOT_INSTALLED = "not_installed"           # CodeQL CLI 未安装
-    UNSUPPORTED_LANGUAGE = "unsupported_language"  # 语言不支持
-    DB_CREATE_FAILED = "db_create_failed"     # 数据库创建失败
-    BUILD_FAILED = "build_failed"             # 构建失败
-    ANALYZE_FAILED = "analyze_failed"         # 分析失败
-    TIMEOUT = "timeout"                        # 超时
-    PACK_ERROR = "pack_error"                 # Query pack 错误
-    UNKNOWN = "unknown"                        # 未知错误
-```
+## Completion Notes
 
-**验收标准**：
-- [ ] CodeQL 引擎输出结构化错误类型
-- [ ] 错误类型可映射到 P6-01 的 `error_type` 字段
+- The container image now includes CodeQL, Java/JDK, Maven, Gradle, Go, Node/npm, Ruby, .NET SDK, and native build toolchains.
+- Go and CodeQL downloads now prefer official sources, then fall back to alternate mirrors when the primary source is too slow or unavailable.
+- The built image was verified with toolchain checks for CodeQL, Java, Maven, Gradle, Go, .NET, and the DeepVuln CLI.
 
----
+## Out Of Scope
 
-### P6-02b：多语言项目展示每种语言独立状态
-
-**修改文件**：`src/layers/l3_analysis/engines/codeql.py`
-
-**新增字段**：
-```python
-codeql_result["language_status"] = {
-    "typescript": {"status": "failed", "stage": "db_create", "error": "..."},
-    "javascript": {"status": "skipped", "reason": "dependency_failed"},
-}
-```
-
-**验收标准**：
-- [ ] 多语言项目显示每种语言独立状态
-- [ ] 语言状态包含失败阶段信息
-
----
-
-## P6-01 完成记录
-
-| 项目 | 状态 |
-|------|------|
-| ScanStatus 枚举 | ✅ 已添加到 `models.py` |
-| FailedEngineInfo 模型 | ✅ 已添加到 `models.py` |
-| `_collect_failed_engines` 辅助函数 | ✅ 已添加到 `main.py` |
-| `_determine_scan_status` 辅助函数 | ✅ 已添加到 `main.py` |
-| 结果对象包含 `status` 字段 | ✅ |
-| 结果对象包含 `failed_engines` 字段 | ✅ |
-| 文本导出包含状态信息 | ✅ |
-| 文本导出包含失败引擎详情 | ✅ |
-| 单元测试 | ✅ 12 个新测试通过 |
-
----
-
-## Phase 6 完整任务列表
-
-### 阶段 1：结果状态模型
-| 任务 | 描述 | 状态 |
-|------|------|------|
-| P6-01 | 扫描结果状态模型重构 | **done** ✅ |
-| P6-02 | CodeQL 失败结构化诊断 | todo |
-
-### 阶段 2：噪声治理
-| 任务 | 描述 | 状态 |
-|------|------|------|
-| P6-03 | 证据强度字段引入 | todo |
-| P6-04 | conditional/informational 细分 | todo |
-| P6-05 | 术语重命名：Verified → Processed | todo |
-
-### 阶段 3：覆盖率透明化
-| 任务 | 描述 | 状态 |
-|------|------|------|
-| P6-06 | Agent 覆盖率统计 | todo |
-| P6-07 | 目录分类与降权策略 | todo |
-| P6-08 | 多语言覆盖矩阵 | todo |
-
-### 阶段 4：测试与验收
-| 任务 | 描述 | 状态 |
-|------|------|------|
-| P6-09~12 | 各模块测试 | todo |
-
----
-
-## 验收指标
-
-### P6-01 任务验收 ✅
-
-| 指标 | 当前值 | 目标值 | 状态 |
-|------|--------|--------|------|
-| 顶层状态字段 | 有 | 有 | ✅ |
-| 状态判定矩阵 | 完整定义 | 完整定义 | ✅ |
-| failed_engines 结构化输出 | 有 | 有 | ✅ |
-| CodeQL 失败时状态误读 | 低 | 低 | ✅ |
-
-### Phase 6 总体验收
-
-| 指标 | 当前值 | 目标值 |
-|------|--------|--------|
-| conditional 数量 | ~100 条 | <40 条 |
-| evidence_strength 覆盖率 | 0% | 100% |
-| Agent 覆盖率统计字段 | 无 | 6 个 |
-
----
-
-## 进度记录
-
-| 时间 | 进展 |
-|------|------|
-| 2026-03-11 | 完成 P6-01：扫描结果状态模型重构 |
-| 2026-03-11 | 设置 P6-02 为当前目标 |
+- Refactoring CodeQL scan orchestration logic in Python.
+- Adding per-language preflight checks in the engine layer.
+- Supporting Swift/macOS-specific build chains inside the Linux image.

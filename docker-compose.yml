@@ -3,10 +3,10 @@
 # 使用方法:
 #   # 使用环境变量
 #   export OPENAI_API_KEY=your-key
-#   docker-compose run --rm deepvuln /target
+#   docker-compose run --rm deepvuln scan -p /target
 #
 #   # 或使用配置文件
-#   docker-compose run --rm -v ./config.local.toml:/app/config.local.toml deepvuln /target
+#   docker-compose run --rm -v ./config.local.toml:/app/config.local.toml deepvuln scan -p /target
 
 version: "3.8"
 
@@ -15,6 +15,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+      args:
+        APT_MIRROR: ${APT_MIRROR:-}
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        NO_PROXY: ${BUILD_NO_PROXY:-}
+        GO_DOWNLOAD_URL: ${GO_DOWNLOAD_URL:-https://go.dev/dl/go1.22.0.linux-amd64.tar.gz}
+        GO_DOWNLOAD_FALLBACK_URL: ${GO_DOWNLOAD_FALLBACK_URL:-https://dl.google.com/go/go1.22.0.linux-amd64.tar.gz}
+        CODEQL_DOWNLOAD_URL: ${CODEQL_DOWNLOAD_URL:-}
+        CODEQL_DOWNLOAD_FALLBACK_URL: ${CODEQL_DOWNLOAD_FALLBACK_URL:-https://ghproxy.net/https://github.com/github/codeql-cli-binaries/releases/download/v2.24.2/codeql-linux64.zip}
+        PRELOAD_CODEQL_PACKS: ${PRELOAD_CODEQL_PACKS:-false}
     image: deepvuln:latest
     container_name: deepvuln
 
@@ -33,6 +45,10 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - PYTHONUNBUFFERED=1
+      - HOME=/home/deepvuln
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-}
 
     # 卷挂载
     volumes:
@@ -43,7 +59,9 @@ services:
       # 缓存目录（加速重复扫描）
       - deepvuln-cache:/home/deepvuln/.cache
       # CodeQL 数据库缓存
-      - codeql-databases:/tmp/codeql_dbs
+      - codeql-databases:/tmp/codeql_cache
+      # CodeQL 查询包缓存
+      - codeql-packs:/home/deepvuln/.codeql
 
     # 工作目录
     working_dir: /target
@@ -57,12 +75,26 @@ services:
     read_only: false
     cap_drop:
       - ALL
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # 可选：用于大型项目的扫描服务
   deepvuln-worker:
     build:
       context: .
       dockerfile: Dockerfile
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+      args:
+        APT_MIRROR: ${APT_MIRROR:-}
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+        NO_PROXY: ${BUILD_NO_PROXY:-}
+        GO_DOWNLOAD_URL: ${GO_DOWNLOAD_URL:-https://go.dev/dl/go1.22.0.linux-amd64.tar.gz}
+        GO_DOWNLOAD_FALLBACK_URL: ${GO_DOWNLOAD_FALLBACK_URL:-}
+        CODEQL_DOWNLOAD_URL: ${CODEQL_DOWNLOAD_URL:-}
+        CODEQL_DOWNLOAD_FALLBACK_URL: ${CODEQL_DOWNLOAD_FALLBACK_URL:-}
+        PRELOAD_CODEQL_PACKS: ${PRELOAD_CODEQL_PACKS:-false}
     image: deepvuln:latest
     container_name: deepvuln-worker
 
@@ -76,20 +108,29 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - WORKER_MODE=true
+      - HOME=/home/deepvuln
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-}
 
     volumes:
       - deepvuln-cache:/home/deepvuln/.cache
-      - codeql-databases:/tmp/codeql_dbs
+      - codeql-databases:/tmp/codeql_cache
+      - codeql-packs:/home/deepvuln/.codeql
 
     command: ["--version"]
     profiles:
       - worker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   deepvuln-cache:
     name: deepvuln-cache
   codeql-databases:
     name: codeql-databases
+  codeql-packs:
+    name: codeql-packs
 
 # 网络配置
 networks:
