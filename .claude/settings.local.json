@@ -115,7 +115,10 @@
       "Bash(tools/proj_task.sh --id P6-03 --status in_progress)",
       "Bash(tools/proj_task.sh --id P6-03 --status done)",
       "Bash(tools/proj_check.sh)",
-      "Bash(bash -x tools/run_check.sh 2>&1 | head -100)"
+      "Bash(bash -x tools/run_check.sh 2>&1 | head -100)",
+      "Bash(tools/proj_task.sh --id P6-04 --status in_progress)",
+      "Bash(tools/proj_task.sh --id P6-04a --status done && tools/proj_task.sh --id P6-04b --status done && tools/proj_task.sh --id P6-04c --status done && tools/proj_task.sh --id P6-04d --status done)",
+      "Bash(tools/proj_task.sh --id P6-04 --status done)"
     ]
   }
 }

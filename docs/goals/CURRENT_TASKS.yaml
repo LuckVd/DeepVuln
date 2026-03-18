@@ -1,7 +1,7 @@
 task_board:
   goal_title: "集成 code-audit 项目优秀实践"
   linked_phase: "Phase 6.5"
-  updated_at: "2026-03-18 20:47:03 CST"
+  updated_at: "2026-03-18 23:09:17 CST"
   items:
     # ===== P0: 防幻觉规则 + 覆盖率矩阵 =====
     - id: P6-03
@@ -42,7 +42,9 @@ task_board:
       title: "conditional/informational 细分（集成污点分析模板+验证方法论）"
       type: task
       owner: ai
-      status: todo
+      status: done
+      status_updated_at: "2026-03-18 23:09:17 CST"
+      status_updated_by: user
       stage_gate: anytime
       work_type: code
       goal_link: "集成 code-audit 项目优秀实践"

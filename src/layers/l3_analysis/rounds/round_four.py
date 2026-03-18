@@ -48,6 +48,17 @@ from src.layers.l3_analysis.task.context_builder import (
     DataFlowMarker,
 )
 
+# P6-04: Confidence scoring integration
+from src.layers.l3_analysis.confidence_scorer import (
+    ConfidenceScorer,
+    ConfidenceReport,
+    calculate_finding_confidence,
+)
+from src.layers.l3_analysis.taint_report import (
+    TaintAnalysisReport,
+    build_taint_report_from_finding,
+)
+
 
 class LLMClientProtocol(Protocol):
     """Protocol for LLM client interface."""
@@ -119,6 +130,10 @@ class ExploitabilityResult(BaseModel):
 
     # Reasoning
     reasoning: str = ""
+
+    # P6-04: Confidence scoring and taint analysis
+    confidence_report: ConfidenceReport | None = None
+    taint_analysis_report: TaintAnalysisReport | None = None
 
     # Metadata
     analyzed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -892,6 +907,23 @@ class RoundFourExecutor:
             status=status,
         )
 
+        # P6-04d: Calculate confidence score using verification methodology
+        confidence_report = self._calculate_confidence_score(
+            finding=finding,
+            call_chain=call_chain,
+            data_flow=data_flow,
+            status=status,
+            confidence=confidence,
+        )
+
+        # P6-04c: Build taint analysis report
+        taint_analysis_report = self._build_taint_analysis_report(
+            finding=finding,
+            call_chain=call_chain,
+            data_flow=data_flow,
+            status=status,
+        )
+
         return ExploitabilityResult(
             finding_id=finding.id,
             status=status,
@@ -905,6 +937,8 @@ class RoundFourExecutor:
             call_chain=call_chain,
             data_flow_markers=data_flow,
             reasoning=reasoning,
+            confidence_report=confidence_report,
+            taint_analysis_report=taint_analysis_report,
         )
 
     async def _llm_assisted_assessment(
@@ -1287,6 +1321,17 @@ class RoundFourExecutor:
                 f"({adj.reason})"
             )
 
+        # P6-04d: Store confidence score and factors on finding
+        if result.confidence_report:
+            candidate.finding.confidence_score = result.confidence_report.score
+            candidate.finding.confidence_factors = [
+                (f.name, f.score_delta) for f in result.confidence_report.factors
+            ]
+
+        # P6-04c: Store taint analysis report on finding
+        if result.taint_analysis_report:
+            candidate.finding.taint_analysis = result.taint_analysis_report.to_dict()
+
         # Update confidence
         if result.confidence >= 0.8:
             candidate.confidence = ConfidenceLevel.HIGH
@@ -1586,3 +1631,236 @@ class RoundFourExecutor:
             SeverityLevel.INFO: SeverityLevel.INFO,
         }
         return downgrade_map.get(severity, severity)
+
+    # =========================================================================
+    # P6-04: Confidence Scoring and Taint Analysis Integration
+    # =========================================================================
+
+    def _calculate_confidence_score(
+        self,
+        finding: Finding,
+        call_chain: CallChainInfo | None,
+        data_flow: list[DataFlowMarker],
+        status: ExploitabilityStatus,
+        confidence: float,
+    ) -> ConfidenceReport:
+        """
+        P6-04d: Calculate confidence score using verification methodology.
+
+        Integrates the ConfidenceScorer from code-audit verification_methodology.md.
+
+        Args:
+            finding: The vulnerability finding.
+            call_chain: Call chain analysis results.
+            data_flow: Data flow markers.
+            status: Current exploitability status.
+            confidence: Current confidence value.
+
+        Returns:
+            ConfidenceReport with score and recommendations.
+        """
+        scorer = ConfidenceScorer()
+
+        # Static analysis factors
+        static_factors: dict[str, bool] = {}
+
+        # Dangerous pattern: high severity or critical
+        if finding.severity in [SeverityLevel.CRITICAL, SeverityLevel.HIGH]:
+            static_factors["dangerous_pattern"] = True
+
+        # Traceable dataflow: we have data flow markers
+        if data_flow and len(data_flow) > 0:
+            static_factors["traceable_dataflow"] = True
+
+        # No sanitization: check data flow for sanitizers
+        has_sanitizer = any(
+            getattr(m, "is_sanitized", False) for m in data_flow
+        )
+        if not has_sanitizer:
+            static_factors["no_sanitization"] = True
+
+        # Cross-engine validation: multiple engines detected
+        if hasattr(finding, "related_engines") and len(finding.related_engines) >= 2:
+            static_factors["cross_engine_validation"] = True
+
+        # AST-level match
+        if hasattr(finding, "ast_hash") and finding.ast_hash:
+            static_factors["ast_level_match"] = True
+
+        scorer.add_static_analysis(static_factors)
+
+        # Dynamic verification factors (based on analysis results)
+        verification_factors: dict[str, bool] = {}
+
+        # If status is EXPLOITABLE with high confidence, treat as PoC success
+        if status == ExploitabilityStatus.EXPLOITABLE and confidence >= 0.85:
+            verification_factors["poc_success"] = True
+
+        # If we have CodeQL dataflow, that's strong verification
+        codeql_finding = self._get_codeql_dataflow(finding)
+        if codeql_finding:
+            verification_factors["multi_payload_success"] = True
+
+        scorer.add_dynamic_verification(verification_factors)
+
+        # Uncertainty factors
+        uncertainty_factors: dict[str, bool] = {}
+
+        # Single engine only
+        if not hasattr(finding, "related_engines") or len(finding.related_engines) <= 1:
+            uncertainty_factors["single_engine_only"] = True
+
+        # Requires authentication
+        if call_chain and not call_chain.is_entry_point:
+            uncertainty_factors["requires_auth"] = True
+
+        # Complex call chain
+        if call_chain and call_chain.callers and len(call_chain.callers) > 3:
+            uncertainty_factors["complex_call_chain"] = True
+
+        # Speculative evidence
+        if hasattr(finding, "evidence_strength"):
+            strength = finding.evidence_strength
+            if hasattr(strength, "value"):
+                strength = strength.value
+            if strength == "speculative":
+                uncertainty_factors["speculative_evidence"] = True
+
+        scorer.apply_uncertainty(uncertainty_factors)
+
+        return scorer.generate_report()
+
+    def _build_taint_analysis_report(
+        self,
+        finding: Finding,
+        call_chain: CallChainInfo | None,
+        data_flow: list[DataFlowMarker],
+        status: ExploitabilityStatus,
+    ) -> TaintAnalysisReport | None:
+        """
+        P6-04c: Build taint analysis report from finding context.
+
+        Creates a standardized taint analysis report following the
+        code-audit taint_analysis.md template.
+
+        Args:
+            finding: The vulnerability finding.
+            call_chain: Call chain analysis results.
+            data_flow: Data flow markers.
+            status: Current exploitability status.
+
+        Returns:
+            TaintAnalysisReport or None if insufficient data.
+        """
+        # Import here to avoid circular imports
+        from src.layers.l3_analysis.taint_report import (
+            TaintAnalysisReport,
+            TaintSource,
+            TaintPropagation,
+            PropagationStep,
+            TaintSink,
+            SanitizerCheck,
+            SourceType,
+            SinkType,
+            SanitizerType,
+            Controllability,
+        )
+
+        # Build source from data flow
+        source = None
+        if data_flow:
+            first_marker = data_flow[0]
+            source_type = SourceType.HTTP_PARAM
+            if first_marker.source_type == "config":
+                source_type = SourceType.ENVIRONMENT
+            elif first_marker.source_type == "database":
+                source_type = SourceType.DATABASE
+
+            source = TaintSource(
+                location=f"{first_marker.file}:{first_marker.line}" if hasattr(first_marker, "file") else finding.location.to_display(),
+                source_type=source_type,
+                controllability=Controllability.FULL if first_marker.source_type == "user" else Controllability.PARTIAL,
+                code_snippet=first_marker.snippet if hasattr(first_marker, "snippet") else None,
+            )
+        else:
+            # Default source
+            source = TaintSource(
+                location=finding.location.to_display(),
+                source_type=SourceType.HTTP_PARAM,
+                controllability=Controllability.FULL,
+            )
+
+        # Build propagation from data flow
+        propagation = TaintPropagation()
+        for i, marker in enumerate(data_flow):
+            step = PropagationStep(
+                location=f"{getattr(marker, 'file', finding.location.file)}:{getattr(marker, 'line', '?')}",
+                code_snippet=getattr(marker, "snippet", None),
+                operation="data_flow",
+                from_var=getattr(marker, "variable", None),
+                to_var=getattr(marker, "variable", None),
+            )
+            propagation.add_step(step)
+
+        # Add call chain steps
+        if call_chain and call_chain.callers:
+            for caller in call_chain.callers:
+                step = PropagationStep(
+                    location=f"{caller.get('file', 'unknown')}:{caller.get('line', '?')}",
+                    operation="function_call",
+                    function_call=caller.get("name", "unknown"),
+                )
+                propagation.add_step(step)
+
+        # Build sink from finding
+        sink_type = SinkType.SQL_EXEC  # Default
+        if finding.rule_id:
+            rule_lower = finding.rule_id.lower()
+            if "xss" in rule_lower:
+                sink_type = SinkType.TEMPLATE_RENDER
+            elif "rce" in rule_lower or "command" in rule_lower:
+                sink_type = SinkType.COMMAND_EXEC
+            elif "path" in rule_lower or "traversal" in rule_lower:
+                sink_type = SinkType.FILE_READ
+            elif "ssrf" in rule_lower:
+                sink_type = SinkType.NETWORK_REQUEST
+            elif "deserial" in rule_lower:
+                sink_type = SinkType.DESERIALIZE
+
+        sink = TaintSink(
+            location=finding.location.to_display(),
+            sink_type=sink_type,
+            code_snippet=finding.location.snippet,
+            impact=finding.description,
+        )
+
+        # Build sanitizer check
+        sanitizer = None
+        has_sanitizer = any(
+            getattr(m, "is_sanitized", False) for m in data_flow
+        )
+        if has_sanitizer:
+            sanitizer = SanitizerCheck(
+                effective=False,  # If we have a finding, sanitizer wasn't effective
+                bypass_methods=["Requires manual verification"],
+            )
+
+        # Determine exploitability assessment
+        exploitability = Controllability.FULL
+        if status in [ExploitabilityStatus.NOT_EXPLOITABLE, ExploitabilityStatus.UNLIKELY]:
+            exploitability = Controllability.NONE
+        elif status == ExploitabilityStatus.CONDITIONAL:
+            exploitability = Controllability.CONDITIONAL
+
+        return TaintAnalysisReport(
+            vuln_id=finding.id,
+            vuln_type=finding.title,
+            severity=finding.severity.value,
+            cwe=finding.cwe,
+            source=source,
+            propagation=propagation,
+            sink=sink,
+            sanitizer=sanitizer,
+            exploitability_assessment=exploitability,
+            fix_suggestion=finding.fix_suggestion,
+        )

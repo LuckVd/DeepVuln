@@ -240,6 +240,69 @@ class EvidenceStrength(str, Enum):
     """
 
 
+# =============================================================================
+# P6-04: Status Subtypes (Taint Analysis + Verification Methodology Integration)
+# =============================================================================
+
+
+class ConditionalSubtype(str, Enum):
+    """
+    P6-04a: Conditional status subtypes.
+
+    Based on code-audit taint_analysis.md and verification_methodology.md.
+    Provides fine-grained classification for conditional findings.
+    """
+
+    STRONG = "conditional-strong"
+    """
+    Conditional-Strong: High confidence but needs environment verification.
+    - evidence_strength = strong/medium
+    - exploitability = likely/possible
+    - Has traceable dataflow but needs runtime confirmation
+    """
+
+    WEAK = "conditional-weak"
+    """
+    Conditional-Weak: Lower confidence, needs manual confirmation.
+    - evidence_strength = weak
+    - exploitability = possible/unlikely
+    - Incomplete dataflow or potential false positive
+    """
+
+
+class InformationalSubtype(str, Enum):
+    """
+    P6-04b: Informational status subtypes.
+
+    Based on code-audit verification_methodology.md confidence scoring.
+    Distinguishes different types of non-exploitable findings.
+    """
+
+    NOT_EXPLOITABLE = "not_exploitable"
+    """
+    Not Exploitable: Confirmed as not exploitable.
+    - exploitability = not_exploitable
+    - Valid finding but no real-world attack vector
+    - May be protected by framework or sanitization
+    """
+
+    SPECULATIVE_SIGNAL = "speculative_signal"
+    """
+    Speculative Signal: Speculative finding, likely false positive.
+    - evidence_strength = speculative
+    - Or FindingType.SUSPICIOUS
+    - Low confidence, may be hallucination
+    """
+
+    ENVIRONMENTAL_RISK = "environmental_risk"
+    """
+    Environmental Risk: Requires specific conditions to exploit.
+    - Needs specific configuration/permissions/environment
+    - Exploitable only in certain deployment scenarios
+    - Example: Debug mode enabled, specific feature flag
+    """
+
+
 class HallucinationCheckResult(BaseModel):
     """
     P6-03: Anti-hallucination check result.
@@ -438,6 +501,34 @@ class Finding(BaseModel):
     hallucination_check: HallucinationCheckResult | None = Field(
         default=None,
         description="Anti-hallucination validation result",
+    )
+
+    # P6-04: Status subtypes for fine-grained classification
+    conditional_subtype: ConditionalSubtype | None = Field(
+        default=None,
+        description="P6-04a: Conditional status subtype (strong/weak)",
+    )
+    informational_subtype: InformationalSubtype | None = Field(
+        default=None,
+        description="P6-04b: Informational status subtype",
+    )
+
+    # P6-04c: Taint analysis report (integrated from code-audit)
+    taint_analysis: dict[str, Any] | None = Field(
+        default=None,
+        description="P6-04c: Taint analysis report (Source/Propagation/Sink/Sanitizer)",
+    )
+
+    # P6-04d: Confidence score from verification methodology
+    confidence_score: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="P6-04d: Confidence score (0-100) from verification methodology",
+    )
+    confidence_factors: list[tuple[str, int]] | None = Field(
+        default=None,
+        description="P6-04d: Factors contributing to confidence score",
     )
 
     # Timestamps

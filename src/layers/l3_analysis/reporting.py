@@ -211,6 +211,35 @@ def apply_report_status(findings: list[Any]) -> dict[str, int]:
     return counts
 
 
+def apply_full_report_status(findings: list[Any]) -> dict[str, int]:
+    """
+    P6-04: Apply full report status including subtypes.
+
+    This function:
+    1. Maps each finding to a ReportStatus
+    2. Applies conditional/informational subtypes
+    3. Sets all status fields on findings
+    4. Returns count by status and subtype
+
+    Args:
+        findings: List of Finding objects.
+
+    Returns:
+        Dictionary with count by status and subtype.
+    """
+    # Apply base status
+    base_counts = apply_report_status(findings)
+
+    # Apply subtypes
+    subtype_counts = apply_status_subtypes(findings)
+
+    # Combine counts
+    return {
+        **base_counts,
+        **subtype_counts,
+    }
+
+
 def sort_by_report_status(findings: list[Any], descending: bool = True) -> list[Any]:
     """
     Sort findings by report status priority.
@@ -380,8 +409,262 @@ __all__ = [
     "get_final_status_value",
     "map_to_report_status",
     "apply_report_status",
+    "apply_full_report_status",
     "sort_by_report_status",
     "get_status_display",
     "filter_non_suppressed",
     "get_actionable_findings",
+    # P6-03: Evidence strength
+    "EVIDENCE_STRENGTH_DISPLAY",
+    "get_evidence_strength_display",
+    "get_evidence_strength_counts",
+    # P6-04: Status subtypes
+    "determine_conditional_subtype",
+    "determine_informational_subtype",
+    "apply_status_subtypes",
+    "apply_full_report_status",
+    "get_subtype_display",
+    "get_subtype_counts",
+    "STATUS_SUBTYPE_DISPLAY",
 ]
+
+
+# =============================================================================
+# P6-04: Status Subtypes (Taint Analysis + Verification Methodology Integration)
+# =============================================================================
+
+# Status subtype display map
+STATUS_SUBTYPE_DISPLAY = {
+    # Conditional subtypes
+    "conditional-strong": ("🟠", "orange", "高置信条件 - 需环境验证"),
+    "conditional-weak": ("🟡", "yellow", "低置信条件 - 需人工确认"),
+    # Informational subtypes
+    "not_exploitable": ("🟢", "green", "确认不可利用"),
+    "speculative_signal": ("⚪", "gray", "推测性信号 - 可能误报"),
+    "environmental_risk": ("🔵", "blue", "环境相关风险"),
+}
+
+
+def _get_evidence_strength_value(finding: Any) -> str | None:
+    """Extract evidence_strength value from finding."""
+    strength = getattr(finding, "evidence_strength", None)
+    if strength is None:
+        return None
+    return strength.value if hasattr(strength, "value") else str(strength)
+
+
+def _get_exploitability_value(finding: Any) -> str | None:
+    """Extract exploitability value from finding."""
+    exploitability = getattr(finding, "exploitability", None)
+    if exploitability is None:
+        return None
+    return str(exploitability).lower().strip()
+
+
+def _get_finding_type_value(finding: Any) -> str | None:
+    """Extract finding type value from finding."""
+    finding_type = getattr(finding, "type", None)
+    if finding_type is None:
+        return None
+    return finding_type.value if hasattr(finding_type, "value") else str(finding_type)
+
+
+def determine_conditional_subtype(finding: Any) -> str:
+    """
+    P6-04a: Determine conditional subtype based on evidence and exploitability.
+
+    Classification rules:
+    - conditional-strong: High confidence but needs environment verification
+      - evidence_strength = strong/medium AND exploitability = likely/possible
+    - conditional-weak: Lower confidence, needs manual confirmation
+      - evidence_strength = weak OR exploitability = possible/unlikely
+
+    Args:
+        finding: Finding object with evidence_strength and exploitability.
+
+    Returns:
+        Subtype string: "conditional-strong" or "conditional-weak"
+    """
+    evidence = _get_evidence_strength_value(finding)
+    exploitability = _get_exploitability_value(finding)
+
+    # Strong evidence + likely/possible exploitability = conditional-strong
+    if evidence in ["strong", "medium"]:
+        if exploitability in ["likely", "possible", "exploitable"]:
+            return "conditional-strong"
+        # Strong evidence but exploitability unclear
+        if exploitability is None:
+            return "conditional-strong"
+
+    # Weak evidence or unlikely exploitability = conditional-weak
+    if evidence == "weak":
+        return "conditional-weak"
+
+    # Default to weak if uncertain
+    if exploitability in ["unlikely"]:
+        return "conditional-weak"
+
+    # Default to strong if has cross-engine validation
+    related_engines = getattr(finding, "related_engines", [])
+    if len(related_engines) >= 2:
+        return "conditional-strong"
+
+    # Default to weak
+    return "conditional-weak"
+
+
+def determine_informational_subtype(finding: Any) -> str:
+    """
+    P6-04b: Determine informational subtype based on verification methodology.
+
+    Classification rules:
+    - not_exploitable: Confirmed as not exploitable
+      - exploitability = not_exploitable
+    - speculative_signal: Speculative finding, likely false positive
+      - evidence_strength = speculative OR finding.type = suspicious
+    - environmental_risk: Requires specific conditions to exploit
+      - metadata indicates config/permission requirements
+
+    Args:
+        finding: Finding object with exploitability, evidence_strength, etc.
+
+    Returns:
+        Subtype string: "not_exploitable", "speculative_signal", or "environmental_risk"
+    """
+    evidence = _get_evidence_strength_value(finding)
+    exploitability = _get_exploitability_value(finding)
+    finding_type = _get_finding_type_value(finding)
+
+    # Rule 1: Not exploitable
+    if exploitability == "not_exploitable":
+        return "not_exploitable"
+
+    # Rule 2: Speculative signal
+    if evidence == "speculative":
+        return "speculative_signal"
+    if finding_type == "suspicious":
+        return "speculative_signal"
+
+    # Rule 3: Check for environmental requirements
+    metadata = getattr(finding, "metadata", {})
+    if isinstance(metadata, dict):
+        # Check for environmental indicators
+        if metadata.get("requires_auth") or metadata.get("requires_config"):
+            return "environmental_risk"
+        if metadata.get("environmental_conditions"):
+            return "environmental_risk"
+        # Check confidence score
+        confidence_score = getattr(finding, "confidence_score", None)
+        if confidence_score is not None and confidence_score < 50:
+            return "speculative_signal"
+
+    # Default to not_exploitable for informational
+    return "not_exploitable"
+
+
+def apply_status_subtypes(findings: list[Any]) -> dict[str, int]:
+    """
+    P6-04: Apply status subtypes to findings.
+
+    This function:
+    1. Determines subtype for each finding based on its status
+    2. Sets finding.conditional_subtype or finding.informational_subtype
+    3. Returns count by subtype
+
+    Args:
+        findings: List of Finding objects.
+
+    Returns:
+        Dictionary with count by subtype.
+    """
+    counts = {
+        "conditional-strong": 0,
+        "conditional-weak": 0,
+        "not_exploitable": 0,
+        "speculative_signal": 0,
+        "environmental_risk": 0,
+    }
+
+    for finding in findings:
+        status = map_to_report_status(finding)
+
+        if status == ReportStatus.CONDITIONAL:
+            subtype = determine_conditional_subtype(finding)
+            if hasattr(finding, "conditional_subtype"):
+                finding.conditional_subtype = subtype  # type: ignore
+            counts[subtype] += 1
+
+        elif status == ReportStatus.INFORMATIONAL:
+            subtype = determine_informational_subtype(finding)
+            if hasattr(finding, "informational_subtype"):
+                finding.informational_subtype = subtype  # type: ignore
+            counts[subtype] += 1
+
+    return counts
+
+
+def get_subtype_display(finding: Any) -> tuple[str, str, str]:
+    """
+    Get display information for a finding's subtype.
+
+    Args:
+        finding: Finding object with conditional_subtype or informational_subtype.
+
+    Returns:
+        Tuple of (emoji, color, description) for display.
+    """
+    # Check conditional subtype
+    conditional = getattr(finding, "conditional_subtype", None)
+    if conditional:
+        subtype = conditional.value if hasattr(conditional, "value") else str(conditional)
+        return STATUS_SUBTYPE_DISPLAY.get(subtype, ("❓", "white", "Unknown subtype"))
+
+    # Check informational subtype
+    informational = getattr(finding, "informational_subtype", None)
+    if informational:
+        subtype = informational.value if hasattr(informational, "value") else str(informational)
+        return STATUS_SUBTYPE_DISPLAY.get(subtype, ("❓", "white", "Unknown subtype"))
+
+    # No subtype
+    return ("❓", "white", "No subtype")
+
+
+def get_subtype_counts(findings: list[Any]) -> dict[str, int]:
+    """
+    Count findings by subtype.
+
+    Args:
+        findings: List of Finding objects.
+
+    Returns:
+        Dictionary with count by subtype.
+    """
+    counts = {
+        "conditional-strong": 0,
+        "conditional-weak": 0,
+        "not_exploitable": 0,
+        "speculative_signal": 0,
+        "environmental_risk": 0,
+        "no_subtype": 0,
+    }
+
+    for finding in findings:
+        # Check conditional subtype
+        conditional = getattr(finding, "conditional_subtype", None)
+        if conditional:
+            subtype = conditional.value if hasattr(conditional, "value") else str(conditional)
+            if subtype in counts:
+                counts[subtype] += 1
+                continue
+
+        # Check informational subtype
+        informational = getattr(finding, "informational_subtype", None)
+        if informational:
+            subtype = informational.value if hasattr(informational, "value") else str(informational)
+            if subtype in counts:
+                counts[subtype] += 1
+                continue
+
+        counts["no_subtype"] += 1
+
+    return counts
