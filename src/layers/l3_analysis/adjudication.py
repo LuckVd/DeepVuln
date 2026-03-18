@@ -145,6 +145,10 @@ class AdjudicationSummary:
     deduplication: dict[str, Any] | None = None
     """Result of semantic deduplication (P4-04)."""
 
+    # P6-03: Evidence strength counts
+    evidence_strength: dict[str, int] | None = None
+    """Count of findings by evidence strength (P6-03)."""
+
     # P4-05: Unified report status counts
     report_status: dict[str, int] | None = None
     """Count of findings by unified report status (P4-05)."""
@@ -159,6 +163,7 @@ class AdjudicationSummary:
             "by_status": self.by_status,
             "consistency_check": self.consistency_check,
             "deduplication": self.deduplication,
+            "evidence_strength": self.evidence_strength,
             "report_status": self.report_status,
         }
 
@@ -420,6 +425,7 @@ def validate_no_conflict(finding: Any) -> bool:
 
 def adjudicate_findings(
     findings: list[Any],
+    source_path: Path | None = None,
     validate: bool = True,
     strict_consistency: bool = True,
     enable_deduplication: bool = True,
@@ -431,11 +437,13 @@ def adjudicate_findings(
     1. Applies exploitability override to each finding
     2. Validates for individual conflicts
     3. Performs semantic deduplication (P4-04)
-    4. Enforces global consistency (P4-03)
-    5. Returns summary statistics
+    4. Calculates evidence strength (P6-03)
+    5. Enforces global consistency (P4-03)
+    6. Returns summary statistics
 
     Args:
         findings: List of Finding objects to adjudicate.
+        source_path: Path to source code (for evidence strength calculation).
         validate: Whether to validate for conflicts (default: True).
         strict_consistency: If True, raise GlobalAdjudicationError on consistency
                            violations. If False, return result with conflicts listed.
@@ -448,6 +456,8 @@ def adjudicate_findings(
         GlobalAdjudicationError: If strict_consistency=True and global consistency
                                 violations are detected.
     """
+    from pathlib import Path as PathlibPath
+
     logger = get_logger(__name__)
     summary = AdjudicationSummary()
     summary.total_findings = len(findings)
@@ -487,6 +497,16 @@ def adjudicate_findings(
             f"Semantic deduplication: {summary.total_findings} -> {len(findings)} findings "
             f"({dedup_result.removed_count} removed, {dedup_result.merged_groups} groups merged)"
         )
+
+    # P6-03: Calculate Evidence Strength
+    # Calculate AFTER deduplication (related_engines is available)
+    if source_path is not None:
+        from src.layers.l3_analysis.evidence_calculator import calculate_evidence_strength
+        findings, strength_counts = calculate_evidence_strength(findings, source_path)
+        summary.evidence_strength = strength_counts
+        logger.info(f"Evidence strength calculated: {strength_counts}")
+    else:
+        logger.debug("Skipping evidence strength calculation: source_path not provided")
 
     # P4-03: Global Adjudication Consistency Check
     # This is the FINAL consistency check before output.

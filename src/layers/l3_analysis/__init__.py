@@ -48,9 +48,11 @@ from src.layers.l3_analysis.models import (
     CodeQLErrorType,
     CodeQLLanguageStatus,
     CODEQL_ERROR_SUGGESTIONS,
+    EvidenceStrength,
     FailedEngineInfo,
     Finding,
     FindingType,
+    HallucinationCheckResult,
     ScanResult,
     ScanStatus,
     SeverityLevel,
@@ -106,6 +108,9 @@ __all__ = [
     "CodeQLErrorType",
     "CodeQLLanguageStatus",
     "CODEQL_ERROR_SUGGESTIONS",
+    # P6-03: Evidence Strength
+    "EvidenceStrength",
+    "HallucinationCheckResult",
     # Engines
     "BaseEngine",
     "EngineRegistry",

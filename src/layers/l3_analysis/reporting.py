@@ -270,6 +270,76 @@ def get_status_display(status: ReportStatus | str) -> tuple[str, str]:
     return display_map.get(status, ("❓", "white"))
 
 
+# =============================================================================
+# P6-03: Evidence Strength Display
+# =============================================================================
+
+# Evidence strength display map
+EVIDENCE_STRENGTH_DISPLAY = {
+    "strong": ("💪", "green", "Strong evidence - multi-engine validation"),
+    "medium": ("👍", "yellow", "Medium evidence - high confidence detection"),
+    "weak": ("⚠️", "orange", "Weak evidence - needs manual verification"),
+    "speculative": ("❓", "red", "Speculative - likely false positive"),
+}
+
+
+def get_evidence_strength_display(finding: Any) -> tuple[str, str, str]:
+    """
+    Get display information for evidence strength.
+
+    Args:
+        finding: Finding object with evidence_strength attribute.
+
+    Returns:
+        Tuple of (emoji, color, description) for display.
+    """
+    strength = getattr(finding, "evidence_strength", None)
+    if strength is None:
+        return ("❔", "white", "Not assessed")
+
+    # Handle enum or string
+    strength_str = strength.value if hasattr(strength, "value") else str(strength)
+
+    return EVIDENCE_STRENGTH_DISPLAY.get(
+        strength_str,
+        ("❔", "white", "Unknown evidence strength")
+    )
+
+
+def get_evidence_strength_counts(findings: list[Any]) -> dict[str, int]:
+    """
+    Count findings by evidence strength.
+
+    Args:
+        findings: List of Finding objects.
+
+    Returns:
+        Dictionary with count by evidence strength.
+    """
+    counts = {
+        "strong": 0,
+        "medium": 0,
+        "weak": 0,
+        "speculative": 0,
+        "not_assessed": 0,
+    }
+
+    for finding in findings:
+        strength = getattr(finding, "evidence_strength", None)
+        if strength is None:
+            counts["not_assessed"] += 1
+            continue
+
+        # Handle enum or string
+        strength_str = strength.value if hasattr(strength, "value") else str(strength)
+        if strength_str in counts:
+            counts[strength_str] += 1
+        else:
+            counts["not_assessed"] += 1
+
+    return counts
+
+
 def filter_non_suppressed(findings: list[Any]) -> list[Any]:
     """
     Filter out suppressed findings from a list.

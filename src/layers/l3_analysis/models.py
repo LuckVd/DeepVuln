@@ -193,6 +193,97 @@ class SeverityLevel(str, Enum):
     INFO = "info"  # No security impact
 
 
+# =============================================================================
+# P6-03: Evidence Strength (Anti-Hallucination Integration)
+# =============================================================================
+
+
+class EvidenceStrength(str, Enum):
+    """
+    P6-03: Evidence strength for vulnerability findings.
+
+    Based on code-audit anti-hallucination rules and coverage matrix.
+    Indicates how well the finding is supported by verifiable evidence.
+    """
+
+    STRONG = "strong"
+    """
+    Strong evidence:
+    - Multi-engine cross-validation (len(related_engines) >= 2)
+    - Or multiple detections merged (duplicate_count >= 2)
+    - Or high confidence (>= 0.9) + all hallucination checks passed
+    """
+
+    MEDIUM = "medium"
+    """
+    Medium evidence:
+    - Single engine with high confidence (>= 0.8)
+    - Or merged at least once (duplicate_count >= 1)
+    - Core validations passed
+    """
+
+    WEAK = "weak"
+    """
+    Weak evidence:
+    - Single engine with moderate confidence (0.5 <= confidence < 0.8)
+    - No cross-engine confirmation
+    - Requires manual verification
+    """
+
+    SPECULATIVE = "speculative"
+    """
+    Speculative evidence:
+    - FindingType.SUSPICIOUS type
+    - Or confidence < 0.5
+    - Or hallucination check failed
+    - Likely false positive, needs special attention
+    """
+
+
+class HallucinationCheckResult(BaseModel):
+    """
+    P6-03: Anti-hallucination check result.
+
+    Based on code-audit anti_hallucination.md rules:
+    - Rule 1: File existence verification
+    - Rule 3: Line number validity verification
+    """
+
+    file_exists: bool = Field(..., description="File exists (Rule 1)")
+    code_authentic: bool = Field(default=True, description="Code is authentic (Rule 2)")
+    line_number_valid: bool = Field(..., description="Line number is valid (Rule 3)")
+    tech_stack_match: bool = Field(default=True, description="Tech stack matches (Rule 4)")
+
+    # Detailed info
+    file_path: str = Field(..., description="Checked file path")
+    actual_line_count: int | None = Field(default=None, description="Actual line count of file")
+    reported_line: int | None = Field(default=None, description="Reported line number")
+
+    @property
+    def all_passed(self) -> bool:
+        """All checks passed."""
+        return all([
+            self.file_exists,
+            self.code_authentic,
+            self.line_number_valid,
+            self.tech_stack_match,
+        ])
+
+    @property
+    def has_failure(self) -> bool:
+        """Any check failed."""
+        return not self.all_passed
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for metadata storage."""
+        return {
+            "all_passed": self.all_passed,
+            "file_exists": self.file_exists,
+            "line_number_valid": self.line_number_valid,
+            "tech_stack_match": self.tech_stack_match,
+        }
+
+
 class CodeLocation(BaseModel):
     """Location of a finding in source code."""
 
@@ -333,6 +424,20 @@ class Finding(BaseModel):
     report_status: str | None = Field(
         default=None,
         description="Unified report status for external output (exploitable/conditional/informational/suppressed)",
+    )
+
+    # P6-03: Evidence strength (anti-hallucination integration)
+    evidence_strength: EvidenceStrength | None = Field(
+        default=None,
+        description="Evidence strength based on anti-hallucination rules",
+    )
+    evidence_details: dict[str, Any] | None = Field(
+        default=None,
+        description="Detailed evidence strength calculation breakdown",
+    )
+    hallucination_check: HallucinationCheckResult | None = Field(
+        default=None,
+        description="Anti-hallucination validation result",
     )
 
     # Timestamps
