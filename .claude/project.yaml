@@ -1,0 +1,61 @@
+project:
+  name: "DeepVuln"
+  type: "application"
+  description: "Existing application repository discovered at the target path; Primary language appears to be python; Git metadata is already present; Test directories already exist; Repository already contains project documentation; Detected active code areas: src; Historical work before adoption is treated as context, not reconstructed task history"
+  primary_language: "python"
+  stack:
+    - python
+    - markdown
+    - yaml
+    - shell
+
+modules:
+  governance-core:
+    path:
+      - .claude/**
+      - tools/**
+    status: active
+    level: core
+  planning-state:
+    path:
+      - docs/goals/**
+      - docs/roadmap/**
+      - docs/history/**
+    status: active
+    level: stable
+  context-docs:
+    path:
+      - docs/context/**
+      - docs/api/**
+      - README.md
+    status: active
+    level: active
+  app-module-1:
+    path:
+      - src
+    status: todo
+    level: active
+    note: Derived from project brief module path src
+
+fact_sources:
+  highest:
+    - .claude/project.yaml
+    - docs/goals/CURRENT_GOAL.yaml
+    - docs/goals/CURRENT_TASKS.yaml
+    - docs/goals/INBOX.yaml
+  medium:
+    - docs/roadmap/ROADMAP.md
+    - docs/context/FACT_SOURCES.md
+    - docs/context/structure/STRUCTURE_CONTRACT.yaml
+    - docs/context/structure/SYNC_RULES.yaml
+    - docs/api/API.md
+  derived:
+    - docs/reports/review-latest.md
+    - docs/history/COMMIT_HISTORY.md
+
+required_cleanup:
+  - remove_or_mark_replaced_plans
+  - update_current_goal_when_scope_changes
+  - update_current_tasks_when_scope_changes
+  - keep_inbox_only_for_open_items
+  - flag_dead_code_or_dead_docs_in_review

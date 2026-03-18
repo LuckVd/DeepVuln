@@ -1,0 +1,34 @@
+goal:
+  title: "Take over current in-flight work in DeepVuln"
+  status: in_progress
+  priority: "high"
+  objective: "Adopt the live repository into ClaudeDevKit, capture the current execution context, and define the next delivery slice without reconstructing all historical work."
+  linked_phase: "Phase 1"
+  task_board: "docs/goals/CURRENT_TASKS.yaml"
+  work_type: "code"
+  decision_points:
+    - ucp-001
+    - ccp-001
+  acceptance_criteria:
+    - Governance workspace is installed in the existing repository
+    - Current project state is summarized from the live codebase
+    - A current goal and task board exist for work from today onward
+  in_scope:
+    - governance workspace bootstrap
+    - current project snapshot
+    - next executable slice
+  out_of_scope:
+    - reconstructing full historical task history
+    - auto-closing past milestones without review
+  impacted_modules:
+    - src
+  required_sync_docs:
+    - docs/context/files/README.md
+  required_checks:
+    - constitution
+    - protection
+    - scope
+    - goal
+    - tasks
+  notes:
+    - Initialized by /proj-init on 2026-03-17

@@ -97,7 +97,12 @@
       "Bash(git checkout HEAD -- src/layers/l3_analysis/engines/opencode_agent.py && echo \"✓ File restored\")",
       "Bash(git checkout 0998d04 -- src/layers/l3_analysis/engines/opencode_agent.py && echo \"✓ File restored to 0998d04\")",
       "Bash(echo \"=== OPENAI 相关环境变量 ===\" && env | grep -iE \"OPENAI|LLM|MODEL|API_KEY|BASE_URL\" 2>/dev/null | head -20 || echo \"未找到相关环境变量\")",
-      "Bash(ruff check src/ --quiet 2>&1 || echo \"Lint check completed\")"
+      "Bash(ruff check src/ --quiet 2>&1 || echo \"Lint check completed\")",
+      "Bash(tools/proj_readproject.sh)",
+      "Bash(tools/proj_readproject.sh --full)",
+      "Bash(tools/proj_capture.sh)",
+      "Bash(tools/proj_capture.sh --help)",
+      "Bash(tools/proj_task.sh --id ucp-001 --status done --by user --note \"用户确认项目快照和目标边界正确\")"
     ]
   }
 }

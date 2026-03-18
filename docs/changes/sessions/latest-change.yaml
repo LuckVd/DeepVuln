@@ -1,0 +1,14 @@
+goal: Take over current in-flight work in DeepVuln
+intent: Adopt the live repository into ClaudeDevKit, capture the current execution context, and define the next delivery slice without reconstructing all historical work.
+planned_files:
+  - .claude/**
+  - tools/**
+  - docs/**
+  - src
+do_not_touch:
+  - .git/**
+risk_flags:
+  - init_state_change
+verification_plan:
+  - run /proj-readproject to confirm the adopted snapshot
+  - review the inferred goal, tasks, and sync docs before /proj-check

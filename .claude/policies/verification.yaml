@@ -1,0 +1,18 @@
+required_checks:
+  - constitution
+  - scope
+  - protection
+  - goal
+
+commit_checks:
+  - user_authorization
+  - acceptance_criteria
+  - cleanup_review
+  - api_risk_if_triggered
+
+review_output:
+  - goal_match
+  - risk_summary
+  - scope_drift
+  - missing_tests
+  - cleanup_actions

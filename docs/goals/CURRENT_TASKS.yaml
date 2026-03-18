@@ -1,0 +1,52 @@
+task_board:
+  goal_title: "Take over current in-flight work in DeepVuln"
+  linked_phase: "Phase 1"
+  updated_at: "2026-03-18 16:08:21 CST"
+  items:
+    - id: task-001
+      title: "Review the inferred project snapshot"
+      type: task
+      owner: ai
+      status: todo
+      stage_gate: anytime
+      work_type: code
+      goal_link: "Take over current in-flight work in DeepVuln"
+      done_definition: "The generated repository summary matches the live project state closely enough to continue planning"
+      required_sync_docs:
+        - docs/context/files/README.md
+    - id: task-002
+      title: "Define the next executable slice for the in-flight work"
+      type: task
+      owner: ai
+      status: todo
+      stage_gate: anytime
+      work_type: code
+      goal_link: "Take over current in-flight work in DeepVuln"
+      done_definition: "A current goal slice exists for the next delivery step after adoption"
+      required_sync_docs:
+        - docs/context/files/README.md
+    - id: ucp-001
+      title: "Confirm inferred scope and active delivery target"
+      type: checkpoint
+      owner: user
+      status: done
+      status_note: "用户确认项目快照和目标边界正确"
+      status_updated_at: "2026-03-18 16:08:21 CST"
+      status_updated_by: user
+      stage_gate: before_check
+      work_type: doc
+      goal_link: "Take over current in-flight work in DeepVuln"
+      done_definition: "User confirms the adoption summary and the current goal boundary"
+      required_sync_docs:
+        - docs/context/structure/README.md
+    - id: ccp-001
+      title: "Approve readiness to commit"
+      type: checkpoint
+      owner: user
+      status: todo
+      stage_gate: before_commit
+      work_type: doc
+      goal_link: "Take over current in-flight work in DeepVuln"
+      done_definition: "User explicitly approves the commit gate outcome"
+      required_sync_docs:
+        - docs/context/structure/README.md

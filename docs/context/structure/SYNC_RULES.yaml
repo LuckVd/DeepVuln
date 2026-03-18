@@ -1,0 +1,37 @@
+rules:
+  - id: source_files_need_file_index
+    when_changed:
+      - src/**
+      - schema/**
+      - config/**
+    require_docs:
+      - docs/context/files/**
+  - id: api_changes_need_api_docs
+    when_changed:
+      - src/api/**
+      - src/routes/**
+      - src/controllers/**
+      - src/endpoints/**
+    require_docs:
+      - docs/api/API.md
+      - docs/context/apis/**
+  - id: function_changes_need_function_docs
+    when_changed:
+      - src/services/**
+      - src/controllers/**
+      - src/utils/**
+    require_docs:
+      - docs/context/functions/**
+  - id: model_changes_need_model_docs
+    when_changed:
+      - src/models/**
+      - schema/**
+      - config/**
+    require_docs:
+      - docs/context/models/**
+  - id: workflow_changes_need_structure_docs
+    when_changed:
+      - .claude/**
+      - tools/**
+    require_docs:
+      - docs/context/structure/**

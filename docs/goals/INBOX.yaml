@@ -1,0 +1,9 @@
+items:
+  - id: inbox-seed-001
+    type: followup
+    title: "Review unresolved init assumptions"
+    source: proj-init
+    priority: medium
+    decision: schedule_later
+    linked_goal: "Take over current in-flight work in DeepVuln"
+    status: open
