@@ -1,52 +1,250 @@
 task_board:
-  goal_title: "Take over current in-flight work in DeepVuln"
-  linked_phase: "Phase 1"
-  updated_at: "2026-03-18 16:08:21 CST"
+  goal_title: "集成 code-audit 项目优秀实践"
+  linked_phase: "Phase 6.5"
+  updated_at: "2026-03-18 16:52:45 CST"
   items:
-    - id: task-001
-      title: "Review the inferred project snapshot"
+    # ===== P0: 防幻觉规则 + 覆盖率矩阵 =====
+    - id: P6-03
+      title: "证据强度字段引入（集成防幻觉规则+覆盖率矩阵）"
       type: task
       owner: ai
       status: todo
       stage_gate: anytime
       work_type: code
-      goal_link: "Take over current in-flight work in DeepVuln"
-      done_definition: "The generated repository summary matches the live project state closely enough to continue planning"
+      goal_link: "集成 code-audit 项目优秀实践"
+      priority: P0
+      done_definition: "实现 evidence_strength 字段：strong/medium/weak/speculative，集成防幻觉规则到 LLM 验证流程"
       required_sync_docs:
         - docs/context/files/README.md
-    - id: task-002
-      title: "Define the next executable slice for the in-flight work"
+      source_reference: "/opt/AI/code-audit/references/core/anti_hallucination.md, /opt/AI/code-audit/references/checklists/coverage_matrix.md"
+      impacted_files:
+        - src/layers/l3_analysis/models.py
+        - src/layers/l3_analysis/engines/opencode_agent.py
+        - src/layers/l3_analysis/reporting.py
+      subtasks:
+        - id: P6-03a
+          title: "集成防幻觉规则到 LLM 验证流程"
+          status: todo
+          done_definition: "LLM 漏洞判定流程中强制执行文件存在性验证、代码真实性验证、行号准确性验证、技术栈一致性验证"
+        - id: P6-03b
+          title: "判定依据：source/sink/entry point/数据流/PoC/跨引擎印证"
+          status: todo
+          done_definition: "基于多维度证据判定证据强度"
+        - id: P6-03c
+          title: "[Suspicious] 类结果强制标记 speculative"
+          status: todo
+          done_definition: "可疑类结果自动标记为最低证据强度"
+
+    # ===== P1: 污点分析模板 + 漏洞验证方法论 =====
+    - id: P6-04
+      title: "conditional/informational 细分（集成污点分析模板+验证方法论）"
       type: task
       owner: ai
       status: todo
       stage_gate: anytime
       work_type: code
-      goal_link: "Take over current in-flight work in DeepVuln"
-      done_definition: "A current goal slice exists for the next delivery step after adoption"
+      goal_link: "集成 code-audit 项目优秀实践"
+      priority: P1
+      done_definition: "conditional 细分为 conditional-strong/conditional-weak；informational 细分为 not_exploitable/speculative_signal/environmental_risk；规范化污点分析报告模板"
       required_sync_docs:
         - docs/context/files/README.md
-    - id: ucp-001
-      title: "Confirm inferred scope and active delivery target"
+      source_reference: "/opt/AI/code-audit/references/core/taint_analysis.md, /opt/AI/code-audit/references/core/verification_methodology.md"
+      impacted_files:
+        - src/layers/l3_analysis/models.py
+        - src/layers/l3_analysis/reporting.py
+        - src/layers/l3_analysis/rounds/round_four.py
+      subtasks:
+        - id: P6-04a
+          title: "conditional 细分：conditional-strong / conditional-weak"
+          status: todo
+        - id: P6-04b
+          title: "informational 细分：not_exploitable / speculative_signal / environmental_risk"
+          status: todo
+        - id: P6-04c
+          title: "规范化污点分析报告模板（Source/Propagation/Sink/Sanitizer/Exploitability）"
+          status: todo
+        - id: P6-04d
+          title: "集成漏洞验证方法论到置信度评分"
+          status: todo
+
+    # ===== P2: Sink/Source 库 + 语言检查清单 =====
+    - id: P6-05
+      title: "术语重命名：Verified → Processed（同时扩展规则库）"
+      type: task
+      owner: ai
+      status: todo
+      stage_gate: anytime
+      work_type: code
+      goal_link: "集成 code-audit 项目优秀实践"
+      priority: P2
+      done_definition: "术语重命名完成；从 code-audit 导入 Sink/Source 库和语言检查清单"
+      required_sync_docs:
+        - docs/context/files/README.md
+      source_reference: "/opt/AI/code-audit/references/core/sinks_sources.md, /opt/AI/code-audit/references/checklists/"
+      impacted_files:
+        - rules/
+        - src/layers/l3_analysis/engines/
+      subtasks:
+        - id: P6-05a
+          title: "扩展 Sink/Source 危险函数库"
+          status: todo
+        - id: P6-05b
+          title: "集成语言检查清单到规则库（Java/Python/Go/PHP/JS/Ruby/.NET/Rust/C++）"
+          status: todo
+
+    # ===== P3: 业务逻辑检测 + WooYun 案例库 =====
+    - id: P6-06
+      title: "Agent 覆盖率统计（同时设计业务逻辑检测方法论）"
+      type: task
+      owner: ai
+      status: todo
+      stage_gate: anytime
+      work_type: code
+      goal_link: "集成 code-audit 项目优秀实践"
+      priority: P3
+      done_definition: "输出覆盖率统计字段；实现 Actor×Action×Resource 矩阵和状态机枚举检测逻辑"
+      required_sync_docs:
+        - docs/context/files/README.md
+      source_reference: "/opt/AI/code-audit/references/security/business_logic.md"
+      impacted_files:
+        - src/layers/l3_analysis/
+        - src/layers/l1_intelligence/
+      subtasks:
+        - id: P6-06a
+          title: "输出统计字段：analyzable_files_total/files_selected/files_scanned/files_failed/files_skipped_by_limit"
+          status: todo
+        - id: P6-06b
+          title: "设计业务逻辑检测方法论 (D9 维度)"
+          status: todo
+
+    - id: P6-07
+      title: "目录分类与降权策略（同时导入 WooYun 案例库）"
+      type: task
+      owner: ai
+      status: todo
+      stage_gate: anytime
+      work_type: code
+      goal_link: "集成 code-audit 项目优秀实践"
+      priority: P3
+      done_definition: "新增目录分类；WooYun 案例库可作为 LLM 上下文参考"
+      required_sync_docs:
+        - docs/context/files/README.md
+      source_reference: "/opt/AI/code-audit/references/wooyun/"
+      impacted_files:
+        - rules/
+        - docs/context/
+      subtasks:
+        - id: P6-07a
+          title: "新增目录分类：production_code/test_code/sample_code/fixture_code/challenge_code"
+          status: todo
+        - id: P6-07b
+          title: "非生产代码降权处理"
+          status: todo
+        - id: P6-07c
+          title: "配置项支持排除非生产目录"
+          status: todo
+        - id: P6-07d
+          title: "导入 WooYun 案例库作为漏洞模式参考"
+          status: todo
+
+    - id: P6-08
+      title: "多语言覆盖矩阵"
+      type: task
+      owner: ai
+      status: todo
+      stage_gate: anytime
+      work_type: code
+      goal_link: "Phase 6 - 报告可信度与噪声治理"
+      priority: P3
+      done_definition: "language x engine x status 矩阵数据结构"
+      required_sync_docs:
+        - docs/context/files/README.md
+      subtasks:
+        - id: P6-08a
+          title: "language x engine x status 矩阵数据结构"
+          status: todo
+
+    # ===== 测试与验收 =====
+    - id: P6-09
+      title: "结果状态模型测试"
+      type: task
+      owner: ai
+      status: done
+      stage_gate: anytime
+      work_type: code
+      goal_link: "Phase 6 - 报告可信度与噪声治理"
+      priority: P3
+      done_definition: "结果状态模型测试通过"
+      required_sync_docs:
+        - docs/context/files/README.md
+      note: "已完成"
+
+    - id: P6-10
+      title: "噪声分层测试"
+      type: task
+      owner: ai
+      status: todo
+      stage_gate: anytime
+      work_type: code
+      goal_link: "Phase 6 - 报告可信度与噪声治理"
+      priority: P3
+      done_definition: "噪声分层测试通过"
+      required_sync_docs:
+        - docs/context/files/README.md
+
+    - id: P6-11
+      title: "覆盖率表达测试"
+      type: task
+      owner: ai
+      status: todo
+      stage_gate: anytime
+      work_type: code
+      goal_link: "Phase 6 - 报告可信度与噪声治理"
+      priority: P3
+      done_definition: "覆盖率表达测试通过"
+      required_sync_docs:
+        - docs/context/files/README.md
+
+    - id: P6-12
+      title: "目录分类测试"
+      type: task
+      owner: ai
+      status: todo
+      stage_gate: anytime
+      work_type: code
+      goal_link: "Phase 6 - 报告可信度与噪声治理"
+      priority: P3
+      done_definition: "目录分类测试通过"
+      required_sync_docs:
+        - docs/context/files/README.md
+
+    # ===== 检查点 =====
+    - id: ucp-002
+      title: "确认集成任务范围和优先级"
       type: checkpoint
       owner: user
       status: done
-      status_note: "用户确认项目快照和目标边界正确"
-      status_updated_at: "2026-03-18 16:08:21 CST"
+      status_note: "用户确认集成任务范围和优先级"
+      status_updated_at: "2026-03-18 16:44:12 CST"
       status_updated_by: user
       stage_gate: before_check
       work_type: doc
-      goal_link: "Take over current in-flight work in DeepVuln"
-      done_definition: "User confirms the adoption summary and the current goal boundary"
+      goal_link: "集成 code-audit 项目优秀实践"
+      done_definition: "用户确认集成任务的范围和执行顺序"
       required_sync_docs:
         - docs/context/structure/README.md
-    - id: ccp-001
-      title: "Approve readiness to commit"
+
+    - id: ccp-002
+      title: "批准集成任务完成提交"
       type: checkpoint
       owner: user
-      status: todo
+      status: done
+      status_note: "用户批准提交集成规划变更"
+      status_updated_at: "2026-03-18 16:52:45 CST"
+      status_updated_by: user
       stage_gate: before_commit
       work_type: doc
-      goal_link: "Take over current in-flight work in DeepVuln"
-      done_definition: "User explicitly approves the commit gate outcome"
+      goal_link: "集成 code-audit 项目优秀实践"
+      done_definition: "用户明确批准提交集成变更"
       required_sync_docs:
         - docs/context/structure/README.md

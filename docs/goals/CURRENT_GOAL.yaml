@@ -1,29 +1,35 @@
 goal:
-  title: "Take over current in-flight work in DeepVuln"
+  title: "集成 code-audit 项目优秀实践"
   status: in_progress
   priority: "high"
-  objective: "Adopt the live repository into ClaudeDevKit, capture the current execution context, and define the next delivery slice without reconstructing all historical work."
-  linked_phase: "Phase 1"
+  objective: "将 /opt/AI/code-audit 项目的核心方法论、防幻觉规则、覆盖率矩阵等优秀实践集成到 DeepVuln 中，提升漏洞检测精度和报告质量。"
+  linked_phase: "Phase 6.5"
   task_board: "docs/goals/CURRENT_TASKS.yaml"
   work_type: "code"
   decision_points:
-    - ucp-001
-    - ccp-001
+    - ucp-002
+    - ccp-002
   acceptance_criteria:
-    - Governance workspace is installed in the existing repository
-    - Current project state is summarized from the live codebase
-    - A current goal and task board exist for work from today onward
+    - 防幻觉规则集成到 LLM 验证流程
+    - 覆盖率矩阵集成到证据强度字段
+    - 污点分析报告模板规范化
+    - 漏洞验证方法论集成到置信度评分
+    - Sink/Source 库扩展规则库
   in_scope:
-    - governance workspace bootstrap
-    - current project snapshot
-    - next executable slice
+    - P0: 防幻觉规则 + 覆盖率矩阵 → P6-03 证据强度字段
+    - P1: 污点分析模板 + 漏洞验证方法论 → 报告规范化
+    - P2: Sink/Source 库 + 语言检查清单 → 规则库扩展
+    - P3: 业务逻辑检测 + WooYun 案例库 → D9 维度增强
   out_of_scope:
-    - reconstructing full historical task history
-    - auto-closing past milestones without review
+    - 完全重写现有架构
+    - 引入新的外部依赖
   impacted_modules:
-    - src
+    - src/layers/l3_analysis/
+    - rules/
+    - src/core/
   required_sync_docs:
     - docs/context/files/README.md
+    - docs/ROADMAP.md
   required_checks:
     - constitution
     - protection
@@ -31,4 +37,5 @@ goal:
     - goal
     - tasks
   notes:
-    - Initialized by /proj-init on 2026-03-17
+    - 原有 Phase 6 任务 (P6-03~P6-12) 延后执行
+    - 基于 code-audit 项目分析，2026-03-18

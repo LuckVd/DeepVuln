@@ -1,14 +1,14 @@
-# Structure Constraints
+# Structure Context
 
-This directory defines the enforceable structure and synchronization rules for the project.
+> 自动生成的结构上下文文档
 
-## Fact Sources
+## 更新记录
 
-- `STRUCTURE_CONTRACT.yaml`: allowed paths, module roles, and sync obligations
-- `SYNC_RULES.yaml`: change-triggered documentation sync rules
+- 2026-03-18: Phase 6.5 集成任务规划，更新 ROADMAP.md 和任务看板
 
-## Human Summary
+## 相关文件
 
-- `.claude/` and `tools/` are governance-core and require structure doc updates when changed.
-- `docs/goals/`, `docs/roadmap/`, and `docs/history/` are planning-state.
-- `src/` is the runtime code area and must sync file, function, API, and model docs as applicable.
+- docs/ROADMAP.md
+- docs/goals/CURRENT_GOAL.yaml
+- docs/goals/CURRENT_TASKS.yaml
+

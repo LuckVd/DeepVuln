@@ -79,7 +79,8 @@ DeepVuln/
 |Phase 3|精度重构|Rule Gating + TechStack 重构|done|2026-03|
 |Phase 4|裁决统一|Exploitability 主裁决 + 误报压制|done|2026-03-06|
 |Phase 5|精度深化|可利用性评估增强 + 调用图分析|done|2026-03|
-|Phase 6|报告可信度|结果边界清晰化 + 噪声治理 + 覆盖率透明|**→ 当前阶段**|2026-03|
+|Phase 6|报告可信度|结果边界清晰化 + 噪声治理 + 覆盖率透明|in_progress|2026-03|
+|**Phase 6.5**|**code-audit 集成**|**防幻觉规则 + 覆盖率矩阵 + 污点分析模板 + 漏洞验证方法论**|**→ 当前阶段**|2026-03|
 
 ---
 
@@ -135,6 +136,8 @@ DeepVuln/
 ## Phase 6 详细任务：扫描结果可信度
 
 > 基于 Juice Shop 扫描评估，聚焦结果边界清晰化
+>
+> **Phase 6.5 集成说明**: P6-03~P6-07 已合并 code-audit 集成内容，详见下方 Phase 6.5 章节
 
 ### 阶段 1：结果状态模型
 
@@ -143,34 +146,40 @@ DeepVuln/
 |P6-01|扫描结果状态模型重构|P5-05|done|
 |P6-01a|引入顶层状态：complete_success/partial_success/degraded_success/failed|P6-01|done|
 |P6-01b|Failed Engines 字段结构化|P6-01a|done|
-|P6-02|CodeQL 失败结构化诊断|P6-01|todo|
-|P6-02a|失败原因拆分：not_installed/unsupported_language/db_create_failed/build_failed/analyze_failed/timeout/pack_error|P6-02|todo|
-|P6-02b|多语言项目展示每种语言独立状态|P6-02a|todo|
+|P6-02|CodeQL 失败结构化诊断|P6-01|done|
+|P6-02a|失败原因拆分：not_installed/unsupported_language/db_create_failed/build_failed/analyze_failed/timeout/pack_error|P6-02|done|
+|P6-02b|多语言项目展示每种语言独立状态|P6-02a|done|
 
-### 阶段 2：噪声治理
+### 阶段 2：噪声治理（集成 code-audit 增强）
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P6-03|证据强度字段引入|P6-01|todo|
-|P6-03a|定义 evidence_strength：strong/medium/weak/speculative|P6-03|todo|
+|P6-03|证据强度字段引入 **[集成防幻觉规则+覆盖率矩阵]**|P6-01|todo|
+|P6-03a|集成防幻觉规则到 LLM 验证流程|P6-03|todo|
 |P6-03b|判定依据：source/sink/entry point/数据流/PoC/跨引擎印证|P6-03a|todo|
 |P6-03c|[Suspicious] 类结果强制标记 speculative|P6-03b|todo|
-|P6-04|conditional/informational 细分|P6-03|todo|
+|P6-04|conditional/informational 细分 **[集成污点分析模板+验证方法论]**|P6-03|todo|
 |P6-04a|conditional 细分：conditional-strong / conditional-weak|P6-04|todo|
 |P6-04b|informational 细分：not_exploitable / speculative_signal / environmental_risk|P6-04a|todo|
-|P6-05|术语重命名：Verified → Processed|P6-04|todo|
+|P6-04c|规范化污点分析报告模板（Source/Propagation/Sink/Sanitizer/Exploitability）|P6-04|todo|
+|P6-04d|集成漏洞验证方法论到置信度评分|P6-04c|todo|
+|P6-05|术语重命名：Verified → Processed **[同时扩展规则库]**|P6-04|todo|
+|P6-05a|扩展 Sink/Source 危险函数库|P6-05|todo|
+|P6-05b|集成语言检查清单到规则库（Java/Python/Go/PHP/JS/Ruby/.NET/Rust/C++）|P6-05a|todo|
 
-### 阶段 3：覆盖率透明化
+### 阶段 3：覆盖率透明化（集成 code-audit 增强）
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P6-06|Agent 覆盖率统计|P6-01|todo|
+|P6-06|Agent 覆盖率统计 **[同时设计业务逻辑检测方法论]**|P6-05|todo|
 |P6-06a|输出统计字段：analyzable_files_total / files_selected / files_scanned / files_failed / files_skipped_by_limit|P6-06|todo|
-|P6-07|目录分类与降权策略|P6-06|todo|
+|P6-06b|设计业务逻辑检测方法论 (D9 维度)|P6-06a|todo|
+|P6-07|目录分类与降权策略 **[同时导入 WooYun 案例库]**|P6-06|todo|
 |P6-07a|新增目录分类：production_code / test_code / sample_code / fixture_code / challenge_code|P6-07|todo|
 |P6-07b|非生产代码降权处理|P6-07a|todo|
 |P6-07c|配置项支持排除非生产目录|P6-07b|todo|
-|P6-08|多语言覆盖矩阵|P6-06|todo|
+|P6-07d|导入 WooYun 案例库作为漏洞模式参考|P6-07|todo|
+|P6-08|多语言覆盖矩阵|P6-07|todo|
 |P6-08a|language x engine x status 矩阵数据结构|P6-08|todo|
 
 ### 阶段 4：测试与验收
@@ -282,8 +291,72 @@ DeepVuln/
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 6 - 报告可信度与噪声治理|
-|**当前进度**|P6-01 扫描结果状态模型重构（进行中）|
-|**下一步**|P6-01a 引入顶层状态与状态判定矩阵|
-|**重点模块**|`src/cli/main.py`, `src/layers/l3_analysis/reporting.py`, `src/layers/l3_analysis/engines/codeql.py`|
-|**目标**|结果边界清晰化，先解决“完整扫描被误读”的问题|
+|**阶段**|Phase 6.5 - code-audit 项目优秀实践集成|
+|**当前进度**|P6-03 证据强度字段引入（集成防幻觉规则+覆盖率矩阵）待开始|
+|**下一步**|P6-03a 集成防幻觉规则到 LLM 验证流程|
+|**重点模块**|`src/layers/l3_analysis/`, `rules/`, `src/core/`|
+|**目标**|提升漏洞检测精度、减少误报、规范化报告输出|
+
+---
+
+## Phase 6.5 详细任务：code-audit 集成
+
+> 集成 /opt/AI/code-audit 项目的优秀实践，提升 DeepVuln 能力
+>
+> **注意**: 集成内容已合并到原有 P6-03~P6-07 任务中，保持任务 ID 连续性
+
+### P6-03: 证据强度字段引入（P0 - 集成防幻觉规则+覆盖率矩阵）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-03|证据强度字段引入（集成防幻觉规则+覆盖率矩阵）|-|todo|
+|P6-03a|集成防幻觉规则到 LLM 验证流程|P6-03|todo|
+|P6-03b|判定依据：source/sink/entry point/数据流/PoC/跨引擎印证|P6-03a|todo|
+|P6-03c|[Suspicious] 类结果强制标记 speculative|P6-03b|todo|
+
+### P6-04: conditional/informational 细分（P1 - 集成污点分析模板+验证方法论）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-04|conditional/informational 细分（集成污点分析模板+验证方法论）|P6-03|todo|
+|P6-04a|conditional 细分：conditional-strong / conditional-weak|P6-04|todo|
+|P6-04b|informational 细分：not_exploitable / speculative_signal / environmental_risk|P6-04a|todo|
+|P6-04c|规范化污点分析报告模板（Source/Propagation/Sink/Sanitizer/Exploitability）|P6-04|todo|
+|P6-04d|集成漏洞验证方法论到置信度评分|P6-04c|todo|
+
+### P6-05: 术语重命名（P2 - 同时扩展规则库）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-05|术语重命名：Verified → Processed（同时扩展规则库）|P6-04|todo|
+|P6-05a|扩展 Sink/Source 危险函数库|P6-05|todo|
+|P6-05b|集成语言检查清单到规则库（Java/Python/Go/PHP/JS/Ruby/.NET/Rust/C++）|P6-05a|todo|
+
+### P6-06: Agent 覆盖率统计（P3 - 同时设计业务逻辑检测方法论）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-06|Agent 覆盖率统计（同时设计业务逻辑检测方法论）|P6-05|todo|
+|P6-06a|输出统计字段：analyzable_files_total/files_selected/files_scanned/files_failed/files_skipped_by_limit|P6-06|todo|
+|P6-06b|设计业务逻辑检测方法论 (D9 维度)|P6-06a|todo|
+
+### P6-07: 目录分类与降权策略（P3 - 同时导入 WooYun 案例库）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-07|目录分类与降权策略（同时导入 WooYun 案例库）|P6-06|todo|
+|P6-07a|新增目录分类：production_code/test_code/sample_code/fixture_code/challenge_code|P6-07|todo|
+|P6-07b|非生产代码降权处理|P6-07a|todo|
+|P6-07c|配置项支持排除非生产目录|P6-07b|todo|
+|P6-07d|导入 WooYun 案例库作为漏洞模式参考|P6-07|todo|
+
+### P6-08~P6-12: 覆盖率矩阵与测试（保持原计划）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-08|多语言覆盖矩阵|P6-07|todo|
+|P6-08a|language x engine x status 矩阵数据结构|P6-08|todo|
+|P6-09|结果状态模型测试|P6-01|done|
+|P6-10|噪声分层测试|P6-04|todo|
+|P6-11|覆盖率表达测试|P6-06|todo|
+|P6-12|目录分类测试|P6-07|todo|

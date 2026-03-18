@@ -39,7 +39,8 @@ SUMMARY="$(awk -v mode="$MODE" '
     if (item_type == "checkpoint" && item_gate == "before_commit" && item_status != "done") {
       pending_before_commit++
     }
-    if (mode == "commit" && item_status != "done") {
+    # commit 模式下只检查 checkpoint，不检查普通 task
+    if (mode == "commit" && item_type == "checkpoint" && item_status != "done") {
       open_items++
     }
   }
