@@ -9,6 +9,8 @@ do_not_touch:
   - .git/**
 risk_flags:
   - init_state_change
+core_change_acknowledged: true
+stable_change_acknowledged: true
 verification_plan:
   - run /proj-readproject to confirm the adopted snapshot
   - review the inferred goal, tasks, and sync docs before /proj-check

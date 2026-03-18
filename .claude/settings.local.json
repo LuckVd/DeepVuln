@@ -102,7 +102,20 @@
       "Bash(tools/proj_readproject.sh --full)",
       "Bash(tools/proj_capture.sh)",
       "Bash(tools/proj_capture.sh --help)",
-      "Bash(tools/proj_task.sh --id ucp-001 --status done --by user --note \"用户确认项目快照和目标边界正确\")"
+      "Bash(tools/proj_task.sh --id ucp-001 --status done --by user --note \"用户确认项目快照和目标边界正确\")",
+      "Bash(tools/proj_task.sh --id ccp-001 --status done --by user --note \"用户批准提交\")",
+      "Bash(tools/proj_task.sh --id ucp-002 --status done --by user --note \"用户确认集成任务范围和优先级\")",
+      "Bash(tools/proj_help.sh)",
+      "Bash(tools/proj_commit.sh)",
+      "Bash(tools/run_commit_gate.sh)",
+      "Bash(tools/proj_task.sh --id ccp-002 --status done --by user --note \"用户批准提交集成规划变更\")",
+      "Bash(echo \"y\" | tools/run_commit_gate.sh approved 2>&1 || cat docs/reports/commit-gate-latest.md)",
+      "Bash(tools/proj_task.sh --list)",
+      "Bash(grep -r \"ASTDeduplicator\\\\|deduplicate\" src/layers/l3_analysis/*.py 2>/dev/null | head -20)",
+      "Bash(tools/proj_task.sh --id P6-03 --status in_progress)",
+      "Bash(tools/proj_task.sh --id P6-03 --status done)",
+      "Bash(tools/proj_check.sh)",
+      "Bash(bash -x tools/run_check.sh 2>&1 | head -100)"
     ]
   }
 }
