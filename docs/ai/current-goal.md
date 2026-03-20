@@ -2,7 +2,7 @@
 
 ## Status
 
-In Progress - Started on 2026-03-20.
+✅ Completed - 2026-03-20
 
 ## Goal
 
@@ -44,12 +44,12 @@ P6-08: 多语言覆盖矩阵
 
 | 步骤 | 任务 | 状态 |
 |------|------|------|
-| S1 | 创建 coverage 目录结构 | pending |
-| S2 | 定义数据模型 (CoverageStatus, DimensionType, DimensionCoverage) | pending |
-| S3 | 实现 CoverageMatrix 主模型 | pending |
-| S4 | 实现 CoverageEvaluator 覆盖判定器 | pending |
-| S5 | 集成到 CoverageStats | pending |
-| S6 | 编写单元测试 | pending |
+| S1 | 创建 coverage 目录结构 | ✅ completed |
+| S2 | 定义数据模型 (CoverageStatus, DimensionType, DimensionCoverage) | ✅ completed |
+| S3 | 实现 CoverageMatrix 主模型 | ✅ completed |
+| S4 | 实现 CoverageEvaluator 覆盖判定器 | ✅ completed |
+| S5 | 集成到 CoverageStats | ✅ completed |
+| S6 | 编写单元测试 | ✅ completed |
 
 ## Coverage Criteria
 
