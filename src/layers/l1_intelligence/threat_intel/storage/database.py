@@ -297,7 +297,7 @@ class ThreatIntelDatabase:
                 WHERE c.rowid IN (
                     SELECT rowid FROM cves_fts WHERE cves_fts MATCH ?
                 )
-                ORDER BY c.kev DESC, c.cvss_v3_score DESC NULLS LAST
+                ORDER BY c.kev DESC, c.cvss_v3_score IS NULL, c.cvss_v3_score DESC
                 LIMIT ? OFFSET ?
             """, (query, limit, offset)) as cursor:
                 rows = await cursor.fetchall()
@@ -310,7 +310,7 @@ class ThreatIntelDatabase:
         async with self._db.execute("""
             SELECT * FROM cves
             WHERE description LIKE ? OR cve_id LIKE ?
-            ORDER BY kev DESC, cvss_v3_score DESC NULLS LAST
+            ORDER BY kev DESC, cvss_v3_score IS NULL, cvss_v3_score DESC
             LIMIT ? OFFSET ?
         """, (f"%{query}%", f"%{query}%", limit, offset)) as cursor:
             rows = await cursor.fetchall()
