@@ -531,6 +531,18 @@ class Finding(BaseModel):
         description="P6-04d: Factors contributing to confidence score",
     )
 
+    # P6-07: Directory classification for non-production code downgrading
+    directory_class: str | None = Field(
+        default=None,
+        description="P6-07: Directory classification (production_code/test_code/sample_code/fixture_code/challenge_code)",
+    )
+    score_multiplier: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="P6-07: Score multiplier based on directory class (1.0 for production, lower for non-production)",
+    )
+
     # Timestamps
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

@@ -145,3 +145,35 @@ base_url = "http://localhost:11434"
 # 默认模型
 # 常用: llama2, mistral, codellama, deepseek-coder
 model = "llama2"
+
+# =============================================================================
+# P6-07: 目录分类配置
+# =============================================================================
+
+[directory_classification]
+# 是否启用目录分类降权
+# 启用后，非生产代码（测试、示例、challenge等）的漏洞评分会被降低
+# 关闭后，所有文件都视为 production_code (multiplier = 1.0)
+enabled = true
+
+# 自定义目录分类（扩展默认规则）
+# 格式: 目录列表，匹配到的目录将使用对应分类
+[directory_classification.custom_dirs]
+# 将特定目录标记为 challenge（故意存在漏洞的代码）
+challenge_code = ["juice-shop", "dvwa", "webgoat", "my-vuln-app"]
+# 将特定目录标记为 sample（示例/演示代码）
+sample_code = ["examples", "demos", "poc"]
+# 将特定目录标记为 test（测试代码）
+test_code = ["__tests__", "specs"]
+# 将特定目录标记为 fixture（测试夹具数据）
+fixture_code = ["test-fixtures", "mock-data"]
+
+# 自定义降权因子（覆盖默认值）
+# 范围: 0.0 - 1.0，值越小降权越多
+# production_code 默认 1.0（不降权）
+[directory_classification.multipliers]
+production_code = 1.0
+test_code = 0.3
+sample_code = 0.1
+fixture_code = 0.2
+challenge_code = 0.1

@@ -361,3 +361,73 @@ def get_llm_batch_max_chars() -> int:
     """
     config = load_config()
     return config.get("llm", {}).get("batch_max_chars", 30000)
+
+
+# =============================================================================
+# P6-07: Directory Classification Configuration
+# =============================================================================
+
+_directory_config_cache: dict[str, Any] | None = None
+
+
+def get_directory_classification_config(force_reload: bool = False) -> dict[str, Any]:
+    """
+    P6-07: Get directory classification configuration.
+
+    Returns:
+        Directory classification config with:
+        - enabled: bool (default True)
+        - custom_dirs: dict[str, list[str]] - custom directory rules
+        - multipliers: dict[str, float] - custom score multipliers
+    """
+    global _directory_config_cache
+
+    if _directory_config_cache is not None and not force_reload:
+        return _directory_config_cache
+
+    config = load_config(force_reload=force_reload)
+    dir_config = config.get("directory_classification", {})
+
+    result = {
+        "enabled": dir_config.get("enabled", True),
+        "custom_dirs": dir_config.get("custom_dirs", {}),
+        "multipliers": dir_config.get("multipliers", {}),
+    }
+
+    _directory_config_cache = result
+    return result
+
+
+def is_directory_classification_enabled() -> bool:
+    """
+    P6-07: Check if directory classification is enabled.
+
+    Returns:
+        True if directory classification is enabled (default True).
+    """
+    config = get_directory_classification_config()
+    return config.get("enabled", True)
+
+
+def get_custom_directory_rules() -> dict[str, list[str]]:
+    """
+    P6-07: Get custom directory classification rules.
+
+    Returns:
+        Dict mapping directory class names to list of directory patterns.
+        Example: {"challenge_code": ["my-vuln-app"], "test_code": ["__tests__"]}
+    """
+    config = get_directory_classification_config()
+    return config.get("custom_dirs", {})
+
+
+def get_custom_score_multipliers() -> dict[str, float]:
+    """
+    P6-07: Get custom score multipliers for directory classes.
+
+    Returns:
+        Dict mapping directory class names to multiplier values.
+        Example: {"test_code": 0.5, "challenge_code": 0.0}
+    """
+    config = get_directory_classification_config()
+    return config.get("multipliers", {})

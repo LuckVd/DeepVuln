@@ -9,7 +9,10 @@ Target: Markdown never scanned, irrelevant directories excluded, language precis
 """
 
 from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 from typing import Any
+import re
 
 from src.core.logger.logger import get_logger
 
@@ -177,6 +180,218 @@ LANGUAGE_TO_SEMGREP_LANG: dict[str, str] = {
     "lua": "lua",
     "perl": "perl",
 }
+
+
+# ============================================================================
+# P6-07: Directory Classification for Non-Production Code Downgrading
+# =============================================================================
+
+class DirectoryClass(str, Enum):
+    """
+    P6-07a: Directory classification for code categorization.
+
+    Used for non-production code downgrading to reduce noise in reports.
+    Each class has a corresponding score_multiplier that reduces the
+    final score of findings in that directory.
+    """
+
+    PRODUCTION = "production_code"
+    """生产代码 - 正常评分，score_multiplier = 1.0"""
+
+    TEST = "test_code"
+    """测试代码 - 降权 0.3（单元测试、集成测试、E2E测试）"""
+
+    SAMPLE = "sample_code"
+    """示例/演示代码 - 降权 0.1（examples、demos、samples）"""
+
+    FIXTURE = "fixture_code"
+    """测试夹具代码 - 降权 0.2（测试数据、mock数据）"""
+
+    CHALLENGE = "challenge_code"
+    """CTF/挑战代码 - 降权 0.1（vulnerable apps、CTF challenges）"""
+
+
+# P6-07b: Directory classification rules - matched in priority order (highest first)
+DIRECTORY_CLASSIFICATION_RULES: list[tuple[list[str], DirectoryClass]] = [
+    # Challenge/CTF 代码（最高优先级，识别故意存在漏洞的代码）
+    (
+        [
+            "challenges", "challenge", "ctf", "vulnerable", "vuln-apps",
+            "juice-shop", "dvwa", "webgoat", "bwapp", "mutillidae",
+            "vuln", "vulnerables", "deliberately-vulnerable",
+        ],
+        DirectoryClass.CHALLENGE,
+    ),
+    # 测试夹具代码（测试数据和 mock）
+    (
+        [
+            "fixtures", "fixture", "testdata", "test_data", "testfiles",
+            "test_files", "mocks", "mock", "stubs", "stub", "fake", "fakes",
+            "factories", "factory", "__fixtures__",
+        ],
+        DirectoryClass.FIXTURE,
+    ),
+    # 示例/演示代码
+    (
+        [
+            "examples", "example", "samples", "sample", "demo", "demos",
+            "documentation-samples", "docs-samples", "tutorials", "tutorial",
+        ],
+        DirectoryClass.SAMPLE,
+    ),
+    # 测试代码（优先级较低，避免误匹配 challenge 下的 test）
+    (
+        [
+            "tests", "test", "__tests__", "__test__", "spec", "specs",
+            "__spec__", "integration", "e2e", "unit", "functional",
+            "__mocks__", "testing",
+        ],
+        DirectoryClass.TEST,
+    ),
+]
+
+# P6-07b: Filename pattern classification rules
+FILENAME_CLASSIFICATION_RULES: list[tuple[str, DirectoryClass]] = [
+    # Python test patterns
+    (r"_test\.py$", DirectoryClass.TEST),
+    (r"test_.*\.py$", DirectoryClass.TEST),
+    (r"_spec\.py$", DirectoryClass.TEST),
+    # JavaScript/TypeScript test patterns
+    (r"\.test\.(js|ts|jsx|tsx)$", DirectoryClass.TEST),
+    (r"\.spec\.(js|ts|jsx|tsx)$", DirectoryClass.TEST),
+    (r".*_test\.(js|ts)$", DirectoryClass.TEST),
+    # Go test patterns
+    (r"_test\.go$", DirectoryClass.TEST),
+    # Java test patterns
+    (r"Test\.java$", DirectoryClass.TEST),
+    (r"Tests\.java$", DirectoryClass.TEST),
+    # Ruby test patterns
+    (r"_test\.rb$", DirectoryClass.TEST),
+    (r"_spec\.rb$", DirectoryClass.TEST),
+    # Fixture patterns
+    (r"fixture", DirectoryClass.FIXTURE),
+    (r"\.fixture\.(py|js|ts|json|yaml|yml)$", DirectoryClass.FIXTURE),
+    (r"mock.*\.(py|js|ts)$", DirectoryClass.FIXTURE),
+    (r"stub.*\.(py|js|ts)$", DirectoryClass.FIXTURE),
+]
+
+# P6-07c: Score multipliers for directory classes
+SCORE_MULTIPLIERS: dict[DirectoryClass, float] = {
+    DirectoryClass.PRODUCTION: 1.0,   # 无降权
+    DirectoryClass.TEST: 0.3,         # 降低 70%
+    DirectoryClass.FIXTURE: 0.2,      # 降低 80%
+    DirectoryClass.SAMPLE: 0.1,       # 降低 90%
+    DirectoryClass.CHALLENGE: 0.1,    # 降低 90%
+}
+
+
+def classify_directory(
+    file_path: str | Path,
+    project_root: str | Path | None = None,
+    *,
+    custom_rules: dict[str, list[str]] | None = None,
+) -> DirectoryClass:
+    """
+    P6-07b: Classify a file path into a directory class.
+
+    Classification priority (highest to lowest):
+    1. Custom rules (if provided)
+    2. Challenge/CTF directories
+    3. Fixture directories
+    4. Sample/demo directories
+    5. Test directories
+    6. Filename patterns
+    7. Production (default)
+
+    Args:
+        file_path: File path to classify.
+        project_root: Project root for relative path calculation (unused, for future).
+        custom_rules: Custom classification rules from config.
+            Format: {"challenge_code": ["my-vuln-app"], "test_code": ["__tests__"]}
+
+    Returns:
+        DirectoryClass for the file.
+
+    Example:
+        >>> classify_directory("tests/test_main.py")
+        DirectoryClass.TEST
+        >>> classify_directory("examples/demo.py")
+        DirectoryClass.SAMPLE
+        >>> classify_directory("src/main.py")
+        DirectoryClass.PRODUCTION
+    """
+    path = Path(file_path)
+    path_str = str(path).lower().replace("\\", "/")
+    path_parts = [p.lower() for p in path.parts]
+
+    # 1. Check custom rules first (from config)
+    if custom_rules:
+        for class_name, dirs in custom_rules.items():
+            for dir_pattern in dirs:
+                if dir_pattern.lower() in path_str:
+                    try:
+                        return DirectoryClass(class_name)
+                    except ValueError:
+                        # Invalid class name, skip
+                        continue
+
+    # 2. Check directory rules (in priority order)
+    for dir_patterns, dir_class in DIRECTORY_CLASSIFICATION_RULES:
+        for pattern in dir_patterns:
+            # Check if pattern matches any path component exactly
+            if pattern.lower() in path_parts:
+                return dir_class
+            # Also check substring for compound directory names
+            if pattern.lower() in path_str:
+                return dir_class
+
+    # 3. Check filename patterns
+    filename = path.name.lower()
+    for pattern, file_class in FILENAME_CLASSIFICATION_RULES:
+        if re.search(pattern, filename, re.IGNORECASE):
+            return file_class
+
+    # 4. Default to production
+    return DirectoryClass.PRODUCTION
+
+
+def get_score_multiplier(
+    directory_class: DirectoryClass,
+    *,
+    custom_multipliers: dict[str, float] | None = None,
+) -> float:
+    """
+    P6-07c: Get score multiplier for a directory class.
+
+    The multiplier is used to reduce the final score of findings in
+    non-production code, making them less prominent in reports.
+
+    Args:
+        directory_class: The directory class.
+        custom_multipliers: Custom multipliers from config.
+            Format: {"test_code": 0.5, "challenge_code": 0.0}
+
+    Returns:
+        Score multiplier (0.0 - 1.0).
+
+    Example:
+        >>> get_score_multiplier(DirectoryClass.TEST)
+        0.3
+        >>> get_score_multiplier(DirectoryClass.PRODUCTION)
+        1.0
+        >>> get_score_multiplier(DirectoryClass.TEST, custom_multipliers={"test_code": 0.5})
+        0.5
+    """
+    # Check custom multipliers first
+    if custom_multipliers:
+        class_name = directory_class.value
+        if class_name in custom_multipliers:
+            multiplier = custom_multipliers[class_name]
+            # Clamp to valid range
+            return max(0.0, min(1.0, multiplier))
+
+    # Fall back to default multipliers
+    return SCORE_MULTIPLIERS.get(directory_class, 1.0)
 
 
 # ============================================================================

@@ -1,0 +1,66 @@
+goal_id: P6-07
+title: "目录分类与降权策略"
+stage: completed
+status: done
+selected_option: P6-07
+design_confirmed: true
+blocked_by: []
+open_questions: []
+implementation_steps:
+  - id: S1-01
+    description: "定义 DirectoryClass 枚举"
+    status: completed
+  - id: S1-02
+    description: "定义分类规则常量"
+    status: completed
+  - id: S1-03
+    description: "实现 classify_directory() 函数"
+    status: completed
+  - id: S1-04
+    description: "定义 SCORE_MULTIPLIERS 常量"
+    status: completed
+  - id: S1-05
+    description: "实现 get_score_multiplier() 函数"
+    status: completed
+  - id: S2-01
+    description: "Finding 模型添加新字段"
+    status: completed
+  - id: S2-02
+    description: "FinalScore 添加降权字段"
+    status: completed
+  - id: S2-03
+    description: "calculate_final_score() 支持降权"
+    status: completed
+  - id: S3-01
+    description: "配置函数实现"
+    status: completed
+  - id: S3-02
+    description: "更新配置示例文件"
+    status: completed
+  - id: S4-01
+    description: "单元测试"
+    status: completed
+test_scope:
+  - "test_classify_test_directory"
+  - "test_classify_fixture_directory"
+  - "test_classify_sample_directory"
+  - "test_classify_challenge_directory"
+  - "test_classify_production_directory"
+  - "test_with_directory_multiplier"
+  - "test_formula_includes_multiplier"
+security_blockers: []
+dead_code_actions: []
+goal_candidates:
+  - id: P6-06b
+    title: 业务逻辑检测方法论设计
+    priority: P3
+    status: candidate
+  - id: P6-08
+    title: 多语言覆盖矩阵
+    priority: P3
+    status: candidate
+sync_status: synced
+last_check_at: null
+last_security_scan_at: null
+last_deadcode_scan_at: null
+last_synced_at: "2026-03-20"

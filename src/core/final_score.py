@@ -88,7 +88,7 @@ class FinalScore:
     """
 
     total: float
-    """Final calculated score (0.0 - 1.2 with engine weight)."""
+    """Final calculated score (0.0 - 1.2 with engine weight, reduced by directory multiplier)."""
 
     severity_score: float
     """Normalized severity score (0.0 - 1.0)."""
@@ -101,6 +101,13 @@ class FinalScore:
 
     engine_weight: float
     """Engine weight multiplier."""
+
+    # P6-07: Directory class multiplier for non-production code
+    directory_multiplier: float = field(default=1.0)
+    """P6-07: Score multiplier based on directory class (1.0 for production)."""
+
+    directory_class: str | None = field(default=None)
+    """P6-07: Directory class name (production_code/test_code/etc)."""
 
     formula: str = field(default="")
     """Human-readable formula used for calculation."""
@@ -120,16 +127,21 @@ class FinalScore:
     def __post_init__(self):
         """Generate formula string if not provided."""
         if not self.formula:
-            self.formula = (
+            base = (
                 f"({self.severity_score:.2f} * {SEVERITY_WEIGHT} + "
                 f"{self.exploitability_score:.2f} * {EXPLOITABILITY_WEIGHT} + "
-                f"{self.confidence_score:.2f} * {CONFIDENCE_WEIGHT}) * "
-                f"{self.engine_weight:.1f} = {self.total:.3f}"
+                f"{self.confidence_score:.2f} * {CONFIDENCE_WEIGHT})"
             )
+            if self.engine_weight != 1.0:
+                base += f" * {self.engine_weight:.1f}"
+            if self.directory_multiplier != 1.0:
+                base += f" * {self.directory_multiplier:.1f}"
+            base += f" = {self.total:.3f}"
+            self.formula = base
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for metadata storage."""
-        return {
+        result = {
             "total": round(self.total, 4),
             "severity_score": round(self.severity_score, 4),
             "exploitability_score": round(self.exploitability_score, 4),
@@ -141,6 +153,12 @@ class FinalScore:
             "raw_confidence": self.raw_confidence,
             "engine": self.engine,
         }
+        # P6-07: Include directory info if present
+        if self.directory_multiplier != 1.0:
+            result["directory_multiplier"] = round(self.directory_multiplier, 2)
+        if self.directory_class:
+            result["directory_class"] = self.directory_class
+        return result
 
 
 def get_severity_score(severity: str | None) -> float:
@@ -224,6 +242,9 @@ def calculate_final_score(
     exploitability_score: float | None = None,
     confidence_score: float | None = None,
     engine_weight: float | None = None,
+    # P6-07: Directory class parameters for non-production code downgrading
+    directory_class: str | None = None,
+    directory_multiplier: float = 1.0,
 ) -> FinalScore:
     """
     Calculate final score from components.
@@ -233,7 +254,7 @@ def calculate_final_score(
             severity_score * SEVERITY_WEIGHT +
             exploitability_score * EXPLOITABILITY_WEIGHT +
             confidence_score * CONFIDENCE_WEIGHT
-        ) * engine_weight
+        ) * engine_weight * directory_multiplier
 
     Args:
         severity: Severity level string.
@@ -245,6 +266,9 @@ def calculate_final_score(
         exploitability_score: Pre-calculated exploitability score (overrides exploitability).
         confidence_score: Pre-calculated confidence score (overrides confidence).
         engine_weight: Pre-calculated engine weight (overrides engine).
+
+        directory_class: P6-07 Directory class name (production_code/test_code/etc).
+        directory_multiplier: P6-07 Score multiplier for non-production code (default 1.0).
 
     Returns:
         FinalScore object with full breakdown.
@@ -263,7 +287,10 @@ def calculate_final_score(
     )
 
     # Apply engine weight
-    total = base_score * eng_weight
+    score_after_engine = base_score * eng_weight
+
+    # P6-07: Apply directory multiplier for non-production code
+    total = score_after_engine * directory_multiplier
 
     return FinalScore(
         total=total,
@@ -271,6 +298,8 @@ def calculate_final_score(
         exploitability_score=exp_score,
         confidence_score=conf_score,
         engine_weight=eng_weight,
+        directory_multiplier=directory_multiplier,
+        directory_class=directory_class,
         raw_severity=severity,
         raw_exploitability=exploitability,
         raw_confidence=confidence,
@@ -324,11 +353,23 @@ def calculate_finding_score(finding: Any, engine: str | None = None) -> FinalSco
     if engine is None and hasattr(finding, "source"):
         engine = finding.source
 
+    # P6-07: Extract directory class and multiplier for non-production code
+    directory_class = None
+    directory_multiplier = 1.0
+    if hasattr(finding, "directory_class") and finding.directory_class:
+        directory_class = finding.directory_class
+        if hasattr(directory_class, "value"):
+            directory_class = directory_class.value
+    if hasattr(finding, "score_multiplier"):
+        directory_multiplier = finding.score_multiplier
+
     return calculate_final_score(
         severity=severity,
         exploitability=exploitability,
         confidence=confidence,
         engine=engine,
+        directory_class=directory_class,
+        directory_multiplier=directory_multiplier,
     )
 
 
