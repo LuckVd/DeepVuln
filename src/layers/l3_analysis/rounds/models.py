@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.layers.l3_analysis.coverage.matrix import CoverageMatrix
 from src.layers.l3_analysis.models import Finding, SeverityLevel
 
 
@@ -137,7 +138,12 @@ class VulnerabilityCandidate(BaseModel):
 
 
 class CoverageStats(BaseModel):
-    """Statistics about code coverage during a round."""
+    """
+    Statistics about code coverage during a round.
+
+    P6-06a: File/line/target coverage.
+    P6-08: Security dimension coverage matrix.
+    """
 
     # File coverage
     total_files: int = Field(default=0, description="Total files in scope")
@@ -159,6 +165,12 @@ class CoverageStats(BaseModel):
     http_endpoints_scanned: int = Field(default=0, description="HTTP endpoints scanned")
     rpc_endpoints_scanned: int = Field(default=0, description="RPC endpoints scanned")
 
+    # P6-08: Security dimension coverage matrix
+    dimension_matrix: CoverageMatrix | None = Field(
+        default=None,
+        description="Security dimension coverage matrix (language x engine x dimension)",
+    )
+
     @property
     def file_coverage_percent(self) -> float:
         """Calculate file coverage percentage."""
@@ -172,6 +184,19 @@ class CoverageStats(BaseModel):
         if self.total_targets == 0:
             return 0.0
         return (self.analyzed_targets / self.total_targets) * 100
+
+    @property
+    def dimension_coverage_rate(self) -> float:
+        """Calculate security dimension coverage rate."""
+        if self.dimension_matrix is None:
+            return 0.0
+        return self.dimension_matrix.get_overall_coverage_rate()
+
+    def get_dimension_coverage_summary(self) -> dict[int, dict[str, int]] | None:
+        """Get dimension coverage summary."""
+        if self.dimension_matrix is None:
+            return None
+        return self.dimension_matrix.get_dimension_coverage_summary()
 
 
 class EngineStats(BaseModel):

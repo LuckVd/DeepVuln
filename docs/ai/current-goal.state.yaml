@@ -1,68 +1,94 @@
-goal_id: P6-06b
-title: "业务逻辑检测方法论设计 (D9 维度)"
+goal_id: P6-08
+title: "多语言覆盖矩阵"
 stage: completed
 status: done
-selected_option: P6-06b
+selected_option: P6-08
 design_confirmed: true
 blocked_by: []
 open_questions: []
 implementation_steps:
   - id: S1
-    description: "创建 methodology 目录结构"
+    description: "创建 coverage 目录结构"
     status: completed
   - id: S2
-    description: "编写通用业务逻辑方法论"
+    description: "定义数据模型 (CoverageStatus, DimensionType, DimensionCoverage)"
     status: completed
   - id: S3
-    description: "编写 Python 专项检测模式"
+    description: "实现 CoverageMatrix 主模型"
     status: completed
   - id: S4
-    description: "编写 Java 专项检测模式"
+    description: "实现 CoverageEvaluator 覆盖判定器"
     status: completed
   - id: S5
-    description: "编写 Go 专项检测模式"
+    description: "集成到 CoverageStats"
     status: completed
   - id: S6
-    description: "集成到 sinks_sources 模块"
-    status: completed
-  - id: S7
     description: "编写单元测试"
     status: completed
 test_scope:
-  - "test_methodology_directory_exists"
-  - "test_methodology_files_defined"
-  - "test_general_methodology_exists"
-  - "test_python_methodology_exists"
-  - "test_java_methodology_exists"
-  - "test_go_methodology_exists"
-  - "test_get_general_methodology"
-  - "test_get_python_methodology"
-  - "test_get_java_methodology"
-  - "test_get_go_methodology"
-  - "test_get_invalid_methodology"
-  - "test_list_returns_list"
-  - "test_list_includes_general"
-  - "test_list_includes_languages"
-  - "test_general_methodology_has_d9_sections"
-  - "test_python_methodology_has_framework_sections"
-  - "test_java_methodology_has_spring_content"
-  - "test_go_methodology_has_framework_sections"
-  - "test_category_idor_exists"
-  - "test_category_mass_assignment_exists"
-  - "test_category_state_machine_exists"
-  - "test_category_race_condition_exists"
-  - "test_category_data_export_exists"
-  - "test_category_multi_tenant_exists"
-  - "test_all_categories_count"
+  - "test_core_languages_count"
+  - "test_core_languages_content"
+  - "test_all_engines_count"
+  - "test_all_engines_content"
+  - "test_all_dimensions_count"
+  - "test_all_dimensions_range"
+  - "test_not_covered_exists"
+  - "test_shallow_exists"
+  - "test_covered_exists"
+  - "test_not_applicable_exists"
+  - "test_sink_driven_exists"
+  - "test_control_driven_exists"
+  - "test_config_driven_exists"
+  - "test_dimension_type_map_sink_driven"
+  - "test_dimension_type_map_control_driven"
+  - "test_dimension_type_map_config_driven"
+  - "test_get_sink_driven_dimensions"
+  - "test_get_control_driven_dimensions"
+  - "test_get_config_driven_dimensions"
+  - "test_create_dimension_coverage"
+  - "test_dimension_type_property"
+  - "test_endpoint_coverage_rate"
+  - "test_endpoint_coverage_rate_zero_total"
+  - "test_config_coverage_rate"
+  - "test_create_language_engine_coverage"
+  - "test_get_dimension_creates_if_missing"
+  - "test_set_dimension"
+  - "test_get_covered_count"
+  - "test_create_coverage_matrix"
+  - "test_get_coverage_creates_if_missing"
+  - "test_set_coverage"
+  - "test_set_coverage_with_kwargs"
+  - "test_get_dimension_status_across_engines"
+  - "test_get_overall_coverage_rate"
+  - "test_get_dimension_coverage_summary"
+  - "test_not_covered_when_no_sinks_searched"
+  - "test_shallow_when_partial_search"
+  - "test_covered_when_full_coverage"
+  - "test_shallow_when_low_fanout"
+  - "test_not_covered_when_no_endpoints"
+  - "test_shallow_when_low_endpoint_rate"
+  - "test_covered_in_standard_mode"
+  - "test_not_covered_in_deep_mode_insufficient_endpoints"
+  - "test_covered_in_deep_mode"
+  - "test_not_covered_when_no_config_items"
+  - "test_shallow_when_partial_config"
+  - "test_shallow_when_all_checked_no_baseline"
+  - "test_covered_when_all_criteria_met"
+  - "test_evaluate_sink_driven_dimension"
+  - "test_evaluate_control_driven_dimension"
+  - "test_evaluate_config_driven_dimension"
+  - "test_evaluate_sink_driven_coverage"
+  - "test_evaluate_control_driven_coverage"
+  - "test_evaluate_config_driven_coverage"
 security_blockers: []
 dead_code_actions: []
 goal_candidates:
-  - id: P6-08
-    title: 多语言覆盖矩阵
-    priority: P3
-    status: candidate
   - id: P6-07d
     title: 导入 WooYun 案例库
+    priority: P3
+    status: candidate
+  - id: P6-10
+    title: 噪声分层测试
     priority: P3
     status: candidate
 sync_status: synced
