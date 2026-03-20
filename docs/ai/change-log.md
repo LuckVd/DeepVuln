@@ -2,6 +2,24 @@
 
 ## 2026-03-20
 
+### P6-06b: Business Logic Detection Methodology Complete
+
+- **Goal ID**: P6-06b
+- **Summary**: Created D9 dimension business logic detection methodology for Agent audits
+- **Impact**:
+  - `src/layers/l3_analysis/methodology/__init__.py`: Module entry with `get_methodology_path()`, `list_available_methodologies()`
+  - `src/layers/l3_analysis/methodology/business_logic.md`: General methodology with 6 D9 subtypes
+  - `src/layers/l3_analysis/methodology/python_business_logic.md`: Python patterns (Django/Flask/FastAPI)
+  - `src/layers/l3_analysis/methodology/java_business_logic.md`: Java patterns (Spring Boot)
+  - `src/layers/l3_analysis/methodology/go_business_logic.md`: Go patterns (Gin/Echo/Fiber)
+  - `src/layers/l3_analysis/sinks_sources/__init__.py`: Added `BusinessLogicCategory` enum
+  - `tests/unit/test_l3/test_methodology.py`: 26 unit tests
+- **D9 Subtypes**: IDOR, Mass Assignment, State Machine, Race Condition, Data Export, Multi-tenant
+- **Tests**: 26 passed
+- **Dead Code**: No issues found
+- **Security**: No secrets exposed
+- **Commit Status**: pending
+
 ### P6-07: Directory Classification Complete
 
 - **Goal ID**: P6-07

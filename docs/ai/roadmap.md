@@ -68,11 +68,11 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P6-06|Agent 覆盖率统计（同时设计业务逻辑检测方法论）|P6-05|partial|
+|P6-06|Agent 覆盖率统计（同时设计业务逻辑检测方法论）|P6-05|done|
 |P6-06a|输出统计字段：total_files/scanned_files/skipped_files|P6-06|done|
-|P6-06b|设计业务逻辑检测方法论 (D9 维度)|P6-06a|todo|
+|P6-06b|设计业务逻辑检测方法论 (D9 维度)|P6-06a|done|
 
-**实现文件**: `src/layers/l3_analysis/rounds/models.py:CoverageStats`
+**实现文件**: `src/layers/l3_analysis/rounds/models.py:CoverageStats`, `src/layers/l3_analysis/methodology/`
 
 ### P6-07: 目录分类与降权策略（P3）
 

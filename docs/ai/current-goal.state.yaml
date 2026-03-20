@@ -1,62 +1,68 @@
-goal_id: P6-07
-title: "目录分类与降权策略"
+goal_id: P6-06b
+title: "业务逻辑检测方法论设计 (D9 维度)"
 stage: completed
 status: done
-selected_option: P6-07
+selected_option: P6-06b
 design_confirmed: true
 blocked_by: []
 open_questions: []
 implementation_steps:
-  - id: S1-01
-    description: "定义 DirectoryClass 枚举"
+  - id: S1
+    description: "创建 methodology 目录结构"
     status: completed
-  - id: S1-02
-    description: "定义分类规则常量"
+  - id: S2
+    description: "编写通用业务逻辑方法论"
     status: completed
-  - id: S1-03
-    description: "实现 classify_directory() 函数"
+  - id: S3
+    description: "编写 Python 专项检测模式"
     status: completed
-  - id: S1-04
-    description: "定义 SCORE_MULTIPLIERS 常量"
+  - id: S4
+    description: "编写 Java 专项检测模式"
     status: completed
-  - id: S1-05
-    description: "实现 get_score_multiplier() 函数"
+  - id: S5
+    description: "编写 Go 专项检测模式"
     status: completed
-  - id: S2-01
-    description: "Finding 模型添加新字段"
+  - id: S6
+    description: "集成到 sinks_sources 模块"
     status: completed
-  - id: S2-02
-    description: "FinalScore 添加降权字段"
-    status: completed
-  - id: S2-03
-    description: "calculate_final_score() 支持降权"
-    status: completed
-  - id: S3-01
-    description: "配置函数实现"
-    status: completed
-  - id: S3-02
-    description: "更新配置示例文件"
-    status: completed
-  - id: S4-01
-    description: "单元测试"
+  - id: S7
+    description: "编写单元测试"
     status: completed
 test_scope:
-  - "test_classify_test_directory"
-  - "test_classify_fixture_directory"
-  - "test_classify_sample_directory"
-  - "test_classify_challenge_directory"
-  - "test_classify_production_directory"
-  - "test_with_directory_multiplier"
-  - "test_formula_includes_multiplier"
+  - "test_methodology_directory_exists"
+  - "test_methodology_files_defined"
+  - "test_general_methodology_exists"
+  - "test_python_methodology_exists"
+  - "test_java_methodology_exists"
+  - "test_go_methodology_exists"
+  - "test_get_general_methodology"
+  - "test_get_python_methodology"
+  - "test_get_java_methodology"
+  - "test_get_go_methodology"
+  - "test_get_invalid_methodology"
+  - "test_list_returns_list"
+  - "test_list_includes_general"
+  - "test_list_includes_languages"
+  - "test_general_methodology_has_d9_sections"
+  - "test_python_methodology_has_framework_sections"
+  - "test_java_methodology_has_spring_content"
+  - "test_go_methodology_has_framework_sections"
+  - "test_category_idor_exists"
+  - "test_category_mass_assignment_exists"
+  - "test_category_state_machine_exists"
+  - "test_category_race_condition_exists"
+  - "test_category_data_export_exists"
+  - "test_category_multi_tenant_exists"
+  - "test_all_categories_count"
 security_blockers: []
 dead_code_actions: []
 goal_candidates:
-  - id: P6-06b
-    title: 业务逻辑检测方法论设计
-    priority: P3
-    status: candidate
   - id: P6-08
     title: 多语言覆盖矩阵
+    priority: P3
+    status: candidate
+  - id: P6-07d
+    title: 导入 WooYun 案例库
     priority: P3
     status: candidate
 sync_status: synced
