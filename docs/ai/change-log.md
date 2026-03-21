@@ -2,6 +2,24 @@
 
 ## 2026-03-21
 
+### P6-10: Noise Layering Tests Complete
+
+- **Goal ID**: P6-10
+- **Summary**: Unit tests for P6-04 conditional/informational subtype classification
+- **Impact**:
+  - `tests/unit/test_l3/test_noise_layering.py`: 35 new tests
+- **Test Coverage**:
+  - ConditionalSubtype: STRONG/WEAK enum (5 tests)
+  - InformationalSubtype: NOT_EXPLOITABLE/SPECULATIVE_SIGNAL/ENVIRONMENTAL_RISK (5 tests)
+  - Finding + ConditionalSubtype integration (6 tests)
+  - Finding + InformationalSubtype integration (6 tests)
+  - TaintReport models: SourceType, SinkType, SanitizerType, Controllability (8 tests)
+  - Noise layering integration scenarios (5 tests)
+- **Tests**: 35 passed
+- **Dead Code**: not run
+- **Security**: not run
+- **Commit**: pending
+
 ### P6-07d: WooYun Vulnerability Case Library Import Complete
 
 - **Goal ID**: P6-07d

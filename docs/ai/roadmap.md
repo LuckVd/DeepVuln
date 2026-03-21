@@ -93,7 +93,7 @@
 |P6-08|多语言覆盖矩阵|P6-07|done|
 |P6-08a|language x engine x dimension x status 矩阵数据结构|P6-08|done|
 |P6-09|结果状态模型测试|P6-01|done|
-|P6-10|噪声分层测试|P6-04|todo|
+|P6-10|噪声分层测试|P6-04|done|
 |P6-11|覆盖率表达测试|P6-06|todo|
 |P6-12|目录分类测试|P6-07|todo|
 

@@ -1,55 +1,63 @@
-goal_id: P6-07d
-title: "导入 WooYun 案例库"
+goal_id: P6-10
+title: "噪声分层测试"
 stage: completed
 status: done
-selected_option: P6-07d
+selected_option: P6-10
 design_confirmed: true
 blocked_by: []
 open_questions: []
 implementation_steps:
   - id: S1
-    description: "更新 methodology/__init__.py 添加 WooYun 访问函数"
+    description: "创建 test_noise_layering.py 测试文件"
     status: completed
   - id: S2
-    description: "添加单元测试 test_methodology.py 扩展"
+    description: "实现 TestConditionalSubtype 测试类"
     status: completed
   - id: S3
-    description: "Git 提交 WooYun 目录和代码变更"
+    description: "实现 TestInformationalSubtype 测试类"
+    status: completed
+  - id: S4
+    description: "实现 TestFindingConditionalSubtype 测试类"
+    status: completed
+  - id: S5
+    description: "实现 TestFindingInformationalSubtype 测试类"
+    status: completed
+  - id: S6
+    description: "实现 TestTaintReportModels 测试类"
+    status: completed
+  - id: S7
+    description: "实现 TestNoiseLayeringIntegration 测试类"
+    status: completed
+  - id: S8
+    description: "运行测试验证"
     status: completed
 test_scope:
-  - "test_wooyun_directory_exists"
-  - "test_wooyun_directory_location"
-  - "test_wooyun_files_defined"
-  - "test_wooyun_index_exists"
-  - "test_sql_injection_file_exists"
-  - "test_xss_file_exists"
-  - "test_command_execution_file_exists"
-  - "test_logic_flaws_file_exists"
-  - "test_file_upload_file_exists"
-  - "test_unauthorized_access_file_exists"
-  - "test_info_disclosure_file_exists"
-  - "test_file_traversal_file_exists"
-  - "test_get_wooyun_index"
-  - "test_get_sql_injection_path"
-  - "test_get_xss_path"
-  - "test_get_invalid_type"
-  - "test_list_returns_list"
-  - "test_list_includes_index"
-  - "test_list_includes_vuln_types"
-  - "test_stats_is_dict"
-  - "test_stats_has_total"
-  - "test_stats_sql_injection_count"
-  - "test_stats_all_types_present"
-  - "test_index_has_statistics"
-  - "test_index_has_vuln_types"
-  - "test_sql_injection_has_methodology"
+  - "test_strong_exists"
+  - "test_weak_exists"
+  - "test_all_subtypes_count"
+  - "test_strong_serialization"
+  - "test_weak_serialization"
+  - "test_not_exploitable_exists"
+  - "test_speculative_signal_exists"
+  - "test_environmental_risk_exists"
+  - "test_finding_with_conditional_strong"
+  - "test_finding_with_conditional_weak"
+  - "test_finding_with_not_exploitable"
+  - "test_finding_with_speculative_signal"
+  - "test_finding_with_environmental_risk"
+  - "test_source_type_enum"
+  - "test_sink_type_enum"
+  - "test_sanitizer_type_enum"
+  - "test_controllability_enum"
+  - "test_taint_source_creation"
+  - "test_exploitable_finding_no_subtype"
+  - "test_conditional_finding_classification_chain"
+  - "test_informational_not_exploitable_chain"
+  - "test_environmental_risk_with_conditions"
+  - "test_confidence_score_integration"
 security_blockers: []
 dead_code_actions: []
 goal_candidates:
-  - id: P6-10
-    title: 噪声分层测试
-    priority: P3
-    status: candidate
   - id: P6-11
     title: 覆盖率表达测试
     priority: P3
