@@ -2,6 +2,22 @@
 
 ## 2026-03-21
 
+### P6-12: Directory Classification Tests Verified
+
+- **Goal ID**: P6-12
+- **Summary**: Verified existing tests for P6-07 directory classification
+- **Impact**:
+  - `tests/unit/test_core/test_file_filtering.py`: 41 tests (already existed)
+- **Test Coverage**:
+  - DirectoryClass enum (3 tests)
+  - classify_directory() function (23 tests)
+  - get_score_multiplier() function (10 tests)
+  - Score multipliers constants (2 tests)
+  - Classification rules (3 tests)
+- **Tests**: 41 passed
+- **Status**: Tests already existed and passed
+- **Commit**: N/A (no code changes needed)
+
 ### P6-11: Coverage Stats Tests Complete
 
 - **Goal ID**: P6-11

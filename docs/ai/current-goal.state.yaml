@@ -1,68 +1,38 @@
-goal_id: P6-11
-title: "覆盖率表达测试"
+goal_id: P6-12
+title: "目录分类测试"
 stage: completed
 status: done
-selected_option: P6-11
+selected_option: P6-12
 design_confirmed: true
 blocked_by: []
 open_questions: []
 implementation_steps:
   - id: S1
-    description: "创建 test_coverage_stats.py 测试文件"
+    description: "检查现有测试文件"
     status: completed
   - id: S2
-    description: "实现 TestCoverageStatsCreation 测试类"
-    status: completed
-  - id: S3
-    description: "实现 TestCoverageStatsFileCoverage 测试类"
-    status: completed
-  - id: S4
-    description: "实现 TestCoverageStatsTargetCoverage 测试类"
-    status: completed
-  - id: S5
-    description: "实现 TestCoverageStatsEntryPointCoverage 测试类"
-    status: completed
-  - id: S6
-    description: "实现 TestCoverageStatsDimensionMatrix 测试类"
-    status: completed
-  - id: S7
-    description: "实现 TestEngineStats 测试类"
-    status: completed
-  - id: S8
     description: "运行测试验证"
     status: completed
+  - id: S3
+    description: "更新 roadmap 状态"
+    status: completed
 test_scope:
-  - "test_create_with_defaults"
-  - "test_create_with_file_counts"
-  - "test_create_with_line_counts"
-  - "test_create_with_target_counts"
-  - "test_file_coverage_percent_zero_total"
-  - "test_file_coverage_percent_full"
-  - "test_file_coverage_percent_partial"
-  - "test_target_coverage_percent_zero_total"
-  - "test_target_coverage_percent_full"
-  - "test_target_coverage_percent_partial"
-  - "test_entry_points_scanned_default"
-  - "test_http_endpoints_scanned"
-  - "test_rpc_endpoints_scanned"
-  - "test_dimension_matrix_none_by_default"
-  - "test_dimension_coverage_rate_zero_when_none"
-  - "test_dimension_coverage_rate_with_matrix"
-  - "test_create_engine_stats_with_defaults"
-  - "test_create_engine_stats_with_counts"
-  - "test_add_error"
-  - "test_add_warning"
-  - "test_tokens_and_api_calls"
-  - "test_full_audit_coverage"
-  - "test_minimal_coverage_stats"
-  - "test_coverage_summary_with_mixed_status"
+  - "test_enum_values"
+  - "test_enum_count"
+  - "test_classify_test_directory"
+  - "test_classify_fixture_directory"
+  - "test_classify_sample_directory"
+  - "test_classify_challenge_directory"
+  - "test_classify_production_directory"
+  - "test_production_multiplier"
+  - "test_test_multiplier"
+  - "test_fixture_multiplier"
+  - "test_sample_multiplier"
+  - "test_challenge_multiplier"
+  - "test_custom_multipliers_override"
 security_blockers: []
 dead_code_actions: []
-goal_candidates:
-  - id: P6-12
-    title: 目录分类测试
-    priority: P3
-    status: candidate
+goal_candidates: []
 sync_status: synced
 last_check_at: null
 last_security_scan_at: null
