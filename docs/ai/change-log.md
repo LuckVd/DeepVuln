@@ -2,6 +2,25 @@
 
 ## 2026-03-21
 
+### P6-11: Coverage Stats Tests Complete
+
+- **Goal ID**: P6-11
+- **Summary**: Unit tests for P6-06 CoverageStats and EngineStats models
+- **Impact**:
+  - `tests/unit/test_l3/test_coverage_stats.py`: 30 new tests
+- **Test Coverage**:
+  - CoverageStats creation and defaults (4 tests)
+  - File coverage calculation (5 tests)
+  - Target coverage calculation (5 tests)
+  - Entry point coverage (4 tests)
+  - Dimension matrix integration (4 tests)
+  - EngineStats model (5 tests)
+  - Integration scenarios (3 tests)
+- **Tests**: 30 passed
+- **Dead Code**: not run
+- **Security**: not run
+- **Commit**: pending
+
 ### P6-10: Noise Layering Tests Complete
 
 - **Goal ID**: P6-10

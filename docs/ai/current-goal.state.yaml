@@ -1,67 +1,64 @@
-goal_id: P6-10
-title: "噪声分层测试"
+goal_id: P6-11
+title: "覆盖率表达测试"
 stage: completed
 status: done
-selected_option: P6-10
+selected_option: P6-11
 design_confirmed: true
 blocked_by: []
 open_questions: []
 implementation_steps:
   - id: S1
-    description: "创建 test_noise_layering.py 测试文件"
+    description: "创建 test_coverage_stats.py 测试文件"
     status: completed
   - id: S2
-    description: "实现 TestConditionalSubtype 测试类"
+    description: "实现 TestCoverageStatsCreation 测试类"
     status: completed
   - id: S3
-    description: "实现 TestInformationalSubtype 测试类"
+    description: "实现 TestCoverageStatsFileCoverage 测试类"
     status: completed
   - id: S4
-    description: "实现 TestFindingConditionalSubtype 测试类"
+    description: "实现 TestCoverageStatsTargetCoverage 测试类"
     status: completed
   - id: S5
-    description: "实现 TestFindingInformationalSubtype 测试类"
+    description: "实现 TestCoverageStatsEntryPointCoverage 测试类"
     status: completed
   - id: S6
-    description: "实现 TestTaintReportModels 测试类"
+    description: "实现 TestCoverageStatsDimensionMatrix 测试类"
     status: completed
   - id: S7
-    description: "实现 TestNoiseLayeringIntegration 测试类"
+    description: "实现 TestEngineStats 测试类"
     status: completed
   - id: S8
     description: "运行测试验证"
     status: completed
 test_scope:
-  - "test_strong_exists"
-  - "test_weak_exists"
-  - "test_all_subtypes_count"
-  - "test_strong_serialization"
-  - "test_weak_serialization"
-  - "test_not_exploitable_exists"
-  - "test_speculative_signal_exists"
-  - "test_environmental_risk_exists"
-  - "test_finding_with_conditional_strong"
-  - "test_finding_with_conditional_weak"
-  - "test_finding_with_not_exploitable"
-  - "test_finding_with_speculative_signal"
-  - "test_finding_with_environmental_risk"
-  - "test_source_type_enum"
-  - "test_sink_type_enum"
-  - "test_sanitizer_type_enum"
-  - "test_controllability_enum"
-  - "test_taint_source_creation"
-  - "test_exploitable_finding_no_subtype"
-  - "test_conditional_finding_classification_chain"
-  - "test_informational_not_exploitable_chain"
-  - "test_environmental_risk_with_conditions"
-  - "test_confidence_score_integration"
+  - "test_create_with_defaults"
+  - "test_create_with_file_counts"
+  - "test_create_with_line_counts"
+  - "test_create_with_target_counts"
+  - "test_file_coverage_percent_zero_total"
+  - "test_file_coverage_percent_full"
+  - "test_file_coverage_percent_partial"
+  - "test_target_coverage_percent_zero_total"
+  - "test_target_coverage_percent_full"
+  - "test_target_coverage_percent_partial"
+  - "test_entry_points_scanned_default"
+  - "test_http_endpoints_scanned"
+  - "test_rpc_endpoints_scanned"
+  - "test_dimension_matrix_none_by_default"
+  - "test_dimension_coverage_rate_zero_when_none"
+  - "test_dimension_coverage_rate_with_matrix"
+  - "test_create_engine_stats_with_defaults"
+  - "test_create_engine_stats_with_counts"
+  - "test_add_error"
+  - "test_add_warning"
+  - "test_tokens_and_api_calls"
+  - "test_full_audit_coverage"
+  - "test_minimal_coverage_stats"
+  - "test_coverage_summary_with_mixed_status"
 security_blockers: []
 dead_code_actions: []
 goal_candidates:
-  - id: P6-11
-    title: 覆盖率表达测试
-    priority: P3
-    status: candidate
   - id: P6-12
     title: 目录分类测试
     priority: P3

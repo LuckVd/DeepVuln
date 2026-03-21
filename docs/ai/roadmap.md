@@ -94,7 +94,7 @@
 |P6-08a|language x engine x dimension x status 矩阵数据结构|P6-08|done|
 |P6-09|结果状态模型测试|P6-01|done|
 |P6-10|噪声分层测试|P6-04|done|
-|P6-11|覆盖率表达测试|P6-06|todo|
+|P6-11|覆盖率表达测试|P6-06|done|
 |P6-12|目录分类测试|P6-07|todo|
 
 **实现文件**: `src/layers/l3_analysis/coverage/matrix.py`, `src/layers/l3_analysis/coverage/evaluator.py`

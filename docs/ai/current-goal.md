@@ -6,63 +6,67 @@
 
 ## Goal
 
-P6-10: 噪声分层测试
+P6-11: 覆盖率表达测试
 
 ## Summary
 
-为 P6-04 实现的 conditional/informational 细分模型编写单元测试，确保噪声分层功能正常工作。测试覆盖 ConditionalSubtype、InformationalSubtype 枚举以及 Finding 模型集成。
+为 P6-06 的 `CoverageStats` 和 `EngineStats` 模型编写单元测试，验证覆盖率统计功能正常工作。
 
 ## Scope
 
 | 项目 | 内容 |
 |------|------|
-| **依赖任务** | P6-04 (conditional/informational 细分) |
-| **测试目标** | ConditionalSubtype, InformationalSubtype, TaintReport 模型 |
-| **实现文件** | `src/layers/l3_analysis/models.py`, `src/layers/l3_analysis/taint_report.py` |
+| **依赖任务** | P6-06 (Agent 覆盖率统计) |
+| **测试目标** | CoverageStats, EngineStats |
+| **实现文件** | `src/layers/l3_analysis/rounds/models.py` |
 
 ## Deliverables
 
 | 文件 | 变更 |
 |------|------|
-| `tests/unit/test_l3/test_noise_layering.py` | 新增测试文件 (35 tests) |
+| `tests/unit/test_l3/test_coverage_stats.py` | 新增测试文件 (30 tests) |
 
 ## Acceptance Criteria
 
-1. ✅ `ConditionalSubtype` 枚举测试通过 (5 tests)
-2. ✅ `InformationalSubtype` 枚举测试通过 (5 tests)
-3. ✅ Finding 模型与 subtype 集成测试通过 (12 tests)
-4. ✅ 污点分析报告模型测试通过 (8 tests)
-5. ✅ 噪声分层集成场景测试通过 (5 tests)
+1. ✅ CoverageStats 创建和默认值测试通过 (4 tests)
+2. ✅ 文件覆盖率计算测试通过 (5 tests)
+3. ✅ 目标覆盖率计算测试通过 (5 tests)
+4. ✅ 入口点覆盖统计测试通过 (4 tests)
+5. ✅ 维度矩阵集成测试通过 (4 tests)
+6. ✅ EngineStats 模型测试通过 (5 tests)
+7. ✅ 集成场景测试通过 (3 tests)
 
 ## Implementation Steps
 
 | 步骤 | 任务 | 状态 |
 |------|------|------|
-| S1 | 创建 `test_noise_layering.py` 测试文件 | ✅ completed |
-| S2 | 实现 `TestConditionalSubtype` 测试类 | ✅ completed |
-| S3 | 实现 `TestInformationalSubtype` 测试类 | ✅ completed |
-| S4 | 实现 `TestFindingConditionalSubtype` 测试类 | ✅ completed |
-| S5 | 实现 `TestFindingInformationalSubtype` 测试类 | ✅ completed |
-| S6 | 实现 `TestTaintReportModels` 测试类 | ✅ completed |
-| S7 | 实现 `TestNoiseLayeringIntegration` 测试类 | ✅ completed |
+| S1 | 创建 `test_coverage_stats.py` 测试文件 | ✅ completed |
+| S2 | 实现 `TestCoverageStatsCreation` 测试类 | ✅ completed |
+| S3 | 实现 `TestCoverageStatsFileCoverage` 测试类 | ✅ completed |
+| S4 | 实现 `TestCoverageStatsTargetCoverage` 测试类 | ✅ completed |
+| S5 | 实现 `TestCoverageStatsEntryPointCoverage` 测试类 | ✅ completed |
+| S6 | 实现 `TestCoverageStatsDimensionMatrix` 测试类 | ✅ completed |
+| S7 | 实现 `TestEngineStats` 测试类 | ✅ completed |
 | S8 | 运行测试验证 | ✅ completed |
 
 ## Test Coverage
 
 | 测试类 | 用例数 | 说明 |
 |--------|--------|------|
-| `TestConditionalSubtype` | 5 | STRONG/WEAK 枚举验证 |
-| `TestInformationalSubtype` | 5 | NOT_EXPLOITABLE/SPECULATIVE_SIGNAL/ENVIRONMENTAL_RISK 枚举验证 |
-| `TestFindingConditionalSubtype` | 6 | Finding 与 conditional_subtype 集成 |
-| `TestFindingInformationalSubtype` | 6 | Finding 与 informational_subtype 集成 |
-| `TestTaintReportModels` | 8 | 污点分析模型 (SourceType, SinkType, SanitizerType, Controllability) |
-| `TestNoiseLayeringIntegration` | 5 | 噪声分层集成场景 |
+| `TestCoverageStatsCreation` | 4 | CoverageStats 创建和默认值 |
+| `TestCoverageStatsFileCoverage` | 5 | 文件覆盖率计算 |
+| `TestCoverageStatsTargetCoverage` | 5 | 目标覆盖率计算 |
+| `TestCoverageStatsEntryPointCoverage` | 4 | 入口点覆盖统计 |
+| `TestCoverageStatsDimensionMatrix` | 4 | 维度矩阵集成 |
+| `TestEngineStats` | 5 | EngineStats 模型 |
+| `TestCoverageStatsIntegration` | 3 | 集成场景测试 |
 
 ## References
 
-- `src/layers/l3_analysis/models.py:ConditionalSubtype, InformationalSubtype`
-- `src/layers/l3_analysis/taint_report.py`
+- `src/layers/l3_analysis/rounds/models.py:CoverageStats, EngineStats`
+- `src/layers/l3_analysis/coverage/matrix.py:CoverageMatrix`
 
 ## Dependencies
 
-- P6-04 (conditional/informational 细分) - 已完成
+- P6-06 (Agent 覆盖率统计) - 已完成
+- P6-08 (多语言覆盖矩阵) - 已完成
