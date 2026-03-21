@@ -1,5 +1,21 @@
 # Change Log
 
+## 2026-03-21
+
+### P6-07d: WooYun Vulnerability Case Library Import Complete
+
+- **Goal ID**: P6-07d
+- **Summary**: Imported WooYun vulnerability case library with 88,636 real cases as Agent audit reference
+- **Impact**:
+  - `src/layers/l3_analysis/methodology/wooyun/`: 9 case files (INDEX.md + 8 vuln types)
+  - `src/layers/l3_analysis/methodology/__init__.py`: Added get_wooyun_path(), list_available_wooyun_types(), get_wooyun_stats()
+  - `tests/unit/test_l3/test_methodology.py`: 26 new WooYun tests (52 total)
+- **Case Distribution**: SQL injection (27,732), Unauthorized access (14,377), Logic flaws (8,292), XSS (7,532), Info disclosure (7,337), Command execution (6,826), File traversal (2,854), File upload (2,711)
+- **Tests**: 52 passed
+- **Dead Code**: not run
+- **Security**: not run
+- **Commit**: pending
+
 ## 2026-03-20
 
 ### P6-08: Multi-Language Coverage Matrix Complete

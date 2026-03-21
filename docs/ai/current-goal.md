@@ -2,70 +2,66 @@
 
 ## Status
 
-✅ Completed - 2026-03-20
+✅ Completed - 2026-03-21
 
 ## Goal
 
-P6-08: 多语言覆盖矩阵
+P6-07d: 导入 WooYun 案例库
 
 ## Summary
 
-实现 `language x engine x dimension x status` 四维矩阵数据结构，用于追踪和展示审计覆盖情况。支持三种覆盖判定轨道：Sink-driven、Control-driven、Config-driven。
+将 WooYun 漏洞案例库集成到 DeepVuln 项目中，作为 Agent 审计的漏洞模式参考。包含 88,636 个真实漏洞案例，覆盖 8 种漏洞类型。
 
 ## Scope
 
 | 项目 | 内容 |
 |------|------|
-| **语言范围** | Python, JavaScript, TypeScript, Java, Go, PHP, Ruby, C#, C++, Rust (10 种) |
-| **引擎范围** | Semgrep, CodeQL, Agent (3 种) |
-| **维度范围** | D1-D10 (10 种) |
-| **状态类型** | 未覆盖/浅覆盖/已覆盖/不适用 |
+| **案例来源** | WooYun 平台 2010-2016 年真实漏洞报告 |
+| **总案例数** | 88,636 个 |
+| **漏洞类型** | SQL注入(27,732)、XSS(7,532)、命令执行(6,826)、逻辑漏洞(8,292)、文件上传(2,711)、未授权访问(14,377)、信息泄露(7,337)、文件遍历(2,854) |
+| **目标目录** | `src/layers/l3_analysis/methodology/wooyun/` |
 
 ## Deliverables
 
 | 文件 | 变更 |
 |------|------|
-| `src/layers/l3_analysis/coverage/__init__.py` | 新增模块入口 |
-| `src/layers/l3_analysis/coverage/matrix.py` | 覆盖矩阵数据模型 |
-| `src/layers/l3_analysis/coverage/evaluator.py` | 覆盖标准判定器 |
-| `src/layers/l3_analysis/rounds/models.py` | 集成 CoverageMatrix |
-| `tests/unit/test_l3/test_coverage_matrix.py` | 单元测试 |
+| `src/layers/l3_analysis/methodology/wooyun/*.md` | 9 个案例文件 (已存在) |
+| `src/layers/l3_analysis/methodology/__init__.py` | 添加 WooYun 访问函数 |
+| `tests/unit/test_l3/test_methodology.py` | 扩展 WooYun 测试 (52 tests) |
 
 ## Acceptance Criteria
 
-1. ✅ 创建 `CoverageMatrix` 数据模型
-2. ✅ 创建 `DimensionCoverage` 子模型
-3. ✅ 实现 `CoverageEvaluator` 覆盖标准判断
-4. ✅ 实现矩阵构建器
-5. ✅ 集成到 `CoverageStats`
-6. ✅ 单元测试通过
+1. ✅ 所有案例文件已创建
+2. ✅ `methodology/__init__.py` 添加 `get_wooyun_path()` 函数
+3. ✅ 添加单元测试验证文件可访问
+4. ✅ Git 提交并推送到远程
 
 ## Implementation Steps
 
 | 步骤 | 任务 | 状态 |
 |------|------|------|
-| S1 | 创建 coverage 目录结构 | ✅ completed |
-| S2 | 定义数据模型 (CoverageStatus, DimensionType, DimensionCoverage) | ✅ completed |
-| S3 | 实现 CoverageMatrix 主模型 | ✅ completed |
-| S4 | 实现 CoverageEvaluator 覆盖判定器 | ✅ completed |
-| S5 | 集成到 CoverageStats | ✅ completed |
-| S6 | 编写单元测试 | ✅ completed |
+| S1 | 更新 `methodology/__init__.py` 添加 WooYun 访问函数 | ✅ completed |
+| S2 | 添加单元测试 `test_methodology.py` 扩展 | ✅ completed |
+| S3 | Git 提交 WooYun 目录和代码变更 | ✅ completed |
 
-## Coverage Criteria
+## WooYun Statistics
 
-| 维度类型 | 已覆盖 | 浅覆盖 | 未覆盖 |
-|---------|--------|--------|--------|
-| **Sink-driven** (D1,D4,D5,D6) | Sink 全覆盖 + 数据流 + 扇出率≥30% | 有遗漏/无追踪/扇出率<30% | 未搜索 |
-| **Control-driven** (D3,D9) | 端点审计率≥50%(deep)/≥30%(standard) | 仅 Grep 无端点验证 | 未审计 |
-| **Config-driven** (D2,D7,D8,D10) | 核心配置已检查 + 基线对比 | 部分检查 | 未检查 |
+| 漏洞类型 | 案例数 | 文件 |
+|---------|--------|------|
+| SQL注入 | 27,732 | `sql-injection.md` |
+| 未授权访问 | 14,377 | `unauthorized-access.md` |
+| 逻辑漏洞 | 8,292 | `logic-flaws.md` |
+| XSS跨站 | 7,532 | `xss.md` |
+| 信息泄露 | 7,337 | `info-disclosure.md` |
+| 命令执行 | 6,826 | `command-execution.md` |
+| 文件遍历 | 2,854 | `file-traversal.md` |
+| 文件上传 | 2,711 | `file-upload.md` |
 
 ## References
 
-- `/opt/AI/code-audit/references/checklists/coverage_matrix.md`
-- `src/layers/l1_intelligence/tech_stack_detector/models.py:Language`
-- `src/layers/l3_analysis/rounds/models.py:CoverageStats`
+- `/opt/AI/code-audit/references/wooyun/` - 原始 WooYun 数据源
+- `src/layers/l3_analysis/methodology/__init__.py` - 模块接口
 
 ## Dependencies
 
 - P6-07 (目录分类) - 已完成
-- P6-06b (D9 方法论) - 已完成

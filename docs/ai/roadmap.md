@@ -82,7 +82,7 @@
 |P6-07a|新增目录分类：production_code/test_code/sample_code/fixture_code/challenge_code|P6-07|done|
 |P6-07b|非生产代码降权处理（score_multiplier）|P6-07a|done|
 |P6-07c|配置项支持自定义目录分类和降权因子|P6-07b|done|
-|P6-07d|导入 WooYun 案例库作为漏洞模式参考|P6-07|todo|
+|P6-07d|导入 WooYun 案例库作为漏洞模式参考|P6-07|done|
 
 **实现文件**: `src/core/file_filtering.py:DirectoryClass, classify_directory, get_score_multiplier`, `src/layers/l3_analysis/models.py:Finding.directory_class`, `src/core/final_score.py:directory_multiplier`, `src/core/config/__init__.py:get_directory_classification_config`
 
