@@ -86,6 +86,43 @@
 
 **实现文件**: `src/core/file_filtering.py:DirectoryClass, classify_directory, get_score_multiplier`, `src/layers/l3_analysis/models.py:Finding.directory_class`, `src/core/final_score.py:directory_multiplier`, `src/core/config/__init__.py:get_directory_classification_config`
 
+### P6-13: CodeQL 稳定性加固（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-13|CodeQL 稳定性加固（构建超时、pack 预检、suite 解析、多语言构建上下文）|-|done|
+|P6-13a|修复 BuildExecutor 误用通用 timeout 导致的大项目提前超时|P6-13|done|
+|P6-13b|query pack 不可用时提前失败，避免落入模糊的 analyze 失败|P6-13|done|
+|P6-13c|query suite 解析优先选择最新已安装 pack 版本|P6-13|done|
+|P6-13d|多语言扫描优先保留仓库根构建上下文，降低 monorepo 子目录建库失败率|P6-13|done|
+
+**实现文件**: src/layers/l3_analysis/engines/codeql.py, tests/unit/test_l3/test_codeql_engine.py
+
+### P6-14: CodeQL 条件启用 / Readiness Gating（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-14|默认扫描下的 CodeQL readiness gating|-|done|
+|P6-14a|设计快速 readiness probe，优先判断 CodeQL 能否短时间启动并进入扫描前期|P6-14|done|
+|P6-14b|默认 full/base 扫描按 readiness 结果决定是否启用 CodeQL|P6-14a|done|
+|P6-14c|显式强制请求 CodeQL 时绕过 gating|P6-14b|done|
+|P6-14d|在结果中显式报告 gated/skipped/forced/executed 状态|P6-14c|done|
+
+**实现文件**: src/layers/l3_analysis/engines/codeql.py, src/cli/main.py, tests/unit/test_l3/test_codeql_engine.py
+
+
+### P6-15: 稳定性与打包缺陷修复（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-15|修复仓库审查发现的稳定性与打包缺陷|-|done|
+|P6-15a|修复 agent 在多语言项目中的文件扩展名提取错误|P6-15|done|
+|P6-15b|修复 threat-intel CLI 同步包装器污染全局 event loop 状态|P6-15|done|
+|P6-15c|修复 Python 3.12 下增量分析测试夹具的 event loop 脆弱性|P6-15b|done|
+|P6-15d|补齐缺失的 README 以满足 pyproject 打包元数据|P6-15|done|
+
+**实现文件**: src/cli/main.py, src/cli/intel.py, tests/unit/test_l3/test_incremental.py, README.md
+
 ### P6-08~P6-12: 覆盖率矩阵与测试
 
 |任务|描述|依赖|状态|
@@ -123,10 +160,10 @@
 |字段|值|
 |---|---|
 |**阶段**|Phase 6.5 - code-audit 项目优秀实践集成|
-|**当前进度**|P6-03~P6-07 已完成，P6-06b 和 P6-08 待开始|
-|**下一步**|P6-06b 业务逻辑检测方法论 或 P6-08 多语言覆盖矩阵|
-|**重点模块**|`src/layers/l3_analysis/`, `src/core/file_filtering.py`|
-|**目标**|完成覆盖率透明化，达到 v0.7 里程碑|
+|**当前进度**|P6-03 through P6-15 completed; full regression is green again|
+|**下一步**|Pick the next Phase 6.5 reliability or reporting improvement from the backlog|
+|**重点模块**|src/cli/main.py, src/cli/intel.py, tests/unit/test_l3/test_incremental.py, tests/unit/test_cli/test_main.py, README.md|
+|**目标**|在保持扫描透明度的前提下继续推进稳定性与报告可信度提升|
 
 ---
 

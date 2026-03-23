@@ -1,7 +1,8 @@
 """Tests for CLI main module."""
 
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from click.testing import CliRunner
 
@@ -560,3 +561,146 @@ class TestExportFullScanResult:
         assert "Failed Engines" in content
         assert "codeql [CORE]" in content
         assert "Languages: typescript, javascript" in content
+
+
+    def test_export_includes_codeql_gate_details(self, tmp_path: Path) -> None:
+        """Test export includes CodeQL gate reason and message."""
+        from src.cli.main import _export_full_scan_result
+
+        result = {
+            "status": "partial_success",
+            "source_path": "/test/path",
+            "start_time": "2026-03-23T00:00:00",
+            "end_time": "2026-03-23T00:01:00",
+            "primary_language": "java",
+            "phases": {"semgrep": {"success": True, "findings_count": 1}},
+            "statistics": {"total_findings": 1, "verified_count": 1},
+            "failed_engines": [],
+            "all_findings": [],
+            "errors": [],
+            "codeql_gate": {
+                "status": "gated",
+                "reason": "build_tool_missing",
+                "message": "Required build tool is not available: mvn",
+            },
+        }
+
+        export_file = tmp_path / "report.txt"
+        _export_full_scan_result(result, str(export_file), {})
+
+        content = export_file.read_text()
+        assert "CodeQL Readiness Gate" in content
+        assert "Status: gated" in content
+        assert "Reason: build_tool_missing" in content
+        assert "Message: Required build tool is not available: mvn" in content
+
+    def test_export_includes_forced_codeql_gate_status(self, tmp_path: Path) -> None:
+        """Test export includes forced CodeQL gate status."""
+        from src.cli.main import _export_full_scan_result
+
+        result = {
+            "status": "complete_success",
+            "source_path": "/test/path",
+            "start_time": "2026-03-23T00:00:00",
+            "end_time": "2026-03-23T00:01:00",
+            "primary_language": "python",
+            "phases": {"codeql": {"success": True, "findings_count": 0}},
+            "statistics": {"total_findings": 0, "verified_count": 0},
+            "failed_engines": [],
+            "all_findings": [],
+            "errors": [],
+            "codeql_gate": {
+                "status": "forced",
+                "reason": "forced",
+                "message": "CodeQL was explicitly requested and bypassed readiness gating",
+            },
+        }
+
+        export_file = tmp_path / "report.txt"
+        _export_full_scan_result(result, str(export_file), {})
+
+        content = export_file.read_text()
+        assert "CodeQL Readiness Gate" in content
+        assert "Status: forced" in content
+        assert "Reason: forced" in content
+
+class TestCodeQLGateSummary:
+    """Tests for CodeQL gate summary formatting."""
+
+    def test_format_codeql_gate_summary_for_gated_status(self) -> None:
+        from src.cli.main import _format_codeql_gate_summary
+
+        lines = _format_codeql_gate_summary({
+            "status": "gated",
+            "reason": "build_tool_missing",
+            "message": "Required build tool is not available: mvn",
+        })
+
+        assert lines == [
+            "CodeQL Gate: gated",
+            "Reason: build_tool_missing",
+            "Message: Required build tool is not available: mvn",
+        ]
+
+    def test_format_codeql_gate_summary_omits_non_summary_status(self) -> None:
+        from src.cli.main import _format_codeql_gate_summary
+
+        assert _format_codeql_gate_summary({"status": "not_requested"}) == []
+
+
+class TestDetectedLanguageNormalization:
+    """Tests for detected language normalization helpers."""
+
+    def test_normalize_detected_language_name_from_language_info(self) -> None:
+        from src.cli.main import _normalize_detected_language_name
+        from src.layers.l1_intelligence.tech_stack_detector.models import Language, LanguageInfo
+
+        info = LanguageInfo(language=Language.TYPESCRIPT, file_count=1, line_count=10)
+
+        assert _normalize_detected_language_name(info) == "typescript"
+
+    def test_normalize_detected_language_name_from_raw_string(self) -> None:
+        from src.cli.main import _normalize_detected_language_name
+
+        assert _normalize_detected_language_name("python") == "python"
+
+
+class TestCodeQLReadinessGate:
+    """Tests for CLI-level CodeQL gating decisions."""
+
+    @patch("src.layers.l3_analysis.engines.codeql.CodeQLEngine")
+    def test_default_gate_removes_codeql_when_not_ready(self, mock_engine_class: MagicMock) -> None:
+        from src.cli.main import _apply_codeql_readiness_gate
+
+        mock_engine = MagicMock()
+        mock_engine.check_readiness = AsyncMock(return_value={
+            "ready": False,
+            "reason": "query_pack_missing",
+            "message": "Required query pack is not installed: codeql/java-queries",
+        })
+        mock_engine_class.return_value = mock_engine
+
+        engines, gate = asyncio.run(_apply_codeql_readiness_gate(
+            source_path=Path("/tmp"),
+            engines=["semgrep", "codeql", "agent"],
+            options={},
+            primary_language="java",
+        ))
+
+        assert engines == ["semgrep", "agent"]
+        assert gate["status"] == "gated"
+        assert gate["reason"] == "query_pack_missing"
+
+    def test_force_codeql_bypasses_gate(self) -> None:
+        from src.cli.main import _apply_codeql_readiness_gate
+
+        engines, gate = asyncio.run(_apply_codeql_readiness_gate(
+            source_path=Path("/tmp"),
+            engines=["semgrep", "codeql"],
+            options={"force_codeql": True},
+            primary_language="java",
+        ))
+
+        assert engines == ["semgrep", "codeql"]
+        assert gate["status"] == "forced"
+        assert gate["forced"] is True

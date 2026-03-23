@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import tempfile
 import time
@@ -235,6 +236,110 @@ class CodeQLEngine(BaseEngine):
         """
         lang_lower = language.lower()
         return CODEQL_LANGUAGE_MAP.get(lang_lower)
+
+    async def check_readiness(
+        self,
+        source_path: Path,
+        language: str | None = None,
+        startup_timeout: int = 15,
+    ) -> dict[str, Any]:
+        """Check whether CodeQL can start quickly enough for default scans."""
+        readiness: dict[str, Any] = {
+            "ready": False,
+            "reason": None,
+            "message": None,
+            "language": language,
+            "codeql_language": None,
+            "query_pack": None,
+            "pack_installed": None,
+            "requires_build": None,
+            "build_command": None,
+        }
+
+        try:
+            self.validate_source_path(source_path)
+        except Exception as e:
+            readiness["reason"] = "invalid_source_path"
+            readiness["message"] = str(e)
+            return readiness
+
+        if not self.is_available():
+            readiness["reason"] = "codeql_unavailable"
+            readiness["message"] = "CodeQL CLI is not installed or not in PATH"
+            return readiness
+
+        try:
+            version = await asyncio.wait_for(self.get_version(), timeout=startup_timeout)
+        except Exception:
+            readiness["reason"] = "startup_timeout"
+            readiness["message"] = f"CodeQL did not respond within {startup_timeout}s"
+            return readiness
+
+        if not version:
+            readiness["reason"] = "version_unknown"
+            readiness["message"] = "CodeQL version could not be determined quickly"
+            return readiness
+
+        if not language:
+            language = await self._detect_language(source_path)
+        readiness["language"] = language
+
+        if not language:
+            readiness["reason"] = "language_undetected"
+            readiness["message"] = "Could not detect a supported language for CodeQL"
+            return readiness
+
+        codeql_lang = self.normalize_language(language)
+        readiness["codeql_language"] = codeql_lang
+        if not codeql_lang:
+            readiness["reason"] = "unsupported_language"
+            readiness["message"] = f"Language {language} is not supported by CodeQL"
+            return readiness
+
+        query_pack = DEFAULT_QUERY_PACKS.get(codeql_lang)
+        readiness["query_pack"] = query_pack
+        if query_pack:
+            try:
+                pack_installed = await asyncio.wait_for(
+                    self._is_pack_installed(query_pack),
+                    timeout=min(startup_timeout, 5),
+                )
+            except Exception:
+                pack_installed = False
+            readiness["pack_installed"] = pack_installed
+            if not pack_installed:
+                readiness["reason"] = "query_pack_missing"
+                readiness["message"] = f"Required query pack is not installed: {query_pack}"
+                return readiness
+
+        from src.layers.l3_analysis.build import BuildSystemDetector
+
+        config = BuildSystemDetector().detect(source_path, codeql_lang)
+        readiness["requires_build"] = config.requires_build
+        readiness["build_command"] = config.build_command
+
+        if config.requires_build:
+            if not config.build_command:
+                readiness["reason"] = "build_command_missing"
+                readiness["message"] = "No build command detected for this project"
+                return readiness
+
+            build_tool = shlex.split(config.build_command)[0]
+            tool_available = False
+            if build_tool.startswith("./"):
+                tool_available = (source_path / build_tool[2:]).exists()
+            else:
+                tool_available = self.check_binary_available(build_tool)
+
+            if not tool_available:
+                readiness["reason"] = "build_tool_missing"
+                readiness["message"] = f"Required build tool is not available: {build_tool}"
+                return readiness
+
+        readiness["ready"] = True
+        readiness["reason"] = "ready"
+        readiness["message"] = "CodeQL passed the fast readiness check"
+        return readiness
 
     # =========================================================================
     # P6-02: Structured Error Diagnostics
@@ -1373,6 +1478,26 @@ class CodeQLEngine(BaseEngine):
         if not extensions:
             return [source_path]
 
+        # Compiled and package-managed projects often require the repository
+        # root build context to create a valid CodeQL database.
+        root_build_markers = {
+            "java": ["pom.xml", "build.gradle", "build.gradle.kts", "gradlew", "settings.gradle", "settings.gradle.kts"],
+            "go": ["go.mod", "go.work", "Makefile"],
+            "javascript": ["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"],
+            "typescript": ["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"],
+            "cpp": ["CMakeLists.txt", "Makefile"],
+            "csharp": [".sln", ".csproj"],
+            "swift": ["Package.swift", ".xcodeproj", ".xcworkspace"],
+        }
+
+        markers = root_build_markers.get(language, [])
+        for marker in markers:
+            if marker.startswith("."):
+                if any(source_path.glob(f"*{marker}")):
+                    return [source_path]
+            elif (source_path / marker).exists():
+                return [source_path]
+
         # Common directory patterns for different project types
         subdir_patterns = [
             "src", "lib", "app", "backend", "frontend", "server", "client",
@@ -1446,7 +1571,7 @@ class CodeQLEngine(BaseEngine):
             f"Command: {config.build_command}"
         )
 
-        executor = BuildExecutor(timeout=self.timeout)
+        executor = BuildExecutor(timeout=self.build_timeout)
         result = await executor.execute(config, source_path)
 
         # If build failed, try to diagnose
@@ -1600,7 +1725,11 @@ class CodeQLEngine(BaseEngine):
             # Ensure query pack is downloaded
             query_pack = DEFAULT_QUERY_PACKS.get(language)
             if query_pack and not queries:
-                await self._ensure_query_pack(query_pack)
+                if not await self._ensure_query_pack(query_pack):
+                    logger.warning(
+                        f"Required CodeQL query pack is unavailable: {query_pack}"
+                    )
+                    return None
 
             cmd = [
                 self.codeql_path,
@@ -1853,8 +1982,8 @@ class CodeQLEngine(BaseEngine):
         # Find the pack directory (may have version subdirectory)
         pack_dir = pack_base / pack_name.replace("/", "/")
         if pack_dir.exists():
-            # Look for versioned directory - prefer older compatible versions
-            versions = sorted(pack_dir.glob("*/"), reverse=False)
+            # Look for versioned directory - prefer the newest installed version
+            versions = sorted(pack_dir.glob("*/"), reverse=True)
             if versions:
                 pack_version_dir = versions[0]
                 # First, try to find the query suite file in codeql-suites directory

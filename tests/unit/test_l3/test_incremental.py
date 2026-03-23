@@ -436,7 +436,7 @@ class TestImpactAnalyzer:
         """Build dependency graph for testing (sync wrapper)."""
         graph = DependencyGraph(temp_project)
         # Build synchronously for fixture
-        asyncio.get_event_loop().run_until_complete(graph.build())
+        asyncio.run(graph.build())
         return graph
 
     @pytest.mark.asyncio

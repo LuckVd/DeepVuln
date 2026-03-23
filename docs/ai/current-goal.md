@@ -2,60 +2,74 @@
 
 ## Status
 
-✅ Completed - 2026-03-21
+Completed - 2026-03-23
 
 ## Goal
 
-P6-12: 目录分类测试
+P6-15: Stability and Packaging Bug Fixes
 
 ## Summary
 
-验证 P6-07 目录分类功能的测试已存在并通过。测试覆盖 DirectoryClass 枚举、classify_directory() 函数和 get_score_multiplier() 函数。
+Completed the repository bugfix pass identified during full review. The repair set fixed agent multi-language file targeting, eliminated threat-intel CLI event-loop leakage, stabilized incremental tests under Python 3.12 full-suite execution, and restored packaging metadata by adding the missing README target.
 
 ## Scope
 
-| 项目 | 内容 |
+| Item | Content |
 |------|------|
-| **依赖任务** | P6-07 (目录分类与降权策略) |
-| **测试目标** | DirectoryClass, classify_directory, get_score_multiplier |
-| **实现文件** | `src/core/file_filtering.py` |
+| **Problem** | The repo had correctness and stability defects after P6-14, including scan coverage loss, event-loop contamination, brittle tests, and broken packaging metadata |
+| **Focus Areas** | agent file targeting, CLI asyncio lifecycle hygiene, incremental test reliability, packaging metadata consistency |
+| **Implementation Files** | src/cli/main.py, src/cli/intel.py, tests/unit/test_l3/test_incremental.py, tests/unit/test_cli/test_main.py, tests/unit/test_cli/test_intel.py, README.md |
 
 ## Deliverables
 
-| 文件 | 状态 |
+| File | Status |
 |------|------|
-| `tests/unit/test_core/test_file_filtering.py` | ✅ 已存在 (41 tests) |
+| src/cli/main.py | updated |
+| src/cli/intel.py | updated |
+| tests/unit/test_l3/test_incremental.py | updated |
+| tests/unit/test_cli/test_main.py | updated |
+| tests/unit/test_cli/test_intel.py | added |
+| README.md | added |
+| docs/ai/roadmap.md | updated |
 
 ## Acceptance Criteria
 
-1. ✅ DirectoryClass 枚举测试通过 (3 tests)
-2. ✅ classify_directory() 测试通过 (23 tests)
-3. ✅ get_score_multiplier() 测试通过 (10 tests)
-4. ✅ 分类规则测试通过 (5 tests)
+1. Agent file selection includes all detected languages instead of silently degrading on `LanguageInfo` objects.
+2. Threat-intel CLI async helpers do not leave the process with a closed current event loop.
+3. Incremental test fixtures are stable under Python 3.12 and full-suite execution.
+4. Packaging metadata points to a real README file.
+5. Relevant targeted tests and a full regression run pass.
 
 ## Implementation Steps
 
-| 步骤 | 任务 | 状态 |
+| Step | Task | Status |
 |------|------|------|
-| S1 | 检查现有测试文件 | ✅ completed |
-| S2 | 运行测试验证 | ✅ completed |
-| S3 | 更新 roadmap 状态 | ✅ completed |
+| S1 | Confirm the previous goal is complete and update roadmap/current-goal docs for the bugfix pass | completed |
+| S2 | Fix agent multi-language file targeting in full scans | completed |
+| S3 | Fix CLI event-loop lifecycle handling and incremental-test loop setup | completed |
+| S4 | Restore packaging metadata consistency by adding the missing README target | completed |
+| S5 | Run targeted and full regression tests, then sync docs with final results | completed |
 
-## Test Coverage
+## Validation
 
-| 测试类 | 用例数 | 说明 |
-|--------|--------|------|
-| `TestDirectoryClass` | 3 | DirectoryClass 枚举验证 |
-| `TestClassifyDirectory` | 23 | 目录分类函数测试 |
-| `TestGetScoreMultiplier` | 10 | 分数乘数函数测试 |
-| `TestScoreMultipliersConstant` | 2 | 常量验证 |
-| `TestClassificationRules` | 3 | 规则验证 |
+| Command | Result |
+|--------|--------|
+| pytest -q tests/unit/test_cli/test_main.py tests/unit/test_cli/test_intel.py tests/unit/test_l3/test_incremental.py | 93 passed |
+| pytest -q | 2165 passed, 7 skipped |
+
+## Key Changes
+
+1. Added `_normalize_detected_language_name()` so full-scan agent file selection correctly handles `LanguageInfo` objects from the tech-stack detector.
+2. Updated `src/cli/intel.py::run_async()` to restore the previous event loop instead of leaving a closed loop registered globally.
+3. Replaced the incremental test fixture's implicit `get_event_loop()` usage with `asyncio.run()` and added CLI loop-management regression tests.
+4. Added a root `README.md` so `pyproject.toml` points at a real file during packaging.
 
 ## References
 
-- `src/core/file_filtering.py:DirectoryClass, classify_directory, get_score_multiplier`
-- `tests/unit/test_core/test_file_filtering.py`
-
-## Dependencies
-
-- P6-07 (目录分类与降权策略) - 已完成
+- src/cli/main.py
+- src/cli/intel.py
+- tests/unit/test_l3/test_incremental.py
+- tests/unit/test_cli/test_main.py
+- tests/unit/test_cli/test_intel.py
+- README.md
+- docs/ai/roadmap.md

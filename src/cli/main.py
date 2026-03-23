@@ -41,6 +41,19 @@ from src.layers.l1_intelligence import AssetFetcher
 from src.layers.l3_analysis.models import SeverityLevel
 from src.models.fetcher import FetchResult
 
+def _normalize_detected_language_name(language_info: Any) -> str:
+    """Normalize detected language entries from TechStackDetector."""
+    language_obj = getattr(language_info, "language", language_info)
+    language_value = getattr(language_obj, "value", None)
+    if isinstance(language_value, str):
+        return language_value.lower()
+
+    language_name = getattr(language_obj, "name", None)
+    if isinstance(language_name, str):
+        return language_name.lower()
+
+    return str(language_obj).lower().replace("language.", "")
+
 
 def _check_and_prompt_sync() -> None:
     """Check database status and prompt user to sync if needed."""
@@ -621,6 +634,55 @@ def _determine_scan_status(
     return ScanStatus.PARTIAL_SUCCESS.value
 
 
+async def _apply_codeql_readiness_gate(
+    source_path: Path,
+    engines: list[str],
+    options: dict[str, Any],
+    primary_language: str,
+) -> tuple[list[str], dict[str, Any]]:
+    """Gate CodeQL behind a fast readiness probe for default scans."""
+    gate_state: dict[str, Any] = {
+        "checked": False,
+        "requested": "codeql" in engines,
+        "enabled": "codeql" in engines,
+        "forced": bool(options.get("force_codeql", False)),
+        "status": "not_requested",
+        "ready": None,
+        "reason": None,
+        "message": None,
+    }
+
+    if "codeql" not in engines:
+        return engines, gate_state
+
+    if gate_state["forced"]:
+        gate_state["status"] = "forced"
+        gate_state["ready"] = True
+        gate_state["reason"] = "forced"
+        gate_state["message"] = "CodeQL was explicitly requested and bypassed readiness gating"
+        return engines, gate_state
+
+    gate_state["checked"] = True
+
+    from src.layers.l3_analysis.engines.codeql import CodeQLEngine
+
+    readiness_engine = CodeQLEngine(auto_download_packs=False)
+    readiness = await readiness_engine.check_readiness(
+        source_path=source_path,
+        language=primary_language.lower() if primary_language else None,
+        startup_timeout=int(options.get("codeql_readiness_timeout", 15)),
+    )
+    gate_state.update(readiness)
+
+    if readiness.get("ready"):
+        gate_state["status"] = "enabled"
+        return engines, gate_state
+
+    gate_state["status"] = "gated"
+    gate_state["enabled"] = False
+    return [engine for engine in engines if engine != "codeql"], gate_state
+
+
 async def run_full_security_scan(
     source_path: Path,
     options: dict[str, Any],
@@ -943,6 +1005,17 @@ async def run_full_security_scan(
     console.print(f"  Detected Languages: {', '.join(all_languages) if all_languages else primary_lang}")
     result["detected_languages"] = all_languages
 
+    original_requested_engines = list(engines)
+    engines, codeql_gate = await _apply_codeql_readiness_gate(
+        source_path=source_path,
+        engines=list(engines),
+        options=options,
+        primary_language=primary_lang,
+    )
+    result["engines_requested"] = original_requested_engines
+    result["engines_effective"] = list(engines)
+    result["codeql_gate"] = codeql_gate
+
     # Attack Surface Detection
     # P5-04: New detection mode logic
     # - static_only: Static detection only
@@ -1126,7 +1199,7 @@ async def run_full_security_scan(
         # Get file extensions for ALL detected languages
         all_exts = set()
         for lang in tech_result.languages:
-            lang_name = lang.name.lower() if hasattr(lang, 'name') else str(lang).lower().replace("language.", "")
+            lang_name = _normalize_detected_language_name(lang)
             exts = lang_to_exts.get(lang_name, [lang_name])
             all_exts.update(exts)
 
@@ -1168,9 +1241,12 @@ async def run_full_security_scan(
     scan_tasks = []
 
     # P5-03a Fix 3: Track requested vs executed engines for degradation reporting
-    requested_engines = set(engines) if engines else set()
+    requested_engines = set(original_requested_engines) if original_requested_engines else set()
+    enabled_engines = set(engines) if engines else set()
     executed_engines = set()
     unavailable_engines = set()
+    gated_engines = {"codeql"} if codeql_gate.get("status") == "gated" else set()
+    forced_engines = {"codeql"} if codeql_gate.get("status") == "forced" else set()
 
     if semgrep_engine and semgrep_engine.is_available():
         # P5-01e A8: pass tech_stack and attack_surface for rule gating and file filtering
@@ -1191,7 +1267,7 @@ async def run_full_security_scan(
             attack_surface=surface_report,
         )))
         executed_engines.add("semgrep")
-    elif "semgrep" in requested_engines:
+    elif "semgrep" in enabled_engines:
         unavailable_engines.add("semgrep")
 
     if codeql_engine and codeql_engine.is_available():
@@ -1222,7 +1298,7 @@ async def run_full_security_scan(
                 severity_filter=None,
             )))
         executed_engines.add("codeql")
-    elif "codeql" in requested_engines:
+    elif "codeql" in enabled_engines:
         unavailable_engines.add("codeql")
 
     if agent_engine and agent_target_files:
@@ -1241,15 +1317,30 @@ async def run_full_security_scan(
             ],
         )))
         executed_engines.add("agent")
-    elif "agent" in requested_engines:
+    elif "agent" in enabled_engines:
         unavailable_engines.add("agent")
 
     # P5-03a Fix 3: Report engine degradation status
     result["engine_status"] = {
         "requested": list(requested_engines),
+        "enabled": list(enabled_engines),
         "executed": list(executed_engines),
         "unavailable": list(unavailable_engines),
+        "gated": list(gated_engines),
+        "forced": list(forced_engines),
+        "codeql_gate": codeql_gate,
     }
+
+    if codeql_gate.get("status") == "gated":
+        console.print("\n[yellow]CodeQL readiness gate:[/]")
+        gate_reason = codeql_gate.get("reason", "unknown_reason")
+        console.print(f"  [yellow]- codeql: skipped before scan ({gate_reason})[/]")
+        gate_message = codeql_gate.get("message")
+        if gate_message:
+            console.print(f"  [dim]{gate_message}[/]")
+    elif codeql_gate.get("status") == "forced":
+        console.print("\n[cyan]CodeQL readiness gate:[/]")
+        console.print("  [cyan]- codeql: forced by explicit request; readiness gate bypassed[/]")
 
     # Show warnings for unavailable engines
     if unavailable_engines:
@@ -1874,6 +1965,23 @@ def _build_full_scan_report_view(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _format_codeql_gate_summary(codeql_gate: dict[str, Any] | None) -> list[str]:
+    """Format CodeQL readiness gate status for interactive summaries and reports."""
+    gate = codeql_gate or {}
+    status = gate.get("status")
+    if status not in {"gated", "forced", "enabled"}:
+        return []
+
+    lines = [f"CodeQL Gate: {status}"]
+    reason = gate.get("reason")
+    if reason:
+        lines.append(f"Reason: {reason}")
+    message = gate.get("message")
+    if message:
+        lines.append(f"Message: {message}")
+    return lines
+
+
 def _export_full_scan_result(result: dict[str, Any], export_path: str, options: dict[str, Any]) -> None:
     """Export full scan result to file."""
     stats = result.get("statistics", {})
@@ -1933,6 +2041,21 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
             lines.append(f"    Message: {fe['message']}")
             if fe.get("languages"):
                 lines.append(f"    Languages: {', '.join(fe['languages'])}")
+        lines.append("")
+
+    codeql_gate = result.get("codeql_gate") or {}
+    if codeql_gate.get("status") in {"gated", "forced", "enabled"}:
+        gate_status = codeql_gate.get("status", "unknown")
+        lines.append("-" * 70)
+        lines.append("CodeQL Readiness Gate")
+        lines.append("-" * 70)
+        lines.append(f"  Status: {gate_status}")
+        gate_reason = codeql_gate.get("reason")
+        if gate_reason:
+            lines.append(f"  Reason: {gate_reason}")
+        gate_message = codeql_gate.get("message")
+        if gate_message:
+            lines.append(f"  Message: {gate_message}")
         lines.append("")
 
     if "attack_surface" in result:
@@ -2200,6 +2323,12 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
     # Summary
     console.print(f"[dim]Source:[/] {result['source_path']}")
     console.print(f"[dim]Primary Language:[/] {result.get('primary_language', 'Unknown')}")
+
+    gate_lines = _format_codeql_gate_summary(result.get("codeql_gate"))
+    if gate_lines:
+        console.print(f"[dim]{gate_lines[0]}[/]")
+        for gate_line in gate_lines[1:]:
+            console.print(f"[dim]  {gate_line}[/]")
 
     # Attack Surface
     if "attack_surface" in result:
@@ -2784,6 +2913,8 @@ def scan(
     """
     show_banner()
 
+    explicit_codeql_request = "codeql" in engines
+
     # Handle --full and --base mode logic
     # --full: Enable all features (engines + llm_verify + adversarial)
     # --base: Enable 3 engines only (no LLM verification)
@@ -2862,6 +2993,7 @@ def scan(
         "model": resolved_model,
         "no_deps": no_deps,
         "adversarial": adversarial,
+        "force_codeql": explicit_codeql_request,
         "incremental": incremental,
         "base_ref": base_ref,
         "head_ref": head_ref,

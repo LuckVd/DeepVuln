@@ -1,35 +1,32 @@
-goal_id: P6-12
-title: "目录分类测试"
+goal_id: P6-15
+title: "Stability and Packaging Bug Fixes"
 stage: completed
 status: done
-selected_option: P6-12
+selected_option: P6-15
 design_confirmed: true
 blocked_by: []
 open_questions: []
 implementation_steps:
   - id: S1
-    description: "检查现有测试文件"
+    description: "Confirm the previous goal is complete and update roadmap/current-goal docs for the bugfix pass"
     status: completed
   - id: S2
-    description: "运行测试验证"
+    description: "Fix agent multi-language file targeting in full scans"
     status: completed
   - id: S3
-    description: "更新 roadmap 状态"
+    description: "Fix CLI event-loop lifecycle handling and incremental-test loop setup"
+    status: completed
+  - id: S4
+    description: "Restore packaging metadata consistency by adding the missing README target"
+    status: completed
+  - id: S5
+    description: "Run targeted and full regression tests, then sync docs with final results"
     status: completed
 test_scope:
-  - "test_enum_values"
-  - "test_enum_count"
-  - "test_classify_test_directory"
-  - "test_classify_fixture_directory"
-  - "test_classify_sample_directory"
-  - "test_classify_challenge_directory"
-  - "test_classify_production_directory"
-  - "test_production_multiplier"
-  - "test_test_multiplier"
-  - "test_fixture_multiplier"
-  - "test_sample_multiplier"
-  - "test_challenge_multiplier"
-  - "test_custom_multipliers_override"
+  - "tests/unit/test_cli/test_main.py"
+  - "tests/unit/test_cli/test_intel.py"
+  - "tests/unit/test_l3/test_incremental.py"
+  - "pytest -q"
 security_blockers: []
 dead_code_actions: []
 goal_candidates: []
@@ -37,4 +34,4 @@ sync_status: synced
 last_check_at: null
 last_security_scan_at: null
 last_deadcode_scan_at: null
-last_synced_at: "2026-03-21"
+last_synced_at: "2026-03-23"

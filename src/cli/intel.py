@@ -23,13 +23,19 @@ from src.layers.l1_intelligence.threat_intel import IntelService
 
 
 def run_async(coro):
-    """Run async coroutine synchronously."""
+    """Run async coroutine synchronously without leaking loop state."""
+    try:
+        previous_loop = asyncio.get_event_loop_policy().get_event_loop()
+    except RuntimeError:
+        previous_loop = None
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+        asyncio.set_event_loop(previous_loop)
 
 
 @click.group()

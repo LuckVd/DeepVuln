@@ -4,6 +4,7 @@ Unit tests for CodeQLEngine.
 Tests CodeQL engine functionality without requiring CodeQL CLI to be installed.
 """
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -637,3 +638,107 @@ class TestCodeQLEngineStructuredErrors:
         assert merged["error_type"] == "db_create_failed"
         assert merged["findings_count"] == 3
         assert merged["duration_seconds"] == 12.5
+
+
+class TestCodeQLStabilityFixes:
+    """Regression tests for CodeQL stability improvements."""
+
+    @pytest.mark.asyncio
+    async def test_execute_build_uses_build_timeout(self, tmp_path):
+        engine = CodeQLEngine(timeout=123, build_timeout=987)
+
+        with patch("src.layers.l3_analysis.build.BuildExecutor") as mock_executor_cls:
+            mock_executor = mock_executor_cls.return_value
+            mock_executor.execute = AsyncMock(return_value=MagicMock(success=True, skipped=True))
+
+            await engine._execute_build(tmp_path, "java")
+
+        mock_executor_cls.assert_called_once_with(timeout=987)
+
+    @pytest.mark.asyncio
+    async def test_analyze_database_stops_when_pack_missing(self, tmp_path):
+        engine = CodeQLEngine()
+        db_path = tmp_path / "db"
+        db_path.mkdir()
+
+        with patch.object(engine, "_ensure_query_pack", AsyncMock(return_value=False)):
+            with patch.object(engine, "run_command", AsyncMock()) as run_command:
+                result = await engine._analyze_database(
+                    database_path=db_path,
+                    queries=None,
+                    query_suite="python-security-extended",
+                    language="python",
+                )
+
+        assert result is None
+        run_command.assert_not_called()
+
+    def test_find_language_subdirectories_prefers_root_build_context(self, tmp_path):
+        engine = CodeQLEngine()
+        (tmp_path / "pom.xml").write_text("<project />")
+        service_dir = tmp_path / "service-a"
+        service_dir.mkdir()
+        (service_dir / "Test.java").write_text("class Test {}")
+
+        assert engine._find_language_subdirectories(tmp_path, "java") == [tmp_path]
+
+    def test_resolve_query_path_prefers_newest_installed_pack(self, tmp_path):
+        engine = CodeQLEngine()
+        old_dir = tmp_path / ".codeql" / "packages" / "codeql" / "python-queries" / "0.9.0" / "codeql-suites"
+        new_dir = tmp_path / ".codeql" / "packages" / "codeql" / "python-queries" / "1.2.3" / "codeql-suites"
+        old_dir.mkdir(parents=True)
+        new_dir.mkdir(parents=True)
+        old_suite = old_dir / "python-security-extended.qls"
+        new_suite = new_dir / "python-security-extended.qls"
+        old_suite.write_text("old")
+        new_suite.write_text("new")
+
+        with patch("src.layers.l3_analysis.engines.codeql.Path.home", return_value=tmp_path):
+            resolved = asyncio.run(engine._resolve_query_path("python", "python-security-extended"))
+
+        assert resolved == str(new_suite)
+
+
+class TestCodeQLReadiness:
+    """Tests for fast CodeQL readiness gating."""
+
+    @pytest.mark.asyncio
+    async def test_check_readiness_ready_when_pack_and_build_tool_exist(self, tmp_path):
+        engine = CodeQLEngine()
+        (tmp_path / "pom.xml").write_text("<project />")
+
+        with patch.object(engine, "is_available", return_value=True), \
+             patch.object(engine, "get_version", AsyncMock(return_value="2.24.2")), \
+             patch.object(engine, "_is_pack_installed", AsyncMock(return_value=True)), \
+             patch.object(engine, "check_binary_available", return_value=True):
+            readiness = await engine.check_readiness(tmp_path, language="java")
+
+        assert readiness["ready"] is True
+        assert readiness["reason"] == "ready"
+
+    @pytest.mark.asyncio
+    async def test_check_readiness_fails_when_pack_missing(self, tmp_path):
+        engine = CodeQLEngine()
+        (tmp_path / "pom.xml").write_text("<project />")
+
+        with patch.object(engine, "is_available", return_value=True), \
+             patch.object(engine, "get_version", AsyncMock(return_value="2.24.2")), \
+             patch.object(engine, "_is_pack_installed", AsyncMock(return_value=False)):
+            readiness = await engine.check_readiness(tmp_path, language="java")
+
+        assert readiness["ready"] is False
+        assert readiness["reason"] == "query_pack_missing"
+
+    @pytest.mark.asyncio
+    async def test_check_readiness_fails_when_build_tool_missing(self, tmp_path):
+        engine = CodeQLEngine()
+        (tmp_path / "pom.xml").write_text("<project />")
+
+        with patch.object(engine, "is_available", return_value=True), \
+             patch.object(engine, "get_version", AsyncMock(return_value="2.24.2")), \
+             patch.object(engine, "_is_pack_installed", AsyncMock(return_value=True)), \
+             patch.object(engine, "check_binary_available", return_value=False):
+            readiness = await engine.check_readiness(tmp_path, language="java")
+
+        assert readiness["ready"] is False
+        assert readiness["reason"] == "build_tool_missing"
