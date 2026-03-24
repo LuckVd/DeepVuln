@@ -50,15 +50,31 @@ RUN env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u
         libc6-dev \
         libicu-dev \
         make \
-        maven \
-        gradle \
         nodejs \
         npm \
         openjdk-21-jdk \
         ruby-full \
         unzip \
         wget \
+    # Install Maven and Gradle for Java builds (CodeQL database creation)
+    && env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy \
+        apt-get install -y \
+        maven \
+        gradle \
     && rm -rf /var/lib/apt/lists/*
+
+# Fix OpenJDK 21 security config file (Debian Trixie bug: file is a broken symlink)
+RUN mkdir -p /etc/java-21-openjdk/security \
+    && if [ -L "${JAVA_HOME}/conf/security/java.security" ] && [ ! -e "${JAVA_HOME}/conf/security/java.security" ]; then \
+        echo '# OpenJDK 21 Security Configuration (minimal)' > /etc/java-21-openjdk/security/java.security \
+        && echo 'security.provider.1=SUN' >> /etc/java-21-openjdk/security/java.security \
+        && echo 'security.provider.2=SunRsaSign' >> /etc/java-21-openjdk/security/java.security \
+        && echo 'security.provider.3=SunEC' >> /etc/java-21-openjdk/security/java.security \
+        && echo 'security.provider.4=SunJSSE' >> /etc/java-21-openjdk/security/java.security \
+        && echo 'security.provider.5=SunJCE' >> /etc/java-21-openjdk/security/java.security \
+        && echo 'security.provider.6=SunPKCS11' >> /etc/java-21-openjdk/security/java.security \
+        && echo 'security.useSystemPropertiesFile=false' >> /etc/java-21-openjdk/security/java.security; \
+    fi
 
 RUN mkdir -p /etc/apt/keyrings \
     && env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy \
