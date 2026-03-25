@@ -2,6 +2,25 @@
 
 ## 2026-03-25
 
+### P7-09: Readiness Gate 与 CLI 集成完成
+
+- **Goal ID**: P7-09
+- **Summary**: 增强 Readiness Gate 集成 LLM 决策、构建画像和工具兼容性，提升 CodeQL 启动决策的可解释性
+- **Impact**:
+  - `src/layers/l3_analysis/readiness_gate.py`: CodeQLReadinessGate 核心实现（464 行）
+  - `src/cli/main.py`: CLI 增强（--force-codeql-all 选项 + 增强输出）
+  - `tests/unit/test_l3/test_readiness_gate.py`: 23 个单元测试（512 行）
+- **Test Coverage**:
+  - CodeQLReadinessGate 三层决策测试
+  - LLM 决策集成和 baseline 回退测试
+  - 构建画像集成测试
+  - 工具兼容性检查测试
+  - Force 模式测试
+- **Tests**: 23 passed (all L3 tests: 1532 passed)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
 ### P7-05: 构建计划生成与执行编排完成
 
 - **Goal ID**: P7-05

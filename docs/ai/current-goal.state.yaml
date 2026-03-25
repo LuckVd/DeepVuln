@@ -1,8 +1,8 @@
-goal_id: P7-05
-title: "构建计划生成与执行编排"
+goal_id: P7-09
+title: "Readiness Gate 与 CLI 集成"
 stage: completed
 status: completed
-selected_option: P7-05
+selected_option: P7-09
 design_confirmed: true
 blocked_by: []
 open_questions: []
@@ -10,25 +10,31 @@ resolved_questions: []
 goal_candidates: []
 implementation_steps:
   - id: S1
-    description: "实现数据模型：BuildPlan, BuildStep, RiskLevel, FallbackStrategy"
+    description: "创建 CodeQLReadinessGate 类封装决策逻辑"
     status: completed
   - id: S2
-    description: "实现 BuildPlanGenerator（从 BuildTarget 生成计划）"
+    description: "集成 LLM 语言决策器"
     status: completed
   - id: S3
-    description: "实现 BuildCache（探测/构建结果缓存）"
+    description: "集成构建画像和版本检测"
     status: completed
   - id: S4
-    description: "实现 BuildOrchestrator（计划协调执行）"
+    description: "集成工具兼容性检查"
     status: completed
   - id: S5
-    description: "实现标准化输出（selected/skipped/failed reasons）"
+    description: "重构 _apply_codeql_readiness_gate 使用新类"
     status: completed
   - id: S6
+    description: "更新 CLI 输出显示详细原因"
+    status: completed
+  - id: S7
+    description: "添加 --force-codeql-all 选项"
+    status: completed
+  - id: S8
     description: "编写单元测试"
     status: completed
 test_scope:
-  - "tests/unit/test_l3/test_build_plan.py"
+  - "tests/unit/test_l3/test_readiness_gate.py"
 security_blockers: []
 dead_code_actions: []
 sync_status: not_synced

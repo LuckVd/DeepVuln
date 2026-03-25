@@ -640,43 +640,89 @@ async def _apply_codeql_readiness_gate(
     options: dict[str, Any],
     primary_language: str,
 ) -> tuple[list[str], dict[str, Any]]:
-    """Gate CodeQL behind a fast readiness probe for default scans."""
+    """Gate CodeQL behind an enhanced readiness check with LLM decision.
+
+    P7-09: Enhanced with LLM language decision, build profiling, and tool compatibility.
+    """
     gate_state: dict[str, Any] = {
         "checked": False,
         "requested": "codeql" in engines,
         "enabled": "codeql" in engines,
         "forced": bool(options.get("force_codeql", False)),
+        "force_all": bool(options.get("force_codeql_all", False)),
         "status": "not_requested",
         "ready": None,
         "reason": None,
         "message": None,
+        # Enhanced fields
+        "selected_languages": [],
+        "skipped_languages": [],
+        "decision_source": "none",
+        "tool_report": None,
+        "skip_reasons": {},
     }
 
     if "codeql" not in engines:
         return engines, gate_state
 
-    if gate_state["forced"]:
+    # Force mode: bypass all checks
+    if gate_state["forced"] or gate_state["force_all"]:
         gate_state["status"] = "forced"
         gate_state["ready"] = True
         gate_state["reason"] = "forced"
+        gate_state["decision_source"] = "forced"
         gate_state["message"] = "CodeQL was explicitly requested and bypassed readiness gating"
         return engines, gate_state
 
     gate_state["checked"] = True
 
-    from src.layers.l3_analysis.engines.codeql import CodeQLEngine
+    # Use enhanced readiness gate
+    try:
+        from src.layers.l3_analysis.readiness_gate import CodeQLReadinessGate
 
-    readiness_engine = CodeQLEngine(auto_download_packs=False)
-    readiness = await readiness_engine.check_readiness(
-        source_path=source_path,
-        language=primary_language.lower() if primary_language else None,
-        startup_timeout=int(options.get("codeql_readiness_timeout", 15)),
-    )
-    gate_state.update(readiness)
+        llm_client = options.get("llm_client")
+        readiness_gate = CodeQLReadinessGate(
+            project_path=source_path,
+            llm_client=llm_client,
+            startup_timeout=int(options.get("codeql_readiness_timeout", 15)),
+        )
 
-    if readiness.get("ready"):
-        gate_state["status"] = "enabled"
-        return engines, gate_state
+        result = await readiness_gate.check(force=False)
+
+        # Update gate_state from result
+        gate_state["ready"] = result.ready
+        gate_state["status"] = result.status
+        gate_state["reason"] = result.error if result.error else result.status
+        gate_state["message"] = result.message
+        gate_state["selected_languages"] = result.selected_languages
+        gate_state["skipped_languages"] = [
+            {"language": s.language, "reason": s.reason}
+            for s in result.skipped_languages
+        ]
+        gate_state["decision_source"] = result.decision_source
+        gate_state["tool_report"] = result.tool_report.to_dict() if result.tool_report else None
+        gate_state["skip_reasons"] = result.skip_reasons
+
+        if result.ready:
+            gate_state["status"] = "enabled"
+            return engines, gate_state
+
+    except Exception as e:
+        logger.warning(f"Enhanced readiness gate failed, falling back to basic check: {e}")
+        # Fallback to basic check
+        from src.layers.l3_analysis.engines.codeql import CodeQLEngine
+
+        readiness_engine = CodeQLEngine(auto_download_packs=False)
+        readiness = await readiness_engine.check_readiness(
+            source_path=source_path,
+            language=primary_language.lower() if primary_language else None,
+            startup_timeout=int(options.get("codeql_readiness_timeout", 15)),
+        )
+        gate_state.update(readiness)
+
+        if readiness.get("ready"):
+            gate_state["status"] = "enabled"
+            return engines, gate_state
 
     gate_state["status"] = "gated"
     gate_state["enabled"] = False
@@ -1331,16 +1377,50 @@ async def run_full_security_scan(
         "codeql_gate": codeql_gate,
     }
 
+    # Enhanced CodeQL gate output (P7-09)
     if codeql_gate.get("status") == "gated":
-        console.print("\n[yellow]CodeQL readiness gate:[/]")
+        console.print("\n[yellow]CodeQL Readiness Gate: gated[/]")
         gate_reason = codeql_gate.get("reason", "unknown_reason")
-        console.print(f"  [yellow]- codeql: skipped before scan ({gate_reason})[/]")
+        console.print(f"  [yellow]- codeql: skipped ({gate_reason})[/]")
         gate_message = codeql_gate.get("message")
         if gate_message:
             console.print(f"  [dim]{gate_message}[/]")
     elif codeql_gate.get("status") == "forced":
-        console.print("\n[cyan]CodeQL readiness gate:[/]")
+        console.print("\n[cyan]CodeQL Readiness Gate: forced[/]")
         console.print("  [cyan]- codeql: forced by explicit request; readiness gate bypassed[/]")
+    elif codeql_gate.get("status") == "enabled":
+        console.print("\n[green]CodeQL Readiness Gate: enabled[/]")
+
+        # Show language decision
+        decision_source = codeql_gate.get("decision_source", "none")
+        selected_languages = codeql_gate.get("selected_languages", [])
+        skipped_languages = codeql_gate.get("skipped_languages", [])
+
+        if selected_languages:
+            console.print(f"  [dim]Decision source:[/] {decision_source}")
+            console.print(f"  [green]Selected languages:[/] {', '.join(selected_languages)}")
+
+        if skipped_languages:
+            console.print("  [yellow]Skipped languages:[/]")
+            for skipped in skipped_languages:
+                lang = skipped.get("language", "unknown")
+                reason = skipped.get("reason", "no reason")
+                console.print(f"    [yellow]- {lang}: {reason}[/]")
+
+        # Show tool report summary
+        tool_report = codeql_gate.get("tool_report")
+        if tool_report:
+            ready_count = len(tool_report.get("ready_tools", []))
+            missing_count = len(tool_report.get("missing_tools", []))
+            incompatible_count = len(tool_report.get("incompatible_tools", []))
+
+            if ready_count > 0:
+                console.print(f"  [green]Tools ready:[/] {ready_count}")
+            if missing_count > 0:
+                missing = tool_report.get("missing_tools", [])
+                console.print(f"  [yellow]Tools missing:[/] {', '.join(missing)}")
+            if incompatible_count > 0:
+                console.print(f"  [yellow]Tools incompatible:[/] {incompatible_count}")
 
     # Show warnings for unavailable engines
     if unavailable_engines:
@@ -2838,6 +2918,7 @@ def clean() -> None:
 @click.option("--incremental", is_flag=True, help="Enable incremental scan mode (only scan changed files for 70%+ speedup)")
 @click.option("--base-ref", default="HEAD~1", help="Base git ref for incremental scan (default: HEAD~1)")
 @click.option("--head-ref", default="HEAD", help="Head git ref for incremental scan (default: HEAD)")
+@click.option("--force-codeql-all", is_flag=True, help="Force CodeQL to scan all detected languages, bypassing LLM decision and tool checks")
 def scan(
     path: str,
     include_low: bool,
@@ -2859,6 +2940,7 @@ def scan(
     incremental: bool,
     base_ref: str,
     head_ref: str,
+    force_codeql_all: bool,
 ) -> None:
     """Run security scan on source code.
 
@@ -2994,6 +3076,7 @@ def scan(
         "no_deps": no_deps,
         "adversarial": adversarial,
         "force_codeql": explicit_codeql_request,
+        "force_codeql_all": force_codeql_all,
         "incremental": incremental,
         "base_ref": base_ref,
         "head_ref": head_ref,

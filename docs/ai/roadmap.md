@@ -266,13 +266,13 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P7-09|增强现有 Readiness Gate 集成决策与构建编排|P7-01, P7-05|todo|
-|P7-09a|重构 _apply_codeql_readiness_gate 集成 LLM 决策器|P7-09|todo|
-|P7-09b|添加构建画像和兼容性报告到 Readiness Gate|P7-09a|todo|
-|P7-09c|更新 CLI 输出显示 selected/skipped/failed reasons|P7-09a|todo|
-|P7-09d|添加 --force-codeql-all 选项覆盖 LLM 决策|P7-09a|todo|
+|P7-09|增强现有 Readiness Gate 集成决策与构建编排|P7-01, P7-05|done|
+|P7-09a|重构 _apply_codeql_readiness_gate 集成 LLM 决策器|P7-09|done|
+|P7-09b|添加构建画像和兼容性报告到 Readiness Gate|P7-09a|done|
+|P7-09c|更新 CLI 输出显示 selected/skipped/failed reasons|P7-09a|done|
+|P7-09d|添加 --force-codeql-all 选项覆盖 LLM 决策|P7-09a|done|
 
-**实现文件**: `src/cli/main.py`, `src/layers/l3_analysis/engines/codeql.py`
+**实现文件**: `src/layers/l3_analysis/readiness_gate.py`, `src/cli/main.py`
 
 ### P7-10: 基线策略、测试与效果评估（P1）
 
@@ -313,9 +313,9 @@
 |字段|值|
 |---|---|
 |**阶段**|Phase 7 - CodeQL 智能决策与分语言构建编排|
-|**当前进度**|P7-01/03/04/05 完成（Decision + Discovery + Resolver + BuildPlan）|
-|**下一步**|P7-09 Readiness Gate 集成，或 P7-06 Go/Java 构建支持|
-|**重点模块**|src/layers/l3_analysis/decision/, src/layers/l3_analysis/build/|
+|**当前进度**|P7-01/03/04/05/09 完成（核心决策链路已贯通）|
+|**下一步**|P7-06 Go/Java 标准构建支持，或 P7-10 基线策略与效果评估|
+|**重点模块**|src/layers/l3_analysis/decision/, src/layers/l3_analysis/build/, src/layers/l3_analysis/readiness_gate.py|
 |**目标**|通过 LLM 智能决策 + 构建画像 + 工具兼容性判定，显著提升 CodeQL 多语言构建成功率|
 
 ---

@@ -6,61 +6,62 @@ Completed - 2026-03-25
 
 ## Goal
 
-P7-05: 构建计划生成与执行编排 ✓ 完成
+P7-09: Readiness Gate 与 CLI 集成 ✓ 完成
 
 ## Summary
 
-按构建单元生成 build plan 并受控执行，为 CodeQL 提供可预测、可解释、可回退的构建流程。
+增强现有 Readiness Gate 集成 LLM 语言决策器、构建画像和兼容性报告，提升 CodeQL 启动决策的可解释性。
 
 ## Completion Summary
 
 | Item | Result |
 |------|--------|
-| **实现文件** | `src/layers/l3_analysis/build/build_plan.py` (846 行) |
-| **测试文件** | `tests/unit/test_l3/test_build_plan.py` (644 行, 39 tests) |
-| **测试结果** | 39 passed (all L3 tests: 1509 passed) |
+| **实现文件** | `src/layers/l3_analysis/readiness_gate.py` (464 行) |
+| **修改文件** | `src/cli/main.py` |
+| **测试文件** | `tests/unit/test_l3/test_readiness_gate.py` (512 行, 23 tests) |
+| **测试结果** | 23 passed (all L3 tests: 1532 passed) |
 | **安全扫描** | 无问题 |
 
 ## Implemented Features
 
-### 1. BuildPlan & BuildStep
-- BuildStep: 单个构建步骤（命令/超时/必需性）
-- BuildPlan: 完整构建计划（步骤列表/风险等级/回退策略）
-- skip_reason: 跳过原因记录
+### 1. CodeQLReadinessGate 类
+- 三层决策架构：Basic Check → Smart Decision → Tool Check
+- 懒加载子组件：Decider, ModuleDiscovery, VersionDetector, ToolResolver
+- Force 模式支持
 
-### 2. BuildPlanGenerator
-- 从 BuildTarget 生成 BuildPlan
-- 根据构建系统生成默认命令
-- 根据工具可用性调整计划
-- 风险评估和回退策略确定
+### 2. LLM 决策集成
+- 调用 `CodeQLLanguageDecider` 智能选择语言
+- LLM 失败时自动回退到 baseline
 
-### 3. BuildCache
-- 内存缓存 + TTL 过期
-- SHA256 哈希缓存键
-- 最大条目限制 + LRU 淘汰
-- 默认 24 小时 TTL
+### 3. 构建画像集成
+- ModuleDiscovery 模块发现
+- BuildTargetExtractor 构建目标提取
+- VersionDetector 版本需求检测
 
-### 4. BuildOrchestrator
-- 协调多计划执行
-- 缓存集成
-- BuildSummary 标准化输出
+### 4. 工具兼容性集成
+- ToolResolver 工具发现
+- ReadinessReport 工具就绪报告
 
-### 5. 标准化输出
-- selected_plans: 选中的计划
-- skipped_plans: 跳过的计划（含原因）
-- failed_plans: 失败的计划（含原因）
-- successful_plans: 成功的计划
+### 5. CLI 增强
+- `--force-codeql-all` 选项：强制扫描所有语言
+- 增强输出：显示 selected/skipped languages 和工具状态
+- 三种状态显示：enabled / gated / forced
+
+### 6. ReadinessGateResult
+- selected_languages: 选中的语言列表
+- skipped_languages: 跳过的语言（含原因）
+- decision_source: 决策来源（llm/baseline/forced）
+- tool_report: 工具就绪报告
 
 ## Design Decisions
 
 | 决策 | 选择 |
 |------|------|
-| 缓存位置 | `~/.cache/deepvuln/builds/` |
-| 缓存键 | SHA256(path:command)[:16] |
-| 默认 TTL | 24 小时 |
-| 最大条目 | 1000 |
+| 架构 | 独立 CodeQLReadinessGate 类 |
+| 回退策略 | LLM 失败自动回退 baseline |
+| CLI 输出 | Rich 格式化，分节显示 |
 
 ## Next Recommended
 
 - **P7-06**: Go/Java 标准构建支持
-- **P7-09**: Readiness Gate 集成
+- **P7-10**: 基线策略、测试与效果评估
