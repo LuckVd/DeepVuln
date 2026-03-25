@@ -228,11 +228,11 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P7-06|优先支持标准构建入口明确的语言|P7-05|todo|
-|P7-06a|实现 Go module 构建策略（go.mod/go build ./...）|P7-06|todo|
-|P7-06b|实现 Java Maven 构建策略（wrapper 优先，compile/classes）|P7-06|todo|
-|P7-06c|实现 Java Gradle 构建策略（wrapper 优先，classes）|P7-06|todo|
-|P7-06d|针对 Go/Java 增强失败分类和跳过原因|P7-06a,b,c|todo|
+|P7-06|优先支持标准构建入口明确的语言|P7-05|done|
+|P7-06a|实现 Go module 构建策略（go.mod/go build ./...）|P7-06|done|
+|P7-06b|实现 Java Maven 构建策略（wrapper 优先，compile/classes）|P7-06|done|
+|P7-06c|实现 Java Gradle 构建策略（wrapper 优先，classes）|P7-06|done|
+|P7-06d|针对 Go/Java 增强失败分类和跳过原因|P7-06a,b,c|done|
 
 **实现文件**: `src/layers/l3_analysis/build/builders/go.py`, `src/layers/l3_analysis/build/builders/java.py`
 

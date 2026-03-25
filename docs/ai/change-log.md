@@ -1,5 +1,28 @@
 # Change Log
 
+## 2026-03-26
+
+### P7-06: Go/Java 标准构建支持完成
+
+- **Goal ID**: P7-06
+- **Summary**: 实现 Go 和 Java 专用构建器，提供智能构建策略（wrapper 检测、CGO 处理、多模块支持、失败诊断）
+- **Impact**:
+  - `src/layers/l3_analysis/build/builders/base.py`: Builder 协议和基类（200 行）
+  - `src/layers/l3_analysis/build/builders/go.py`: Go 构建器（490 行）
+  - `src/layers/l3_analysis/build/builders/java.py`: Java 构建器（480 行）
+  - `src/layers/l3_analysis/build/build_plan.py`: 集成 Builder（+100 行）
+  - `src/layers/l3_analysis/readiness_gate.py`: 集成构建分析（+80 行）
+  - `tests/unit/test_l3/test_builders/`: 64 个单元测试（940 行）
+- **Test Coverage**:
+  - Go Builder: CGO 检测、vendor 处理、私有模块、失败诊断（20 tests）
+  - Java Builder: Wrapper 检测、Maven/Gradle 策略、JDK 版本、失败诊断（25 tests）
+  - BuildPlanGenerator 集成测试（39 tests）
+  - ReadinessGate 集成测试（23 tests）
+- **Tests**: 64 passed (all L3 tests: 1596 passed)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
 ## 2026-03-25
 
 ### P7-09: Readiness Gate 与 CLI 集成完成

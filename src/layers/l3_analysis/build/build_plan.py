@@ -28,6 +28,18 @@ from src.layers.l3_analysis.build.tool_resolver import (
     ToolType,
 )
 
+# Import builders - using lazy import to avoid circular dependencies
+BUILDER_REGISTRY: Any = None
+
+
+def _get_builder_registry() -> Any:
+    """Lazy load builder registry to avoid circular imports."""
+    global BUILDER_REGISTRY
+    if BUILDER_REGISTRY is None:
+        from src.layers.l3_analysis.build.builders import BuilderRegistry
+        BUILDER_REGISTRY = BuilderRegistry
+    return BUILDER_REGISTRY
+
 logger = get_logger(__name__)
 
 
@@ -242,7 +254,13 @@ class BuildPlanGenerator:
     Takes BuildTarget objects from BuildTargetExtractor and generates
     executable BuildPlan objects with appropriate steps, timeouts,
     risk levels, and fallback strategies.
+
+    For Go and Java projects, uses the specialized builders from
+    the builders package for more intelligent build strategies.
     """
+
+    # Languages that have specialized builders
+    BUILDER_LANGUAGES = {"go", "java"}
 
     def __init__(
         self,
@@ -272,6 +290,13 @@ class BuildPlanGenerator:
         Returns:
             BuildPlan ready for execution or skipping.
         """
+        # Try using specialized builder first for Go/Java
+        if target.language.lower() in self.BUILDER_LANGUAGES:
+            builder_plan = self._generate_from_builder(target, readiness)
+            if builder_plan:
+                return builder_plan
+
+        # Fall back to generic build plan generation
         # Check if target should be skipped
         if target.build_system == BuildSystem.NONE:
             return BuildPlan(
@@ -335,6 +360,89 @@ class BuildPlanGenerator:
             List of build plans.
         """
         return [self.generate(t, readiness) for t in targets]
+
+    def _generate_from_builder(
+        self,
+        target: BuildTarget,
+        readiness: ReadinessReport | None = None,
+    ) -> BuildPlan | None:
+        """Generate build plan using specialized language builder.
+
+        Args:
+            target: Build target.
+            readiness: Tool readiness report.
+
+        Returns:
+            BuildPlan from specialized builder, or None if should fall back to generic.
+        """
+        try:
+            registry = _get_builder_registry()
+            builder = registry.get(target.language)
+            if not builder:
+                return None
+
+            output = builder.analyze(target.path)
+
+            # If builder skipped due to missing build files but target has
+            # a known build system, fall back to generic generation
+            if output.is_skipped:
+                # Fall back if target has valid build system
+                if target.build_system not in (
+                    BuildSystem.NONE,
+                    BuildSystem.UNKNOWN,
+                ):
+                    return None  # Fall back to generic generation
+                # Otherwise return the skip plan
+                return BuildPlan(
+                    target_name=target.name,
+                    skip_reason=output.skip_reason,
+                    language=output.language,
+                    build_system=target.build_system,
+                )
+
+            # Generate steps from builder output
+            steps: list[BuildStep] = []
+
+            if output.dependency_command:
+                steps.append(
+                    BuildStep(
+                        name=f"Install dependencies for {target.name}",
+                        command=output.dependency_command,
+                        timeout=output.timeout // 2,
+                        cwd=output.cwd or target.path,
+                        env=output.env_vars,
+                        required=False,
+                    )
+                )
+
+            if output.build_command:
+                steps.append(
+                    BuildStep(
+                        name=f"Build {target.name}",
+                        command=output.build_command,
+                        timeout=output.timeout,
+                        cwd=output.cwd or target.path,
+                        env=output.env_vars,
+                        required=True,
+                    )
+                )
+
+            # Determine risk based on warnings
+            risk = RiskLevel.MEDIUM if output.warnings else RiskLevel.LOW
+
+            return BuildPlan(
+                target_name=target.name,
+                steps=steps,
+                risk_level=risk,
+                fallback=FallbackStrategy.SKIP,
+                estimated_duration=output.timeout,
+                language=output.language,
+                build_system=target.build_system,
+            )
+
+        except Exception as e:
+            logger.warning(f"Builder failed for {target.language}: {e}")
+            return None
 
     def _generate_steps(self, target: BuildTarget) -> list[BuildStep]:
         """Generate build steps for a target."""

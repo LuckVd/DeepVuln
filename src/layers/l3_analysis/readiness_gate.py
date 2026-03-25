@@ -38,6 +38,18 @@ from src.layers.l3_analysis.llm.client import LLMClient
 
 logger = get_logger(__name__)
 
+# Lazy import for builders to avoid circular dependencies
+_BuilderRegistry: Any = None
+
+
+def _get_builder_registry() -> Any:
+    """Lazy load builder registry."""
+    global _BuilderRegistry
+    if _BuilderRegistry is None:
+        from src.layers.l3_analysis.build.builders import BuilderRegistry
+        _BuilderRegistry = BuilderRegistry
+    return _BuilderRegistry
+
 
 # =============================================================================
 # Data Classes
@@ -65,6 +77,10 @@ class ReadinessGateResult:
     # Tool readiness
     tool_report: ReadinessReport | None = None
 
+    # Build analysis (from Builders)
+    build_warnings: dict[str, list[str]] = field(default_factory=dict)  # target_name -> warnings
+    build_skip_reasons: dict[str, str] = field(default_factory=dict)  # target_name -> skip_reason
+
     # Reasons
     skip_reasons: dict[str, str] = field(default_factory=dict)
     message: str = ""
@@ -86,10 +102,25 @@ class ReadinessGateResult:
             "modules_count": len(self.modules),
             "build_targets_count": len(self.build_targets),
             "tool_report": self.tool_report.to_dict() if self.tool_report else None,
+            "build_warnings": self.build_warnings,
+            "build_skip_reasons": self.build_skip_reasons,
             "skip_reasons": self.skip_reasons,
             "message": self.message,
             "error": self.error,
         }
+
+
+@dataclass
+class BuildReadinessInfo:
+    """Build readiness analysis from language-specific builder."""
+
+    target_name: str
+    language: str
+    buildable: bool
+    warnings: list[str] = field(default_factory=list)
+    skip_reason: str | None = None
+    build_command: str | None = None
+    detected_files: list[str] = field(default_factory=list)
 
 
 # =============================================================================
@@ -193,6 +224,17 @@ class CodeQLReadinessGate:
             build_targets = []
             version_req = VersionRequirement(module_path=self.project_path)
 
+        # Step 2b: Analyze build readiness using language-specific builders
+        build_readiness = self._analyze_build_readiness(build_targets)
+        build_warnings = {}
+        build_skip_reasons = {}
+
+        for info in build_readiness:
+            if info.warnings:
+                build_warnings[info.target_name] = info.warnings
+            if info.skip_reason:
+                build_skip_reasons[info.target_name] = info.skip_reason
+
         # Step 3: Tool readiness
         tool_report = self._check_tools(build_targets, version_req)
 
@@ -232,9 +274,77 @@ class CodeQLReadinessGate:
             build_targets=build_targets,
             version_requirement=version_req,
             tool_report=tool_report,
+            build_warnings=build_warnings,
+            build_skip_reasons=build_skip_reasons,
             skip_reasons=skip_reasons,
             message=f"CodeQL ready for {len(selected)} language(s)",
         )
+
+    def _analyze_build_readiness(
+        self, build_targets: list[BuildTarget]
+    ) -> list[BuildReadinessInfo]:
+        """Analyze build readiness using language-specific builders.
+
+        Args:
+            build_targets: List of build targets from BuildTargetExtractor.
+
+        Returns:
+            List of BuildReadinessInfo for each target.
+        """
+        results = []
+
+        try:
+            registry = _get_builder_registry()
+        except Exception as e:
+            logger.warning(f"Could not load builder registry: {e}")
+            return results
+
+        for target in build_targets:
+            try:
+                builder = registry.get(target.language)
+                if not builder:
+                    # No specialized builder for this language
+                    results.append(
+                        BuildReadinessInfo(
+                            target_name=target.name,
+                            language=target.language,
+                            buildable=True,  # Assume buildable without specialized analysis
+                        )
+                    )
+                    continue
+
+                # Analyze using the builder
+                output = builder.analyze(target.path)
+
+                results.append(
+                    BuildReadinessInfo(
+                        target_name=target.name,
+                        language=target.language,
+                        buildable=output.is_buildable,
+                        warnings=output.warnings,
+                        skip_reason=output.skip_reason,
+                        build_command=output.build_command,
+                        detected_files=output.detected_files,
+                    )
+                )
+
+                if output.warnings:
+                    logger.debug(
+                        f"Build warnings for {target.name}: {output.warnings}"
+                    )
+
+            except Exception as e:
+                logger.warning(f"Builder analysis failed for {target.name}: {e}")
+                results.append(
+                    BuildReadinessInfo(
+                        target_name=target.name,
+                        language=target.language,
+                        buildable=True,
+                        warnings=[f"Builder analysis failed: {e}"],
+                    )
+                )
+
+        return results
 
     async def _basic_check(self) -> dict[str, Any]:
         """Run basic CodeQL availability check.

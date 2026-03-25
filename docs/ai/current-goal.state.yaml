@@ -1,44 +1,57 @@
-goal_id: P7-09
-title: "Readiness Gate 与 CLI 集成"
+goal_id: P7-06
+title: "Go/Java 标准构建支持"
 stage: completed
 status: completed
-selected_option: P7-09
+selected_option: P7-06
 design_confirmed: true
 blocked_by: []
 open_questions: []
-resolved_questions: []
-goal_candidates: []
+resolved_questions:
+  - question: "CGO 检测是否需要实际尝试编译？"
+    resolution: "使用静态检测 import \"C\" 方案，更快且足够准确"
+goal_candidates:
+  - id: P7-06
+    title: "Go/Java 标准构建支持"
+    reason: "用户指定"
 implementation_steps:
   - id: S1
-    description: "创建 CodeQLReadinessGate 类封装决策逻辑"
+    description: "创建 Builder 协议和基类 (builders/base.py)"
     status: completed
   - id: S2
-    description: "集成 LLM 语言决策器"
+    description: "实现 GoBuilder 类 (builders/go.py)"
     status: completed
   - id: S3
-    description: "集成构建画像和版本检测"
+    description: "实现 JavaBuilder 类 - Maven 策略 (builders/java.py)"
     status: completed
   - id: S4
-    description: "集成工具兼容性检查"
+    description: "实现 JavaBuilder 类 - Gradle 策略 (builders/java.py)"
     status: completed
   - id: S5
-    description: "重构 _apply_codeql_readiness_gate 使用新类"
+    description: "修改 BuildPlanGenerator 集成 Builder"
     status: completed
   - id: S6
-    description: "更新 CLI 输出显示详细原因"
+    description: "增强失败分类和跳过原因"
     status: completed
   - id: S7
-    description: "添加 --force-codeql-all 选项"
+    description: "更新 ReadinessGate 集成"
     status: completed
   - id: S8
     description: "编写单元测试"
     status: completed
 test_scope:
-  - "tests/unit/test_l3/test_readiness_gate.py"
+  - "tests/unit/test_l3/test_builders/test_base.py"
+  - "tests/unit/test_l3/test_builders/test_go_builder.py"
+  - "tests/unit/test_l3/test_builders/test_java_builder.py"
+test_results:
+  builder_tests: 64 passed
+  build_plan_tests: 39 passed
+  readiness_gate_tests: 23 passed
+  all_l3_tests: 1596 passed
+security_scan: passed
 security_blockers: []
 dead_code_actions: []
 sync_status: not_synced
-last_check_at: null
-last_security_scan_at: null
+last_check_at: "2026-03-26"
+last_security_scan_at: "2026-03-26"
 last_deadcode_scan_at: null
 last_synced_at: null

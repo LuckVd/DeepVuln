@@ -2,66 +2,99 @@
 
 ## Status
 
-Completed - 2026-03-25
+Completed - 2026-03-26
 
 ## Goal
 
-P7-09: Readiness Gate 与 CLI 集成 ✓ 完成
+P7-06: Go/Java 标准构建支持 ✓ 完成
 
 ## Summary
 
-增强现有 Readiness Gate 集成 LLM 语言决策器、构建画像和兼容性报告，提升 CodeQL 启动决策的可解释性。
+实现 Go 和 Java 的专用构建器类，提供比现有通用命令生成更智能的构建策略，包括 wrapper 检测、CGO 处理、多模块支持和增强的失败分类。
 
 ## Completion Summary
 
 | Item | Result |
 |------|--------|
-| **实现文件** | `src/layers/l3_analysis/readiness_gate.py` (464 行) |
-| **修改文件** | `src/cli/main.py` |
-| **测试文件** | `tests/unit/test_l3/test_readiness_gate.py` (512 行, 23 tests) |
-| **测试结果** | 23 passed (all L3 tests: 1532 passed) |
+| **新增文件** | `src/layers/l3_analysis/build/builders/` (base.py, go.py, java.py) |
+| **修改文件** | `src/layers/l3_analysis/build/build_plan.py`, `src/layers/l3_analysis/readiness_gate.py` |
+| **测试文件** | `tests/unit/test_l3/test_builders/` (3 files) |
+| **测试结果** | 1596 passed (all L3 tests) |
 | **安全扫描** | 无问题 |
 
 ## Implemented Features
 
-### 1. CodeQLReadinessGate 类
-- 三层决策架构：Basic Check → Smart Decision → Tool Check
-- 懒加载子组件：Decider, ModuleDiscovery, VersionDetector, ToolResolver
-- Force 模式支持
+### 1. Builder 协议 (`builders/base.py`)
 
-### 2. LLM 决策集成
-- 调用 `CodeQLLanguageDecider` 智能选择语言
-- LLM 失败时自动回退到 baseline
+- `LanguageBuilder` 抽象基类
+- `BuilderOutput` 数据类
+- `BuildResult` 枚举 (SUCCESS/FAILED/SKIPPED/PARTIAL)
+- `FailureCategory` 枚举 (12种失败类型)
+- `FailureDiagnosis` 诊断结果
+- `BuilderRegistry` 注册中心
 
-### 3. 构建画像集成
-- ModuleDiscovery 模块发现
-- BuildTargetExtractor 构建目标提取
-- VersionDetector 版本需求检测
+### 2. Go Builder (`builders/go.py`)
 
-### 4. 工具兼容性集成
-- ToolResolver 工具发现
-- ReadinessReport 工具就绪报告
+- go.mod/go.work 解析和验证
+- **CGO 静态检测** (`import "C"`)
+- **vendor 目录处理** (-mod=vendor)
+- **私有模块 GOPRIVATE 配置**
+- build tags 提取和过滤
+- 5种失败分类诊断
 
-### 5. CLI 增强
-- `--force-codeql-all` 选项：强制扫描所有语言
-- 增强输出：显示 selected/skipped languages 和工具状态
-- 三种状态显示：enabled / gated / forced
+### 3. Java Builder (`builders/java.py`)
 
-### 6. ReadinessGateResult
-- selected_languages: 选中的语言列表
-- skipped_languages: 跳过的语言（含原因）
-- decision_source: 决策来源（llm/baseline/forced）
-- tool_report: 工具就绪报告
+- **Wrapper 优先策略** (mvnw/gradlew)
+- **Maven 多模块支持** (-pl/-am 参数)
+- **Gradle 子项目支持**
+- JDK 版本检测 (pom.xml/build.gradle)
+- 7种失败分类诊断
+
+### 4. BuildPlanGenerator 集成
+
+- 对 Go/Java 语言使用专用 Builder
+- 保留通用回退策略
+- 无缝集成现有流程
+
+### 5. ReadinessGate 集成
+
+- 新增 `BuildReadinessInfo` 数据类
+- 新增 `_analyze_build_readiness()` 方法
+- 结果中包含 `build_warnings` 和 `build_skip_reasons`
+
+## Test Results
+
+```
+tests/unit/test_l3/test_builders/ ............ 64 passed
+tests/unit/test_l3/test_build_plan.py ....... 39 passed
+tests/unit/test_l3/test_readiness_gate.py ... 23 passed
+tests/unit/test_l3/ ........................ 1596 passed
+```
 
 ## Design Decisions
 
 | 决策 | 选择 |
 |------|------|
-| 架构 | 独立 CodeQLReadinessGate 类 |
-| 回退策略 | LLM 失败自动回退 baseline |
-| CLI 输出 | Rich 格式化，分节显示 |
+| CGO 检测 | 静态检测 import "C"，不实际编译 |
+| 架构 | 独立 Builder 类 + 懒加载注册中心 |
+| 集成 | BuildPlanGenerator 优先使用 Builder，回退通用策略 |
+| Wrapper | 优先使用 mvnw/gradlew，无则使用系统命令 |
+
+## Files Changed
+
+| 文件 | 操作 | 行数 |
+|------|------|------|
+| `src/layers/l3_analysis/build/builders/__init__.py` | 新增 | 30 |
+| `src/layers/l3_analysis/build/builders/base.py` | 新增 | 200 |
+| `src/layers/l3_analysis/build/builders/go.py` | 新增 | 490 |
+| `src/layers/l3_analysis/build/builders/java.py` | 新增 | 480 |
+| `src/layers/l3_analysis/build/build_plan.py` | 修改 | +100 |
+| `src/layers/l3_analysis/readiness_gate.py` | 修改 | +80 |
+| `tests/unit/test_l3/test_builders/test_base.py` | 新增 | 200 |
+| `tests/unit/test_l3/test_builders/test_go_builder.py` | 新增 | 310 |
+| `tests/unit/test_l3/test_builders/test_java_builder.py` | 新增 | 430 |
 
 ## Next Recommended
 
-- **P7-06**: Go/Java 标准构建支持
+- **P7-07**: Python/JS/TS 轻构建与免构建路径
 - **P7-10**: 基线策略、测试与效果评估
