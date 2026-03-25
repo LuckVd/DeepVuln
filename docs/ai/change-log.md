@@ -2,6 +2,26 @@
 
 ## 2026-03-25
 
+### P7-03b: BuildTargetExtractor 完成
+
+- **Goal ID**: P7-03b
+- **Summary**: 实现构建目标提取器，提取可构建单元、识别入口点、生成 CodeQL 构建推荐
+- **Impact**:
+  - `src/layers/l3_analysis/build/target_extractor.py`: BuildTargetExtractor 核心实现
+  - `src/layers/l3_analysis/build/__init__.py`: 新增导出
+  - `tests/unit/test_l3/test_target_extractor.py`: 17 个单元测试
+- **Test Coverage**:
+  - BuildTarget, EntryPoint, BuildRecommendation 数据模型测试
+  - Java Maven/Gradle 目标提取测试
+  - Go main package 识别测试
+  - Node.js 包目标提取测试
+  - Python 入口点检测测试
+  - 构建策略判定测试
+- **Tests**: 17 passed (all L3 tests: 1397 passed)
+- **Dead Code**: not run
+- **Security**: not run
+- **Commit**: c9aca8f
+
 ### P7-03a: ModuleDiscovery 完成
 
 - **Goal ID**: P7-03a

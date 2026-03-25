@@ -5,6 +5,7 @@ This module provides:
 - Automatic build execution
 - LLM-assisted build diagnostics
 - Module discovery for monorepo support
+- Build target extraction and recommendation
 """
 
 from src.layers.l3_analysis.build.detector import (
@@ -29,6 +30,15 @@ from src.layers.l3_analysis.build.module_discovery import (
     MonorepoType,
     discover_modules,
 )
+from src.layers.l3_analysis.build.target_extractor import (
+    BuildRecommendation,
+    BuildStrategy,
+    BuildTarget,
+    BuildTargetExtractor,
+    EntryPoint,
+    EntryPointType,
+    extract_build_targets,
+)
 
 __all__ = [
     "BuildSystem",
@@ -45,4 +55,11 @@ __all__ = [
     "MonorepoInfo",
     "MonorepoType",
     "discover_modules",
+    "BuildTarget",
+    "EntryPoint",
+    "BuildRecommendation",
+    "BuildStrategy",
+    "EntryPointType",
+    "BuildTargetExtractor",
+    "extract_build_targets",
 ]
