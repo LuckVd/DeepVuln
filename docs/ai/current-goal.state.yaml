@@ -1,8 +1,8 @@
-goal_id: P7-03b
-title: "BuildTargetExtractor - 构建目标提取器"
-stage: implement
+goal_id: P7-03c~g
+title: "VersionDetector - 版本检测器"
+stage: completed
 status: completed
-selected_option: P7-03b
+selected_option: P7-03c~g
 design_confirmed: true
 blocked_by: []
 open_questions: []
@@ -10,36 +10,32 @@ resolved_questions: []
 goal_candidates: []
 implementation_steps:
   - id: S1
-    description: "实现数据模型：BuildTarget, EntryPoint, BuildRecommendation"
+    description: "实现数据模型：VersionRequirement, VersionInfo"
     status: completed
   - id: S2
-    description: "实现 BuildTargetExtractor 基础框架"
+    description: "实现 VersionDetector 基础框架"
     status: completed
   - id: S3
-    description: "实现 Java Build Target 提取"
+    description: "实现 Java pom.xml 版本检测"
     status: completed
   - id: S4
-    description: "实现 Go Build Target 提取"
+    description: "实现 Java build.gradle 版本检测"
     status: completed
   - id: S5
-    description: "实现 Node.js Build Target 提取"
+    description: "实现 Go go.mod 版本检测"
     status: completed
   - id: S6
-    description: "实现 Entry Point 识别"
+    description: "实现 Node .nvmrc/package.json 版本检测"
     status: completed
   - id: S7
-    description: "实现 CodeQL 构建推荐生成"
-    status: completed
-  - id: S8
     description: "编写单元测试"
     status: completed
 test_scope:
-  - "tests/unit/test_l3/test_target_extractor.py"
+  - "tests/unit/test_l3/test_version_detector.py"
 security_blockers: []
 dead_code_actions: []
 sync_status: synced
-last_check_at: "2026-03-25T00:00:00Z"
-last_security_scan_at: "2026-03-25T00:00:00Z"
+last_check_at: null
+last_security_scan_at: "2026-03-25"
 last_deadcode_scan_at: null
-last_synced_at: "2026-03-25T00:00:00Z"
-commit_id: c9aca8f
+last_synced_at: "2026-03-25"

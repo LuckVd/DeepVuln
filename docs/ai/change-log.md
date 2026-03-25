@@ -2,6 +2,29 @@
 
 ## 2026-03-25
 
+### P7-03c~g: VersionDetector 完成
+
+- **Goal ID**: P7-03c~g
+- **Summary**: 实现版本检测器，解析项目配置文件检测所需的运行时版本（Java/Go/Node），为 CodeQL 构建提供环境需求信息
+- **Impact**:
+  - `src/layers/l3_analysis/build/version_detector.py`: VersionDetector 核心实现（476 行）
+  - `src/layers/l3_analysis/build/__init__.py`: 新增导出
+  - `tests/unit/test_l3/test_version_detector.py`: 25 个单元测试（457 行）
+- **Test Coverage**:
+  - RuntimeType, VersionInfo, VersionRequirement 数据模型测试
+  - Java pom.xml maven.compiler.source/target/release 解析
+  - Java build.gradle sourceCompatibility/toolchain 解析
+  - Java build.gradle.kts Kotlin DSL 支持
+  - Go go.mod 版本解析
+  - Node .nvmrc 文件解析（支持 v 前缀、lts 处理）
+  - Node package.json engines 解析（支持 >=, ^, .x 版本格式）
+  - 多运行时同时检测测试
+  - 优先级测试（.nvmrc > engines）
+- **Tests**: 25 passed (all L3 tests: 1422 passed)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
 ### P7-03b: BuildTargetExtractor 完成
 
 - **Goal ID**: P7-03b

@@ -6,6 +6,7 @@ This module provides:
 - LLM-assisted build diagnostics
 - Module discovery for monorepo support
 - Build target extraction and recommendation
+- Runtime version detection
 """
 
 from src.layers.l3_analysis.build.detector import (
@@ -39,6 +40,13 @@ from src.layers.l3_analysis.build.target_extractor import (
     EntryPointType,
     extract_build_targets,
 )
+from src.layers.l3_analysis.build.version_detector import (
+    RuntimeType,
+    VersionDetector,
+    VersionInfo,
+    VersionRequirement,
+    detect_versions,
+)
 
 __all__ = [
     "BuildSystem",
@@ -62,4 +70,9 @@ __all__ = [
     "EntryPointType",
     "BuildTargetExtractor",
     "extract_build_targets",
+    "RuntimeType",
+    "VersionDetector",
+    "VersionInfo",
+    "VersionRequirement",
+    "detect_versions",
 ]
