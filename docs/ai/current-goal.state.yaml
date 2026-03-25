@@ -1,37 +1,55 @@
-goal_id: P6-15
-title: "Stability and Packaging Bug Fixes"
-stage: completed
-status: done
-selected_option: P6-15
+goal_id: P7-01
+title: "LLM 智能语言决策"
+stage: implement
+status: completed
+selected_option: P7-01
 design_confirmed: true
 blocked_by: []
 open_questions: []
+resolved_questions:
+  - question: "module discovery 的最小输入格式"
+    answer: "A. 模块级摘要 - 只传递简化摘要，后续 P7-03 可扩展"
+  - question: "LLM 失败时回退策略"
+    answer: "C. 混合策略 - 主语言 60% + 攻击面 40% 权重"
+goal_candidates: []
 implementation_steps:
   - id: S1
-    description: "Confirm the previous goal is complete and update roadmap/current-goal docs for the bugfix pass"
+    description: "创建 decision 模块目录结构和 __init__.py"
     status: completed
   - id: S2
-    description: "Fix agent multi-language file targeting in full scans"
+    description: "实现数据模型：LanguageInfo, BuildDifficulty, ModuleSummary, LanguageDecisionInput, LanguageDecision"
     status: completed
   - id: S3
-    description: "Fix CLI event-loop lifecycle handling and incremental-test loop setup"
+    description: "接入模块边界输入（来自 module discovery/target extraction 的简化摘要）"
     status: completed
   - id: S4
-    description: "Restore packaging metadata consistency by adding the missing README target"
+    description: "实现简化版 BuildDifficultyAssessor（为 LLM 提供构建难度输入）"
     status: completed
   - id: S5
-    description: "Run targeted and full regression tests, then sync docs with final results"
+    description: "实现 LLM Prompt 模板（安全优先/效率平衡/风险聚焦原则）"
+    status: completed
+  - id: S6
+    description: "实现 CodeQLLanguageDecider 核心类"
+    status: completed
+  - id: S7
+    description: "实现时间预算控制逻辑"
+    status: completed
+  - id: S8
+    description: "实现结果解析、验证和结构化解释输出"
+    status: completed
+  - id: S9
+    description: "实现 deterministic baseline 与 LLM 失败回退"
+    status: completed
+  - id: S10
+    description: "编写单元测试并更新文档/配置项"
     status: completed
 test_scope:
-  - "tests/unit/test_cli/test_main.py"
-  - "tests/unit/test_cli/test_intel.py"
-  - "tests/unit/test_l3/test_incremental.py"
-  - "pytest -q"
+  - "tests/unit/test_l3/test_decision.py"
 security_blockers: []
 dead_code_actions: []
-goal_candidates: []
 sync_status: synced
-last_check_at: null
-last_security_scan_at: null
+last_check_at: "2026-03-25T00:00:00Z"
+last_security_scan_at: "2026-03-25T00:00:00Z"
 last_deadcode_scan_at: null
-last_synced_at: "2026-03-23"
+last_synced_at: "2026-03-25T00:00:00Z"
+commit_id: eabf8dc

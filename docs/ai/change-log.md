@@ -1,5 +1,33 @@
 # Change Log
 
+## 2026-03-25
+
+### P7-01: LLM 智能语言决策完成
+
+- **Goal ID**: P7-01
+- **Summary**: 实现 LLM 驱动的 CodeQL 语言选择决策器
+- **Impact**:
+  - `src/layers/l3_analysis/decision/__init__.py`: 模块初始化和导出
+  - `src/layers/l3_analysis/decision/models.py`: 6 个数据模型定义
+  - `src/layers/l3_analysis/decision/build_assessor.py`: 构建难度评估器
+  - `src/layers/l3_analysis/decision/prompts.py`: LLM Prompt 模板
+  - `src/layers/l3_analysis/decision/language_decider.py`: 核心决策器实现
+  - `tests/unit/test_l3/test_decision.py`: 35 个单元测试
+- **Test Coverage**:
+  - LanguageStructure, DecisionConstraints, LanguageDecision 模型测试
+  - BuildDifficultyAssessor 各语言难度评估测试
+  - Prompt 格式化和验证测试
+  - Baseline 决策逻辑测试
+  - LLM 决策和回退测试
+  - 集成测试
+- **Tests**: 35 passed (all L3 tests: 1360 passed)
+- **Design Decisions**:
+  - 模块输入格式：模块级摘要（可扩展）
+  - 回退策略：混合策略（主语言 60% + 攻击面 40%）
+- **Dead Code**: not run
+- **Security**: not run
+- **Commit**: eabf8dc
+
 ## 2026-03-21
 
 ### P6-12: Directory Classification Tests Verified

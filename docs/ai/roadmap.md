@@ -26,6 +26,7 @@
 |Phase 5|精度深化|可利用性评估增强 + 调用图分析|done|2026-03|
 |Phase 6|报告可信度|结果边界清晰化 + 噪声治理 + 覆盖率透明|in_progress|2026-03|
 |Phase 6.5|code-audit 集成|防幻觉规则 + 覆盖率矩阵 + 污点分析模板 + 漏洞验证方法论|in_progress|2026-03|
+|Phase 7|CodeQL 智能构建|LLM 语言决策 + 分语言构建编排 + 多语言构建成功率提升|todo|2026-Q2|
 
 ---
 
@@ -138,6 +139,157 @@
 
 ---
 
+## Phase 7 详细任务：CodeQL 智能决策与分语言构建编排
+
+> 目标：通过 LLM 智能决策、项目构建画像、工具兼容性判定和分语言执行策略，显著提升 CodeQL 多语言扫描成功率，降低扫描时间
+
+### 目标效果
+
+| 语言 | 当前成功率 | 目标成功率 |
+|------|------------|------------|
+| Python | 95% | 99% |
+| JavaScript/TypeScript | 95% | 99% |
+| Java | 60% | 85% |
+| Go | 70% | 90% |
+| C/C++ | 30% | 70% |
+
+### P7-01: LLM 智能语言决策（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-01|LLM 驱动的 CodeQL 语言选择决策器|-|done|
+|P7-01a|设计 LanguageDecisionInput 数据结构（语言结构/模块摘要/攻击面/Semgrep结果/构建难度）|P7-01|done|
+|P7-01b|实现 LLM 决策 Prompt 模板（安全优先/效率平衡/风险聚焦原则）|P7-01a|done|
+|P7-01c|实现 CodeQLLanguageDecider 类（调用 LLM 获取语言推荐列表）|P7-01b|done|
+|P7-01d|实现时间预算机制（确保总扫描时间在限制内）|P7-01c|done|
+|P7-01e|添加决策结果解析与验证逻辑|P7-01d|done|
+|P7-01f|实现 deterministic baseline，作为回退与效果对照|P7-01e|done|
+
+**实现文件**: `src/layers/l3_analysis/decision/__init__.py`, `src/layers/l3_analysis/decision/models.py`, `src/layers/l3_analysis/decision/language_decider.py`, `src/layers/l3_analysis/decision/prompts.py`, `src/layers/l3_analysis/decision/build_assessor.py`, `tests/unit/test_l3/test_decision.py`
+
+### P7-02: 构建难度评估器（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-02|各语言的构建难度评估机制|P7-01|partial|
+|P7-02a|定义 BuildDifficulty 数据结构（level/estimated_time/blockers）|P7-02|done|
+|P7-02b|实现 Python/JS/TS 难度评估（默认轻构建/免构建，支持升级条件）|P7-02a|done|
+|P7-02c|实现 Java 难度评估（medium，检测 pom.xml/build.gradle/JDK版本）|P7-02a|partial|
+|P7-02d|实现 Go 难度评估（medium，检测 go.mod/cgo/private module 风险）|P7-02a|partial|
+|P7-02e|实现 C/C++ 难度评估（hard，检测构建系统/依赖复杂度/compile_commands 可用性）|P7-02a|partial|
+|P7-02f|集成到 LLM 决策流程作为输入|P7-02c,d,e|done|
+
+**实现文件**: `src/layers/l3_analysis/decision/build_assessor.py`（基础版已在 P7-01 实现，P7-02 需增强版本检测）
+
+### P7-03: 项目构建画像与版本推断（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-03|仓库级项目构建画像与环境需求推断|-|todo|
+|P7-03a|实现 ModuleDiscovery，识别 monorepo/子模块/语言边界|P7-03|todo|
+|P7-03b|实现 BuildTargetExtractor，提取可构建单元和推荐入口|P7-03a|todo|
+|P7-03c|实现 VersionDetector 基础框架|P7-03|todo|
+|P7-03d|Java 版本检测：解析 pom.xml（maven.compiler.source/release）|P7-03c|todo|
+|P7-03e|Java 版本检测：解析 build.gradle（sourceCompatibility/toolchain）|P7-03c|todo|
+|P7-03f|Go 版本检测：解析 go.mod|P7-03c|todo|
+|P7-03g|Node 版本检测：解析 .nvmrc/package.json engines|P7-03c|todo|
+|P7-03h|实现项目配置解析器（devcontainer/CI配置/版本管理器配置）|P7-03c|todo|
+|P7-03i|实现外部依赖可达性检查（私有 registry/submodule/系统依赖）|P7-03b|todo|
+
+**实现文件**: `src/layers/l3_analysis/build/module_discovery.py`, `src/layers/l3_analysis/build/target_extractor.py`, `src/layers/l3_analysis/build/version_detector.py`, `src/layers/l3_analysis/build/project_config.py`
+
+### P7-04: 工具解析与兼容性判定（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-04|发现已有工具并判断是否满足构建需求|P7-03|todo|
+|P7-04a|实现 ToolResolver（system/local cache/managed path）|P7-04|todo|
+|P7-04b|实现 CompatibilityChecker（版本匹配/能力匹配/缺失原因）|P7-04a|todo|
+|P7-04c|实现 ProvisionPolicy（strict/reuse-only/managed-cache）|P7-04b|todo|
+|P7-04d|支持本地预装缓存工具目录，但默认不联网下载|P7-04c|todo|
+|P7-04e|输出标准化 readiness/incompatibility 报告|P7-04b|todo|
+
+**实现文件**: `src/layers/l3_analysis/build/tool_resolver.py`, `src/layers/l3_analysis/build/compatibility.py`, `src/layers/l3_analysis/build/provision_policy.py`
+
+### P7-05: 构建计划生成与执行编排（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-05|按构建单元生成 build plan 并受控执行|P7-03, P7-04|todo|
+|P7-05a|实现 BuildPlanGenerator（命令/超时/风险/回退策略）|P7-05|todo|
+|P7-05b|实现 BuildExecutor 统一封装（输出捕获/超时/错误分类）|P7-05a|todo|
+|P7-05c|实现结果缓存（探测结果/构建结果/失败分类）|P7-05a|todo|
+|P7-05d|实现标准化可解释输出（selected/skipped/failed reasons）|P7-05b|todo|
+|P7-05e|集成到 CodeQL 引擎的 scan 流程|P7-05d|todo|
+
+**实现文件**: `src/layers/l3_analysis/build/build_plan.py`, `src/layers/l3_analysis/build/executor.py`, `src/layers/l3_analysis/build/cache.py`, `src/layers/l3_analysis/build/environment.py`
+
+### P7-06: Go/Java 标准构建支持（P1）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-06|优先支持标准构建入口明确的语言|P7-05|todo|
+|P7-06a|实现 Go module 构建策略（go.mod/go build ./...）|P7-06|todo|
+|P7-06b|实现 Java Maven 构建策略（wrapper 优先，compile/classes）|P7-06|todo|
+|P7-06c|实现 Java Gradle 构建策略（wrapper 优先，classes）|P7-06|todo|
+|P7-06d|针对 Go/Java 增强失败分类和跳过原因|P7-06a,b,c|todo|
+
+**实现文件**: `src/layers/l3_analysis/build/builders/go.py`, `src/layers/l3_analysis/build/builders/java.py`
+
+### P7-07: Python/JS/TS 轻构建与免构建路径（P1）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-07|为动态/脚本语言提供默认轻路径|P7-05|todo|
+|P7-07a|实现 Python 免构建路径（源码+元数据+解释器要求）|P7-07|todo|
+|P7-07b|实现 JS/TS 免构建路径（源码+package/tsconfig/workspace）|P7-07|todo|
+|P7-07c|定义升级到真实构建的条件（代码生成/框架约束/alias/project references）|P7-07a,b|todo|
+|P7-07d|在需要时生成受控 build plan，而非默认安装依赖|P7-07c|todo|
+
+**实现文件**: `src/layers/l3_analysis/build/builders/python.py`, `src/layers/l3_analysis/build/builders/javascript.py`
+
+### P7-08: C/C++ 标准构建系统支持（P1）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-08|仅支持标准构建系统，避免无边界猜测式构建|P7-05|todo|
+|P7-08a|实现 CppBuilder 基础框架|P7-08|todo|
+|P7-08b|实现现有 compile_commands.json 检测与验证|P7-08a|todo|
+|P7-08c|实现 CMake 导出策略（cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON）|P7-08a|todo|
+|P7-08d|实现 Makefile 保守策略（必要时结合 Bear/compiledb）|P7-08a|todo|
+|P7-08e|实现 header-only/无标准构建系统的跳过与说明|P7-08a|todo|
+|P7-08f|明确止损线：高风险场景直接跳过，不做无限回退|P7-08e|todo|
+
+**实现文件**: `src/layers/l3_analysis/build/builders/cpp.py`
+
+### P7-09: Readiness Gate 与 CLI 集成（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-09|增强现有 Readiness Gate 集成决策与构建编排|P7-01, P7-05|todo|
+|P7-09a|重构 _apply_codeql_readiness_gate 集成 LLM 决策器|P7-09|todo|
+|P7-09b|添加构建画像和兼容性报告到 Readiness Gate|P7-09a|todo|
+|P7-09c|更新 CLI 输出显示 selected/skipped/failed reasons|P7-09a|todo|
+|P7-09d|添加 --force-codeql-all 选项覆盖 LLM 决策|P7-09a|todo|
+
+**实现文件**: `src/cli/main.py`, `src/layers/l3_analysis/engines/codeql.py`
+
+### P7-10: 基线策略、测试与效果评估（P1）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-10|验证 LLM 决策相对规则基线是否有净收益|P7-01~P7-09|todo|
+|P7-10a|实现 deterministic baseline（主语言优先/攻击面优先/Semgrep 优先）|P7-10|todo|
+|P7-10b|单元测试：LLM 决策器与结果解析|P7-10|todo|
+|P7-10c|单元测试：版本检测/工具兼容性/构建计划|P7-10|todo|
+|P7-10d|集成测试：多语言项目扫描|P7-10|todo|
+|P7-10e|评估指标：耗时、成功率、发现损失率|P7-10d|todo|
+|P7-10f|回归测试：确保不破坏现有功能|P7-10|todo|
+
+**实现文件**: `tests/unit/test_l3/test_decision.py`, `tests/unit/test_l3/test_build_environment.py`, `tests/integration/test_codeql_build.py`
+
+---
+
 ## 里程碑
 
 |里程碑|交付物|能力描述|状态|日期|
@@ -151,7 +303,8 @@
 |v0.5|裁决统一|Exploitability 主导裁决|done|2026-03-06|
 |v0.6|精度深化|可利用性评估增强 + 调用图分析|done|2026-03-09|
 |v0.7|报告可信度|结果边界清晰 + 噪声治理 + 覆盖率透明|in_progress|2026-03|
-|v0.8|企业稳定版|高精度、低误报、CI 可用|todo|-|
+|v0.75|CodeQL 智能构建|LLM 决策 + 分语言构建编排 + 构建成功率提升|todo|2026-Q2|
+|v0.8|企业稳定版|高精度、低误报、CI 可用|todo|2026-Q2|
 
 ---
 
@@ -159,11 +312,11 @@
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 6.5 - code-audit 项目优秀实践集成|
-|**当前进度**|P6-03 through P6-15 completed; full regression is green again|
-|**下一步**|Pick the next Phase 6.5 reliability or reporting improvement from the backlog|
-|**重点模块**|src/cli/main.py, src/cli/intel.py, tests/unit/test_l3/test_incremental.py, tests/unit/test_cli/test_main.py, README.md|
-|**目标**|在保持扫描透明度的前提下继续推进稳定性与报告可信度提升|
+|**阶段**|Phase 7 - CodeQL 智能决策与分语言构建编排|
+|**当前进度**|P7-01 完成（LLM 智能语言决策）；P7-02 部分完成（基础构建难度评估）|
+|**下一步**|P7-03 项目构建画像与版本推断，或 P7-09 Readiness Gate 集成|
+|**重点模块**|src/layers/l3_analysis/decision/, src/layers/l3_analysis/build/|
+|**目标**|通过 LLM 智能决策 + 构建画像 + 工具兼容性判定，显著提升 CodeQL 多语言构建成功率|
 
 ---
 
@@ -183,9 +336,12 @@
 |类型|描述|影响|状态|缓解措施|
 |---|---|---|---|---|
 |风险|规则误报爆炸|高|存在|引入 Rule Gating|
-|风险|CodeQL 构建/分析失败|高|存在|结构化诊断 + 降级机制 + 报告显式退化|
+|风险|CodeQL 构建/分析失败|高|存在|Phase 7: LLM 决策 + 构建画像 + 分语言执行策略|
 |风险|confirmed/不可利用冲突|高|存在|统一裁决模型|
 |风险|多语言误匹配|高|存在|主语言识别|
+|风险|C/C++ 构建复杂|高|存在|Phase 7: 仅支持标准构建系统 + 明确止损线|
+|风险|工具版本不匹配|中|存在|Phase 7: 版本检测 + 工具兼容性判定|
+|风险|LLM 决策收益不稳定|中|新增|Phase 7: deterministic baseline 对照评估|
 
 ---
 
@@ -198,6 +354,10 @@
 |confirmed 与 exploitability 冲突|0|强制规则|
 |markdown 被扫描|0|文件级过滤|
 |单规则爆炸率|自动抑制|Finding Budget|
+|CodeQL Java 构建成功率|> 85%|Phase 7 目标|
+|CodeQL C/C++ 构建成功率|> 70%|Phase 7 目标（仅标准构建系统）|
+|多语言项目扫描时间|降低 40%|Phase 7: LLM 智能选择语言|
+|策略解释覆盖率|100%|每个 selected/skipped 语言都有明确原因|
 
 ---
 
@@ -208,3 +368,6 @@
 3. **规则前置裁剪**：禁止规则误报爆炸
 4. **语义级去重**：基于 AST 而非行号
 5. **精度优先于召回**
+6. **LLM 智能决策**（Phase 7）：让 LLM 决定最优扫描策略，平衡安全收益与资源消耗
+7. **分语言构建编排**（Phase 7）：按语言类型选择轻路径、标准构建或高风险跳过
+8. **解释优先于猜测**（Phase 7）：所有选择、跳过和失败都必须给出结构化原因
