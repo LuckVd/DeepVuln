@@ -4,6 +4,7 @@ This module provides:
 - Build system detection (Go, Java, Node.js, Python)
 - Automatic build execution
 - LLM-assisted build diagnostics
+- Module discovery for monorepo support
 """
 
 from src.layers.l3_analysis.build.detector import (
@@ -22,6 +23,12 @@ from src.layers.l3_analysis.build.executor import (
     BuildResult,
     execute_build,
 )
+from src.layers.l3_analysis.build.module_discovery import (
+    ModuleDiscovery,
+    MonorepoInfo,
+    MonorepoType,
+    discover_modules,
+)
 
 __all__ = [
     "BuildSystem",
@@ -34,4 +41,8 @@ __all__ = [
     "BuildDiagnostician",
     "BuildDiagnostic",
     "diagnose_build_failure",
+    "ModuleDiscovery",
+    "MonorepoInfo",
+    "MonorepoType",
+    "discover_modules",
 ]

@@ -185,8 +185,8 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P7-03|仓库级项目构建画像与环境需求推断|-|todo|
-|P7-03a|实现 ModuleDiscovery，识别 monorepo/子模块/语言边界|P7-03|todo|
+|P7-03|仓库级项目构建画像与环境需求推断|-|partial|
+|P7-03a|实现 ModuleDiscovery，识别 monorepo/子模块/语言边界|P7-03|done|
 |P7-03b|实现 BuildTargetExtractor，提取可构建单元和推荐入口|P7-03a|todo|
 |P7-03c|实现 VersionDetector 基础框架|P7-03|todo|
 |P7-03d|Java 版本检测：解析 pom.xml（maven.compiler.source/release）|P7-03c|todo|
@@ -196,7 +196,7 @@
 |P7-03h|实现项目配置解析器（devcontainer/CI配置/版本管理器配置）|P7-03c|todo|
 |P7-03i|实现外部依赖可达性检查（私有 registry/submodule/系统依赖）|P7-03b|todo|
 
-**实现文件**: `src/layers/l3_analysis/build/module_discovery.py`, `src/layers/l3_analysis/build/target_extractor.py`, `src/layers/l3_analysis/build/version_detector.py`, `src/layers/l3_analysis/build/project_config.py`
+**实现文件**: `src/layers/l3_analysis/build/module_discovery.py`（已完成）, `src/layers/l3_analysis/build/target_extractor.py`, `src/layers/l3_analysis/build/version_detector.py`, `src/layers/l3_analysis/build/project_config.py`
 
 ### P7-04: 工具解析与兼容性判定（P0）
 

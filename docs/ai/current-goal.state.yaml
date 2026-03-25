@@ -1,50 +1,31 @@
-goal_id: P7-01
-title: "LLM 智能语言决策"
+goal_id: P7-03a
+title: "ModuleDiscovery - 模块发现与边界识别"
 stage: implement
 status: completed
-selected_option: P7-01
+selected_option: P7-03a
 design_confirmed: true
 blocked_by: []
 open_questions: []
-resolved_questions:
-  - question: "module discovery 的最小输入格式"
-    answer: "A. 模块级摘要 - 只传递简化摘要，后续 P7-03 可扩展"
-  - question: "LLM 失败时回退策略"
-    answer: "C. 混合策略 - 主语言 60% + 攻击面 40% 权重"
+resolved_questions: []
 goal_candidates: []
 implementation_steps:
   - id: S1
-    description: "创建 decision 模块目录结构和 __init__.py"
+    description: "实现 ModuleDiscovery 类基础框架"
     status: completed
   - id: S2
-    description: "实现数据模型：LanguageInfo, BuildDifficulty, ModuleSummary, LanguageDecisionInput, LanguageDecision"
+    description: "实现 monorepo 检测逻辑"
     status: completed
   - id: S3
-    description: "接入模块边界输入（来自 module discovery/target extraction 的简化摘要）"
+    description: "实现模块边界识别"
     status: completed
   - id: S4
-    description: "实现简化版 BuildDifficultyAssessor（为 LLM 提供构建难度输入）"
+    description: "集成 BuildSystemDetector"
     status: completed
   - id: S5
-    description: "实现 LLM Prompt 模板（安全优先/效率平衡/风险聚焦原则）"
-    status: completed
-  - id: S6
-    description: "实现 CodeQLLanguageDecider 核心类"
-    status: completed
-  - id: S7
-    description: "实现时间预算控制逻辑"
-    status: completed
-  - id: S8
-    description: "实现结果解析、验证和结构化解释输出"
-    status: completed
-  - id: S9
-    description: "实现 deterministic baseline 与 LLM 失败回退"
-    status: completed
-  - id: S10
-    description: "编写单元测试并更新文档/配置项"
+    description: "编写单元测试"
     status: completed
 test_scope:
-  - "tests/unit/test_l3/test_decision.py"
+  - "tests/unit/test_l3/test_module_discovery.py"
 security_blockers: []
 dead_code_actions: []
 sync_status: synced
@@ -52,4 +33,4 @@ last_check_at: "2026-03-25T00:00:00Z"
 last_security_scan_at: "2026-03-25T00:00:00Z"
 last_deadcode_scan_at: null
 last_synced_at: "2026-03-25T00:00:00Z"
-commit_id: eabf8dc
+commit_id: 2a6b892
