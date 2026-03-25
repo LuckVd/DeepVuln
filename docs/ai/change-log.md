@@ -2,6 +2,26 @@
 
 ## 2026-03-25
 
+### P7-04: 工具解析与兼容性判定完成
+
+- **Goal ID**: P7-04
+- **Summary**: 实现工具发现与兼容性检查，从多源解析构建工具并判定版本是否满足需求
+- **Impact**:
+  - `src/layers/l3_analysis/build/tool_resolver.py`: ToolResolver 核心实现（706 行）
+  - `src/layers/l3_analysis/build/__init__.py`: 新增导出
+  - `tests/unit/test_l3/test_tool_resolver.py`: 48 个单元测试（566 行）
+- **Test Coverage**:
+  - ToolType, ToolSource, ToolInfo 数据模型测试
+  - 版本解析与匹配测试（精确/>=/>/范围）
+  - ToolResolver 三源发现测试（Managed/Cache/PATH）
+  - CompatibilityChecker 兼容性检查测试
+  - ProvisionPolicy 三种策略测试
+  - ReadinessReport 报告生成测试
+- **Tests**: 48 passed (all L3 tests: 1470 passed)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
 ### P7-03c~g: VersionDetector 完成
 
 - **Goal ID**: P7-03c~g

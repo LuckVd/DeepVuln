@@ -7,6 +7,7 @@ This module provides:
 - Module discovery for monorepo support
 - Build target extraction and recommendation
 - Runtime version detection
+- Tool resolution and compatibility checking
 """
 
 from src.layers.l3_analysis.build.detector import (
@@ -47,6 +48,21 @@ from src.layers.l3_analysis.build.version_detector import (
     VersionRequirement,
     detect_versions,
 )
+from src.layers.l3_analysis.build.tool_resolver import (
+    CompatibilityChecker,
+    CompatibilityResult,
+    CompatibilityStatus,
+    ProvisionPolicy,
+    ReadinessReport,
+    ToolInfo,
+    ToolResolver,
+    ToolSource,
+    ToolType,
+    check_tool_compatibility,
+    generate_readiness_report,
+    resolve_tool,
+    version_matches,
+)
 
 __all__ = [
     "BuildSystem",
@@ -75,4 +91,18 @@ __all__ = [
     "VersionInfo",
     "VersionRequirement",
     "detect_versions",
+    # Tool resolver
+    "ToolType",
+    "ToolSource",
+    "ToolInfo",
+    "ToolResolver",
+    "CompatibilityChecker",
+    "CompatibilityResult",
+    "CompatibilityStatus",
+    "ProvisionPolicy",
+    "ReadinessReport",
+    "resolve_tool",
+    "check_tool_compatibility",
+    "generate_readiness_report",
+    "version_matches",
 ]

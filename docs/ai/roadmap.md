@@ -202,14 +202,14 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P7-04|发现已有工具并判断是否满足构建需求|P7-03|todo|
-|P7-04a|实现 ToolResolver（system/local cache/managed path）|P7-04|todo|
-|P7-04b|实现 CompatibilityChecker（版本匹配/能力匹配/缺失原因）|P7-04a|todo|
-|P7-04c|实现 ProvisionPolicy（strict/reuse-only/managed-cache）|P7-04b|todo|
-|P7-04d|支持本地预装缓存工具目录，但默认不联网下载|P7-04c|todo|
-|P7-04e|输出标准化 readiness/incompatibility 报告|P7-04b|todo|
+|P7-04|发现已有工具并判断是否满足构建需求|P7-03|done|
+|P7-04a|实现 ToolResolver（system/local cache/managed path）|P7-04|done|
+|P7-04b|实现 CompatibilityChecker（版本匹配/能力匹配/缺失原因）|P7-04a|done|
+|P7-04c|实现 ProvisionPolicy（strict/reuse-only/managed-cache）|P7-04b|done|
+|P7-04d|支持本地预装缓存工具目录，但默认不联网下载|P7-04c|done|
+|P7-04e|输出标准化 readiness/incompatibility 报告|P7-04b|done|
 
-**实现文件**: `src/layers/l3_analysis/build/tool_resolver.py`, `src/layers/l3_analysis/build/compatibility.py`, `src/layers/l3_analysis/build/provision_policy.py`
+**实现文件**: `src/layers/l3_analysis/build/tool_resolver.py`
 
 ### P7-05: 构建计划生成与执行编排（P0）
 
@@ -313,8 +313,8 @@
 |字段|值|
 |---|---|
 |**阶段**|Phase 7 - CodeQL 智能决策与分语言构建编排|
-|**当前进度**|P7-01 完成；P7-03 完成（ModuleDiscovery + BuildTargetExtractor + VersionDetector）|
-|**下一步**|P7-04 工具解析与兼容性判定，或 P7-09 Readiness Gate 集成|
+|**当前进度**|P7-01 完成；P7-03 完成；P7-04 完成（ToolResolver + CompatibilityChecker + ProvisionPolicy）|
+|**下一步**|P7-05 构建计划生成与执行编排，或 P7-09 Readiness Gate 集成|
 |**重点模块**|src/layers/l3_analysis/decision/, src/layers/l3_analysis/build/|
 |**目标**|通过 LLM 智能决策 + 构建画像 + 工具兼容性判定，显著提升 CodeQL 多语言构建成功率|
 
