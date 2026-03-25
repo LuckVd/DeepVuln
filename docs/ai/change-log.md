@@ -2,6 +2,25 @@
 
 ## 2026-03-25
 
+### P7-05: 构建计划生成与执行编排完成
+
+- **Goal ID**: P7-05
+- **Summary**: 实现构建计划生成与执行编排，为 CodeQL 提供可预测、可解释、可回退的构建流程
+- **Impact**:
+  - `src/layers/l3_analysis/build/build_plan.py`: BuildPlan 核心实现（846 行）
+  - `src/layers/l3_analysis/build/__init__.py`: 新增导出
+  - `tests/unit/test_l3/test_build_plan.py`: 39 个单元测试（644 行）
+- **Test Coverage**:
+  - BuildPlan, BuildStep, RiskLevel, FallbackStrategy 数据模型测试
+  - BuildPlanGenerator 计划生成测试
+  - BuildCache 缓存存取/过期/LRU 淘汰测试
+  - BuildOrchestrator 计划协调执行测试
+  - BuildSummary 标准化输出测试
+- **Tests**: 39 passed (all L3 tests: 1509 passed)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
 ### P7-04: 工具解析与兼容性判定完成
 
 - **Goal ID**: P7-04

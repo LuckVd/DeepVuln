@@ -215,14 +215,14 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P7-05|按构建单元生成 build plan 并受控执行|P7-03, P7-04|todo|
-|P7-05a|实现 BuildPlanGenerator（命令/超时/风险/回退策略）|P7-05|todo|
-|P7-05b|实现 BuildExecutor 统一封装（输出捕获/超时/错误分类）|P7-05a|todo|
-|P7-05c|实现结果缓存（探测结果/构建结果/失败分类）|P7-05a|todo|
-|P7-05d|实现标准化可解释输出（selected/skipped/failed reasons）|P7-05b|todo|
+|P7-05|按构建单元生成 build plan 并受控执行|P7-03, P7-04|done|
+|P7-05a|实现 BuildPlanGenerator（命令/超时/风险/回退策略）|P7-05|done|
+|P7-05b|实现 BuildExecutor 统一封装（输出捕获/超时/错误分类）|P7-05a|done|
+|P7-05c|实现结果缓存（探测结果/构建结果/失败分类）|P7-05a|done|
+|P7-05d|实现标准化可解释输出（selected/skipped/failed reasons）|P7-05b|done|
 |P7-05e|集成到 CodeQL 引擎的 scan 流程|P7-05d|todo|
 
-**实现文件**: `src/layers/l3_analysis/build/build_plan.py`, `src/layers/l3_analysis/build/executor.py`, `src/layers/l3_analysis/build/cache.py`, `src/layers/l3_analysis/build/environment.py`
+**实现文件**: `src/layers/l3_analysis/build/build_plan.py`
 
 ### P7-06: Go/Java 标准构建支持（P1）
 
@@ -313,8 +313,8 @@
 |字段|值|
 |---|---|
 |**阶段**|Phase 7 - CodeQL 智能决策与分语言构建编排|
-|**当前进度**|P7-01 完成；P7-03 完成；P7-04 完成（ToolResolver + CompatibilityChecker + ProvisionPolicy）|
-|**下一步**|P7-05 构建计划生成与执行编排，或 P7-09 Readiness Gate 集成|
+|**当前进度**|P7-01/03/04/05 完成（Decision + Discovery + Resolver + BuildPlan）|
+|**下一步**|P7-09 Readiness Gate 集成，或 P7-06 Go/Java 构建支持|
 |**重点模块**|src/layers/l3_analysis/decision/, src/layers/l3_analysis/build/|
 |**目标**|通过 LLM 智能决策 + 构建画像 + 工具兼容性判定，显著提升 CodeQL 多语言构建成功率|
 

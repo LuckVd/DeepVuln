@@ -6,55 +6,61 @@ Completed - 2026-03-25
 
 ## Goal
 
-P7-04: 工具解析与兼容性判定 ✓ 完成
+P7-05: 构建计划生成与执行编排 ✓ 完成
 
 ## Summary
 
-发现已有工具并判断是否满足构建需求，为 CodeQL 构建提供环境就绪状态报告。
+按构建单元生成 build plan 并受控执行，为 CodeQL 提供可预测、可解释、可回退的构建流程。
 
 ## Completion Summary
 
 | Item | Result |
 |------|--------|
-| **实现文件** | `src/layers/l3_analysis/build/tool_resolver.py` (706 行) |
-| **测试文件** | `tests/unit/test_l3/test_tool_resolver.py` (566 行, 48 tests) |
-| **测试结果** | 48 passed (all L3 tests: 1470 passed) |
+| **实现文件** | `src/layers/l3_analysis/build/build_plan.py` (846 行) |
+| **测试文件** | `tests/unit/test_l3/test_build_plan.py` (644 行, 39 tests) |
+| **测试结果** | 39 passed (all L3 tests: 1509 passed) |
 | **安全扫描** | 无问题 |
 
 ## Implemented Features
 
-### 1. ToolType Enum
-支持 9 种构建工具：JAVA, GO, NODE, MAVEN, GRADLE, NPM, YARN, PNPM, PYTHON
+### 1. BuildPlan & BuildStep
+- BuildStep: 单个构建步骤（命令/超时/必需性）
+- BuildPlan: 完整构建计划（步骤列表/风险等级/回退策略）
+- skip_reason: 跳过原因记录
 
-### 2. ToolResolver
-- **三源发现**：Managed Path → Local Cache → System PATH
-- **版本提取**：运行版本命令并解析输出
-- **配置优先级**：默认路径 + 可配置覆盖
+### 2. BuildPlanGenerator
+- 从 BuildTarget 生成 BuildPlan
+- 根据构建系统生成默认命令
+- 根据工具可用性调整计划
+- 风险评估和回退策略确定
 
-### 3. CompatibilityChecker
-- **版本匹配**：精确匹配、>=、>、范围 (11-17)
-- **状态判定**：OK / VERSION_MISMATCH / NOT_FOUND / CAPABILITY_MISSING
+### 3. BuildCache
+- 内存缓存 + TTL 过期
+- SHA256 哈希缓存键
+- 最大条目限制 + LRU 淘汰
+- 默认 24 小时 TTL
 
-### 4. ProvisionPolicy
-- **STRICT**: 不满足则失败
-- **REUSE_ONLY**: 使用现有工具，警告继续
-- **MANAGED_CACHE**: 尝试使用管理缓存
+### 4. BuildOrchestrator
+- 协调多计划执行
+- 缓存集成
+- BuildSummary 标准化输出
 
-### 5. ReadinessReport
-- 就绪工具列表
-- 不兼容工具列表（含原因）
-- 缺失工具列表
-- is_ready / has_warnings 属性
+### 5. 标准化输出
+- selected_plans: 选中的计划
+- skipped_plans: 跳过的计划（含原因）
+- failed_plans: 失败的计划（含原因）
+- successful_plans: 成功的计划
 
 ## Design Decisions
 
 | 决策 | 选择 |
 |------|------|
-| 预装目录配置 | C. 默认路径 + 可配置覆盖 |
-| 发现优先级 | Managed > Cache > PATH |
-| 版本解析策略 | 正则提取 + 元组比较 |
+| 缓存位置 | `~/.cache/deepvuln/builds/` |
+| 缓存键 | SHA256(path:command)[:16] |
+| 默认 TTL | 24 小时 |
+| 最大条目 | 1000 |
 
 ## Next Recommended
 
-- **P7-05**: 构建计划生成与执行编排
+- **P7-06**: Go/Java 标准构建支持
 - **P7-09**: Readiness Gate 集成

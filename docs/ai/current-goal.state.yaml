@@ -1,8 +1,8 @@
-goal_id: P7-04
-title: "工具解析与兼容性判定"
+goal_id: P7-05
+title: "构建计划生成与执行编排"
 stage: completed
 status: completed
-selected_option: P7-04
+selected_option: P7-05
 design_confirmed: true
 blocked_by: []
 open_questions: []
@@ -10,25 +10,25 @@ resolved_questions: []
 goal_candidates: []
 implementation_steps:
   - id: S1
-    description: "实现数据模型：ToolInfo, ToolSource, ToolType"
+    description: "实现数据模型：BuildPlan, BuildStep, RiskLevel, FallbackStrategy"
     status: completed
   - id: S2
-    description: "实现 ToolResolver（三源发现 + 版本提取）"
+    description: "实现 BuildPlanGenerator（从 BuildTarget 生成计划）"
     status: completed
   - id: S3
-    description: "实现 CompatibilityChecker（版本匹配 + 能力检查）"
+    description: "实现 BuildCache（探测/构建结果缓存）"
     status: completed
   - id: S4
-    description: "实现 ProvisionPolicy（三种策略）"
+    description: "实现 BuildOrchestrator（计划协调执行）"
     status: completed
   - id: S5
-    description: "实现 ReadinessReport 生成"
+    description: "实现标准化输出（selected/skipped/failed reasons）"
     status: completed
   - id: S6
     description: "编写单元测试"
     status: completed
 test_scope:
-  - "tests/unit/test_l3/test_tool_resolver.py"
+  - "tests/unit/test_l3/test_build_plan.py"
 security_blockers: []
 dead_code_actions: []
 sync_status: not_synced

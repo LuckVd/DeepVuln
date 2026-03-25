@@ -8,6 +8,7 @@ This module provides:
 - Build target extraction and recommendation
 - Runtime version detection
 - Tool resolution and compatibility checking
+- Build plan generation and execution orchestration
 """
 
 from src.layers.l3_analysis.build.detector import (
@@ -63,6 +64,21 @@ from src.layers.l3_analysis.build.tool_resolver import (
     resolve_tool,
     version_matches,
 )
+from src.layers.l3_analysis.build.build_plan import (
+    BuildCache,
+    BuildExecutionResult,
+    BuildOrchestrator,
+    BuildPlan,
+    BuildPlanGenerator,
+    BuildPlanStatus,
+    BuildStep,
+    BuildSummary,
+    CacheEntry,
+    FallbackStrategy,
+    RiskLevel,
+    create_build_cache,
+    generate_build_plan,
+)
 
 __all__ = [
     "BuildSystem",
@@ -105,4 +121,18 @@ __all__ = [
     "check_tool_compatibility",
     "generate_readiness_report",
     "version_matches",
+    # Build plan
+    "BuildPlan",
+    "BuildStep",
+    "BuildPlanGenerator",
+    "BuildOrchestrator",
+    "BuildCache",
+    "CacheEntry",
+    "BuildExecutionResult",
+    "BuildSummary",
+    "RiskLevel",
+    "FallbackStrategy",
+    "BuildPlanStatus",
+    "generate_build_plan",
+    "create_build_cache",
 ]
