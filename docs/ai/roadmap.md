@@ -240,11 +240,11 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P7-07|为动态/脚本语言提供默认轻路径|P7-05|todo|
-|P7-07a|实现 Python 免构建路径（源码+元数据+解释器要求）|P7-07|todo|
-|P7-07b|实现 JS/TS 免构建路径（源码+package/tsconfig/workspace）|P7-07|todo|
-|P7-07c|定义升级到真实构建的条件（代码生成/框架约束/alias/project references）|P7-07a,b|todo|
-|P7-07d|在需要时生成受控 build plan，而非默认安装依赖|P7-07c|todo|
+|P7-07|为动态/脚本语言提供默认轻路径|P7-05|done|
+|P7-07a|实现 Python 免构建路径（源码+元数据+解释器要求）|P7-07|done|
+|P7-07b|实现 JS/TS 免构建路径（源码+package/tsconfig/workspace）|P7-07|done|
+|P7-07c|定义升级到真实构建的条件（代码生成/框架约束/alias/project references）|P7-07a,b|done|
+|P7-07d|在需要时生成受控 build plan，而非默认安装依赖|P7-07c|done|
 
 **实现文件**: `src/layers/l3_analysis/build/builders/python.py`, `src/layers/l3_analysis/build/builders/javascript.py`
 

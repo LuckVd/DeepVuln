@@ -2,6 +2,26 @@
 
 ## 2026-03-26
 
+### P7-07: Python/JS/TS 轻构建与免构建路径完成
+
+- **Goal ID**: P7-07
+- **Summary**: 为 Python、JavaScript、TypeScript 实现免构建路径，这些动态语言在 CodeQL 分析中不需要编译，但检测可能需要构建的场景并给出警告
+- **Impact**:
+  - `src/layers/l3_analysis/build/builders/python.py`: Python 构建器（407 行）
+  - `src/layers/l3_analysis/build/builders/javascript.py`: JS/TS 构建器（487 行）
+  - `src/layers/l3_analysis/build/builders/__init__.py`: 导出新 Builder
+  - `tests/unit/test_l3/test_builders/test_python_builder.py`: 29 个单元测试（377 行）
+  - `tests/unit/test_l3/test_builders/test_javascript_builder.py`: 31 个单元测试（446 行）
+- **Test Coverage**:
+  - PythonBuilder: pyproject.toml/requirements.txt/setup.py 检测、Poetry/uv 包管理器识别、Cython/Protobuf 检测警告、版本解析
+  - JavaScriptBuilder: package.json/tsconfig.json 检测、TypeScript 区分、project refs/paths aliases/workspace 检测警告、npm/yarn/pnpm 区分
+- **Tests**: 60 passed
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
+### P7-06: Go/Java 标准构建支持完成
+
 ### P7-06: Go/Java 标准构建支持完成
 
 - **Goal ID**: P7-06
@@ -21,7 +41,7 @@
 - **Tests**: 64 passed (all L3 tests: 1596 passed)
 - **Dead Code**: not run
 - **Security**: No secrets exposed
-- **Commit**: pending
+- **Commit**: 724c281
 
 ## 2026-03-25
 

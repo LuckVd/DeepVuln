@@ -15,6 +15,8 @@ from .base import (
 )
 from .go import GoBuilder
 from .java import JavaBuilder
+from .javascript import JavaScriptBuilder
+from .python import PythonBuilder
 
 __all__ = [
     "BuildResult",
@@ -25,4 +27,6 @@ __all__ = [
     "LanguageBuilder",
     "GoBuilder",
     "JavaBuilder",
+    "JavaScriptBuilder",
+    "PythonBuilder",
 ]
