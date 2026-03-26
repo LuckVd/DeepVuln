@@ -1,42 +1,41 @@
-goal_id: P7-07
-title: "Python/JS/TS 轻构建与免构建路径"
+goal_id: P7-05e
+title: "集成 Builder 系统到 CodeQL scan 流程"
 stage: completed
 status: completed
-selected_option: P7-07
+selected_option: P7-05e
 design_confirmed: true
 blocked_by: []
 open_questions: []
 resolved_questions:
-  - question: "是否需要检测 Pipenv/PDM 等 Python 包管理器？"
-    resolution: "增加 uv 支持，其他（Pipenv/PDM）暂不支持"
-  - question: "是否需要检测 monorepo 工具（nx/turbo/lerna）？"
-    resolution: "只检测 package.json workspaces 字段"
+  - question: "是否需要保留 BuildSystemDetector 作为回退？"
+    resolution: "保留作为未知语言的回退"
+  - question: "Builder.analyze() 是同步方法，是否需要异步包装？"
+    resolution: "直接同步调用（操作轻量）"
 goal_candidates:
-  - id: P7-07
-    title: "Python/JS/TS 轻构建与免构建路径"
-    reason: "用户指定"
+  - id: P7-05e
+    title: "集成 Builder 系统到 CodeQL scan 流程"
+    reason: "打通完整扫描链路，验证已实现 Builder"
 implementation_steps:
   - id: S1
-    description: "创建 PythonBuilder 类 (builders/python.py)"
+    description: "修改 CodeQLEngine._execute_build() 使用 Builder 系统"
     status: completed
   - id: S2
-    description: "实现 Python Cython/Protobuf 检测"
+    description: "修改 CodeQLEngine.scan() 接受 readiness_result 参数"
     status: completed
   - id: S3
-    description: "创建 JavaScriptBuilder 类 (builders/javascript.py)"
+    description: "修改 CLI 层传递 readiness_result"
     status: completed
   - id: S4
-    description: "实现 TypeScript 检测和 project refs 检测"
+    description: "增强 CLI 输出显示 Builder 警告"
     status: completed
   - id: S5
     description: "编写单元测试"
     status: completed
   - id: S6
-    description: "集成验证"
+    description: "集成测试验证"
     status: completed
 test_scope:
-  - "tests/unit/test_l3/test_builders/test_python_builder.py"
-  - "tests/unit/test_l3/test_builders/test_javascript_builder.py"
+  - "tests/unit/test_l3/test_codeql_builder_integration.py"
 security_blockers: []
 dead_code_actions: []
 sync_status: synced

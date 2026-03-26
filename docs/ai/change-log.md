@@ -2,6 +2,27 @@
 
 ## 2026-03-26
 
+### P7-05e: 集成 Builder 系统到 CodeQL scan 流程完成
+
+- **Goal ID**: P7-05e
+- **Summary**: 将已实现的 PythonBuilder、JavaScriptBuilder、GoBuilder、JavaBuilder 集成到 CodeQL 引擎的 scan 流程，替换旧的 BuildSystemDetector，实现完整的智能构建分析链路
+- **Impact**:
+  - `src/layers/l3_analysis/engines/codeql.py`: 集成 Builder 系统 (+150 行)
+  - `src/cli/main.py`: 传递 readiness_result + 显示警告 (+10 行)
+  - `tests/unit/test_l3/test_codeql_builder_integration.py`: 12 个单元测试
+- **Test Coverage**:
+  - `_execute_build()` 使用 Builder 和 ReadinessInfo
+  - `scan()` 接受 `readiness_result` 参数
+  - `scan_multi_language()` 传递 readiness_result
+  - 向后兼容（无 readiness_result 时回退）
+  - Builder 警告传递到 metadata
+- **Tests**: 12 passed
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
+### P7-07: Python/JS/TS 轻构建与免构建路径完成
+
 ### P7-07: Python/JS/TS 轻构建与免构建路径完成
 
 - **Goal ID**: P7-07

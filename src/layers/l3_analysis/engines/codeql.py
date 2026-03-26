@@ -724,6 +724,7 @@ class CodeQLEngine(BaseEngine):
         skip_build: bool = False,
         build_command: str | None = None,
         llm_client: Any = None,
+        readiness_result: Any = None,
         **options,
     ) -> ScanResult:
         """
@@ -737,6 +738,7 @@ class CodeQLEngine(BaseEngine):
         health status metadata. Never raises exceptions.
 
         P6-02: All error paths now return structured error types and language_status.
+        P7-05e: Integrated Builder system for intelligent build analysis.
 
         Args:
             source_path: Path to the source code to scan.
@@ -749,6 +751,7 @@ class CodeQLEngine(BaseEngine):
             skip_build: Whether to skip the build step (use --no-build).
             build_command: Custom build command to use (overrides auto-detection).
             llm_client: LLM client for build diagnostics.
+            readiness_result: ReadinessGateResult with pre-analyzed build info.
             **options: Additional options.
 
         Returns:
@@ -868,19 +871,43 @@ class CodeQLEngine(BaseEngine):
         try:
             # Phase 0: Build project (if required and not using cached DB)
             build_diagnostic = None
+            build_warnings = []
             if not skip_build and not use_cached_db:
+                # Extract readiness_info for the current language
+                readiness_info = None
+                if readiness_result is not None:
+                    # Try to find matching build target
+                    build_targets = getattr(readiness_result, 'build_targets', []) or []
+                    for target in build_targets:
+                        target_lang = getattr(target, 'language', '').lower()
+                        if target_lang == codeql_lang.lower():
+                            # Found matching target, check build_readiness map
+                            target_name = getattr(target, 'name', '')
+                            if hasattr(readiness_result, 'build_warnings') and target_name in readiness_result.build_warnings:
+                                build_warnings = readiness_result.build_warnings[target_name]
+                            break
+
+                    # If readiness_result has direct readiness info, use it
+                    if hasattr(readiness_result, 'build_readiness'):
+                        # Legacy: direct attribute
+                        pass
+
                 try:
                     build_result = await asyncio.wait_for(
                         self._execute_build(
                             source_path=source_path,
                             language=codeql_lang,
                             build_command=build_command,
+                            readiness_info=readiness_info,
                             llm_client=llm_client,
                         ),
                         timeout=self.build_timeout,
                     )
                     if build_result and not build_result.get("success", True):
                         build_diagnostic = build_result.get("diagnostic")
+                        # Collect warnings from build result
+                        if build_result.get("warnings"):
+                            build_warnings.extend(build_result["warnings"])
                         # Log build failure but continue with database creation
                         # CodeQL might still work with partial build
                         logger.warning(
@@ -1114,6 +1141,11 @@ class CodeQLEngine(BaseEngine):
             )
             result.metadata["language_status"] = {codeql_lang: lang_status.model_dump()}
 
+            # P7-05e: Add build warnings from Builder system
+            if build_warnings:
+                result.metadata["build_warnings"] = build_warnings
+                logger.info(f"Build warnings: {build_warnings}")
+
             return self.finalize_scan_result(
                 result,
                 success=True,
@@ -1156,6 +1188,7 @@ class CodeQLEngine(BaseEngine):
         source_path: Path,
         languages: list[str] | None = None,
         min_file_percentage: float = 10.0,
+        readiness_result: Any = None,
         **options,
     ) -> ScanResult:
         """
@@ -1165,11 +1198,13 @@ class CodeQLEngine(BaseEngine):
         CodeQL databases for each, combining the results.
 
         P6-02: Returns language_status for each language scanned.
+        P7-05e: Accepts readiness_result for Builder integration.
 
         Args:
             source_path: Path to the source code.
             languages: Specific languages to scan (auto-detected if not specified).
             min_file_percentage: Minimum percentage for a language to be included.
+            readiness_result: ReadinessGateResult with pre-analyzed build info.
             **options: Additional options passed to scan().
 
         Returns:
@@ -1242,6 +1277,7 @@ class CodeQLEngine(BaseEngine):
                     result = await self.scan(
                         source_path=subdir,
                         language=codeql_lang,
+                        readiness_result=readiness_result,
                         **options,
                     )
 
@@ -1532,14 +1568,19 @@ class CodeQLEngine(BaseEngine):
         source_path: Path,
         language: str,
         build_command: str | None = None,
+        readiness_info: Any = None,
         llm_client: Any = None,
     ) -> dict[str, Any] | None:
         """Execute build before CodeQL database creation.
+
+        Uses the Builder system for intelligent build analysis, with fallback
+        to BuildSystemDetector for unsupported languages.
 
         Args:
             source_path: Path to the source code.
             language: Programming language.
             build_command: Custom build command (overrides auto-detection).
+            readiness_info: BuildReadinessInfo from ReadinessGate (pre-analyzed).
             llm_client: LLM client for build diagnostics.
 
         Returns:
@@ -1551,47 +1592,144 @@ class CodeQLEngine(BaseEngine):
             diagnose_build_failure,
         )
 
-        # Detect build system
-        detector = BuildSystemDetector()
-        config = detector.detect(source_path, language)
+        builder_output = None
+        builder_warnings: list[str] = []
 
-        # Override build command if provided
-        if build_command:
-            config.build_command = build_command
+        # Priority 1: Use ReadinessGate's pre-analyzed result
+        if readiness_info is not None:
+            builder_warnings = getattr(readiness_info, 'warnings', []) or []
 
-        # Skip if no build required or no build command
-        if not config.requires_build or not config.build_command:
+            # Check if build should be skipped
+            skip_reason = getattr(readiness_info, 'skip_reason', None)
+            if skip_reason:
+                logger.info(f"Build skipped for {language}: {skip_reason}")
+                return {
+                    "success": True,
+                    "skipped": True,
+                    "reason": skip_reason,
+                    "warnings": builder_warnings,
+                }
+
+            # Use Builder-provided build_command if available
+            builder_build_cmd = getattr(readiness_info, 'build_command', None)
+            if builder_build_cmd and not build_command:
+                build_command = builder_build_cmd
+
+            # Check if buildable
+            if not getattr(readiness_info, 'buildable', True):
+                logger.info(f"Project marked as not buildable for {language}")
+                return {
+                    "success": True,
+                    "skipped": True,
+                    "reason": "Project not buildable",
+                    "warnings": builder_warnings,
+                }
+
+        # Priority 2: Use Builder system directly (if no readiness_info)
+        if readiness_info is None:
+            try:
+                from src.layers.l3_analysis.build.builders import BuilderRegistry
+                builder = BuilderRegistry.get(language)
+                if builder:
+                    builder_output = builder.analyze(source_path)
+                    builder_warnings = builder_output.warnings or []
+
+                    # Check for skip
+                    if builder_output.skip_reason:
+                        logger.info(f"Builder skipped for {language}: {builder_output.skip_reason}")
+                        return {
+                            "success": True,
+                            "skipped": True,
+                            "reason": builder_output.skip_reason,
+                            "warnings": builder_warnings,
+                        }
+
+                    # Use Builder-provided build_command
+                    if builder_output.build_command and not build_command:
+                        build_command = builder_output.build_command
+
+            except Exception as e:
+                logger.warning(f"Builder analysis failed for {language}: {e}")
+                builder_output = None
+
+        # Priority 3: Fallback to BuildSystemDetector for unsupported languages
+        config = None
+        if not build_command:
+            detector = BuildSystemDetector()
+            config = detector.detect(source_path, language)
+
+            if build_command:
+                config.build_command = build_command
+            elif config.build_command:
+                build_command = config.build_command
+
+        # Determine if build is required
+        requires_build = language.lower() in ("java", "go", "cpp", "c", "csharp", "kotlin", "scala")
+
+        # For Python/JavaScript/TypeScript/Ruby - no build required
+        if language.lower() in ("python", "javascript", "typescript", "ruby"):
             logger.info(f"No build required for language: {language}")
-            return {"success": True, "skipped": True, "reason": "No build required"}
-
-        # Execute build
-        logger.info(
-            f"Executing build for {language}. "
-            f"Build system: {config.build_system.value}, "
-            f"Command: {config.build_command}"
-        )
-
-        executor = BuildExecutor(timeout=self.build_timeout)
-        result = await executor.execute(config, source_path)
-
-        # If build failed, try to diagnose
-        if not result.success and not result.skipped:
-            diagnostic = diagnose_build_failure(
-                result=result,
-                config=config,
-                source_path=source_path,
-                llm_client=llm_client,
-            )
             return {
-                "success": False,
-                "result": result,
-                "diagnostic": diagnostic,
+                "success": True,
+                "skipped": True,
+                "reason": "No build required (interpreted language)",
+                "warnings": builder_warnings,
+                "detected_files": getattr(builder_output, 'detected_files', []) if builder_output else [],
+            }
+
+        # If build command provided or detected, execute build
+        if build_command:
+            logger.info(
+                f"Executing build for {language}. "
+                f"Command: {build_command}"
+            )
+
+            # Create config for BuildExecutor
+            if config is None:
+                config = detector.detect(source_path, language) if 'detector' in dir() else None
+
+            if config:
+                config.build_command = build_command
+                executor = BuildExecutor(timeout=self.build_timeout)
+                result = await executor.execute(config, source_path)
+
+                # If build failed, try to diagnose
+                if not result.success and not result.skipped:
+                    diagnostic = diagnose_build_failure(
+                        result=result,
+                        config=config,
+                        source_path=source_path,
+                        llm_client=llm_client,
+                    )
+                    return {
+                        "success": False,
+                        "result": result,
+                        "diagnostic": diagnostic,
+                        "warnings": builder_warnings,
+                    }
+
+                return {
+                    "success": True,
+                    "result": result,
+                    "diagnostic": None,
+                    "warnings": builder_warnings,
+                }
+
+        # No build command available
+        if requires_build:
+            logger.warning(f"No build command available for {language}, proceeding without build")
+            return {
+                "success": True,
+                "skipped": True,
+                "reason": "No build command available",
+                "warnings": builder_warnings,
             }
 
         return {
             "success": True,
-            "result": result,
-            "diagnostic": None,
+            "skipped": True,
+            "reason": "No build required",
+            "warnings": builder_warnings,
         }
 
     async def _create_database(

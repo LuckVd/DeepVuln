@@ -1335,6 +1335,7 @@ async def run_full_security_scan(
                 source_path=source_path,
                 languages=[lang.lower() for lang in supported_detected],
                 severity_filter=None,
+                readiness_result=codeql_gate,
             )))
         else:
             # Single language or no supported languages - use regular scan
@@ -1342,6 +1343,7 @@ async def run_full_security_scan(
                 source_path=source_path,
                 language=primary_lang.lower(),
                 severity_filter=None,
+                readiness_result=codeql_gate,
             )))
         executed_engines.add("codeql")
     elif "codeql" in enabled_engines:
@@ -1406,6 +1408,14 @@ async def run_full_security_scan(
                 lang = skipped.get("language", "unknown")
                 reason = skipped.get("reason", "no reason")
                 console.print(f"    [yellow]- {lang}: {reason}[/]")
+
+        # P7-05e: Show build warnings from Builder system
+        build_warnings = codeql_gate.get("build_warnings", {})
+        if build_warnings:
+            console.print("  [yellow]Build warnings:[/]")
+            for target_name, warnings in build_warnings.items():
+                for warning in warnings:
+                    console.print(f"    [yellow]⚠ {target_name}: {warning}[/]")
 
         # Show tool report summary
         tool_report = codeql_gate.get("tool_report")
@@ -1527,6 +1537,12 @@ async def run_full_security_scan(
                             f"Agent partial: {files_failed}/{files_total} files failed "
                             f"({failure_rate:.1%})"
                         )
+                # P7-05e: Display build warnings from Builder system
+                if engine_name == "codeql" and hasattr(scan_result, 'metadata'):
+                    if scan_result.metadata and "build_warnings" in scan_result.metadata:
+                        build_warnings = scan_result.metadata["build_warnings"]
+                        if build_warnings:
+                            phase_info["build_warnings"] = build_warnings
                 console.print(f"  ✓ {engine_name.capitalize()}: {findings_count} findings")
                 result["phases"][engine_name] = phase_info
             else:

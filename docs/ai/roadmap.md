@@ -220,9 +220,9 @@
 |P7-05b|实现 BuildExecutor 统一封装（输出捕获/超时/错误分类）|P7-05a|done|
 |P7-05c|实现结果缓存（探测结果/构建结果/失败分类）|P7-05a|done|
 |P7-05d|实现标准化可解释输出（selected/skipped/failed reasons）|P7-05b|done|
-|P7-05e|集成到 CodeQL 引擎的 scan 流程|P7-05d|todo|
+|P7-05e|集成到 CodeQL 引擎的 scan 流程|P7-05d|done|
 
-**实现文件**: `src/layers/l3_analysis/build/build_plan.py`
+**实现文件**: `src/layers/l3_analysis/engines/codeql.py`, `src/cli/main.py`
 
 ### P7-06: Go/Java 标准构建支持（P1）
 
