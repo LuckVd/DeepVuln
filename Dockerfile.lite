@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     ca-certificates \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建工作目录
@@ -42,9 +43,10 @@ RUN uv pip install semgrep
 # 复制项目代码
 COPY . .
 
-# 创建非 root 用户
+# 创建非 root 用户和运行时目录
 RUN useradd -m -s /bin/bash deepvuln \
-    && chown -R deepvuln:deepvuln /app
+    && mkdir -p /opt/runtimes \
+    && chown -R deepvuln:deepvuln /app /opt/runtimes
 
 # 切换到非 root 用户
 USER deepvuln

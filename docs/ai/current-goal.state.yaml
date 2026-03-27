@@ -1,86 +1,54 @@
-goal_id: P8-01
-title: "多版本运行时环境管理器"
+goal_id: P7-11b
+title: "Docker 集成测试"
 stage: completed
 status: completed
-selected_option: "运行时动态安装方案"
+selected_option: "Docker 集成测试框架"
 design_confirmed: true
 blocked_by: []
 open_questions: []
 resolved_questions: []
-goal_candidates:
-  - id: P8-01
-    title: "多版本运行时环境管理器"
-    reason: "解决环境版本不匹配导致的构建失败问题，支持 Java/Python/Node/Go 多版本自动安装和切换"
 implementation_steps:
   - id: S1
-    description: "创建 src/layers/l3_analysis/build/runtime/ 目录结构"
+    description: "创建 tests/integration/docker/ 目录结构"
     status: completed
     priority: P0
   - id: S2
-    description: "实现 RuntimeRegistry 运行时版本注册表"
+    description: "创建 conftest.py (Docker fixture)"
     status: completed
     priority: P0
   - id: S3
-    description: "实现 RuntimeInstaller 基础框架和 Java 安装器"
+    description: "创建 Python 集成测试 (P7-11b-1)"
     status: completed
-    priority: P0
+    priority: P1
   - id: S4
-    description: "实现 RuntimeSwitcher 环境变量切换"
+    description: "创建 JavaScript 集成测试 (P7-11b-2)"
     status: completed
-    priority: P0
+    priority: P1
   - id: S5
-    description: "实现 RuntimeVersionManager 统一管理"
+    description: "创建 Go 集成测试 (P7-11b-3)"
     status: completed
-    priority: P0
+    priority: P1
   - id: S6
-    description: "修改 ProvisionPolicy 添加 AUTO_INSTALL"
+    description: "完善 Java 集成测试 (P7-11b-4)"
     status: completed
     priority: P1
   - id: S7
-    description: "修改 ReadinessGate 集成版本管理器"
+    description: "创建 C/C++ 集成测试 (P7-11b-5)"
     status: completed
     priority: P1
-  - id: S8
-    description: "实现 Python 安装器"
-    status: completed
-    priority: P1
-  - id: S9
-    description: "实现 Node.js 安装器"
-    status: completed
-    priority: P2
-  - id: S10
-    description: "实现 Go 安装器"
-    status: completed
-    priority: P2
-  - id: S11
-    description: "修改 Dockerfile 支持动态安装"
-    status: pending
-    priority: P1
-  - id: S12
-    description: "单元测试覆盖"
-    status: completed
-    priority: P0
-  - id: S13
-    description: "集成测试：Java 8 项目"
-    status: pending
-    priority: P0
-  - id: S14
-    description: "更新文档"
-    status: pending
-    priority: P2
 test_scope:
-  - "tests/unit/test_l3/test_runtime/"
-  - "tests/integration/test_java8_project.py"
-supported_runtimes:
-  java: ["8", "11", "17", "21"]
-  python: ["3.8", "3.9", "3.10", "3.11", "3.12"]
-  node: ["16", "18", "20"]
-  go: ["1.20", "1.21", "1.22"]
-install_strategy: "dynamic_download"
+  - "tests/integration/docker/"
+test_result: "47 passed, 9 skipped, 6 warnings"
+new_files:
+  - "tests/integration/docker/__init__.py"
+  - "tests/integration/docker/conftest.py"
+  - "tests/integration/docker/test_python_integration.py"
+  - "tests/integration/docker/test_javascript_integration.py"
+  - "tests/integration/docker/test_go_integration.py"
+  - "tests/integration/docker/test_java_integration.py"
+  - "tests/integration/docker/test_cpp_integration.py"
 security_blockers: []
 dead_code_actions: []
-sync_status: synced
+sync_status: pending
 last_check_at: "2026-03-27"
-last_security_scan_at: null
-last_deadcode_scan_at: null
-last_synced_at: "2026-03-27"
+last_synced_at: null

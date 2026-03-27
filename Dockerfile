@@ -56,6 +56,7 @@ RUN env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u
         ruby-full \
         unzip \
         wget \
+        xz-utils \
     # Install Maven and Gradle for Java builds (CodeQL database creation)
     && env -u HTTP_PROXY -u HTTPS_PROXY -u NO_PROXY -u http_proxy -u https_proxy -u no_proxy \
         apt-get install -y \
@@ -173,8 +174,8 @@ RUN python -m pip install --no-cache-dir uv \
     && uv pip install --python /app/.venv/bin/python -e ".[analysis]" semgrep
 
 RUN useradd -m -s /bin/bash deepvuln \
-    && mkdir -p /target /tmp/codeql_cache /home/deepvuln/.cache /home/deepvuln/.codeql /go \
-    && chown -R deepvuln:deepvuln /app /target /tmp/codeql_cache /home/deepvuln /go
+    && mkdir -p /target /tmp/codeql_cache /home/deepvuln/.cache /home/deepvuln/.codeql /go /opt/runtimes \
+    && chown -R deepvuln:deepvuln /app /target /tmp/codeql_cache /home/deepvuln /go /opt/runtimes
 
 USER deepvuln
 ENV HOME=/home/deepvuln

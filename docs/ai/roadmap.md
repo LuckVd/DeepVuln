@@ -304,11 +304,13 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P7-11b-1|Python Docker 集成测试|P7-11a|todo|
-|P7-11b-2|JavaScript/TypeScript Docker 集成测试|P7-11a|todo|
-|P7-11b-3|Go Docker 集成测试|P7-11a|todo|
-|P7-11b-4|Java Docker 集成测试|P7-11a|todo|
-|P7-11b-5|C/C++ Docker 集成测试|P7-11a|todo|
+|P7-11b-1|Python Docker 集成测试|P7-11a|done|
+|P7-11b-2|JavaScript/TypeScript Docker 集成测试|P7-11a|done|
+|P7-11b-3|Go Docker 集成测试|P7-11a|done|
+|P7-11b-4|Java Docker 集成测试|P7-11a|done|
+|P7-11b-5|C/C++ Docker 集成测试|P7-11a|done|
+
+**实现文件**: `tests/integration/docker/`
 
 ### P8-01: 多版本运行时环境管理器（P0）
 
