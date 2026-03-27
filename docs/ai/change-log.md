@@ -28,7 +28,7 @@
 - **Tests**: 29 passed
 - **Dead Code**: not run
 - **Security**: No secrets exposed
-- **Commit**: pending
+- **Commit**: 0969ff5
 
 ### P7-11b-4: Java Docker 集成测试完成
 
