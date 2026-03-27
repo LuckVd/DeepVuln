@@ -20,7 +20,7 @@
 - **Tests**: 28 passed (CppBuilder), 152 passed (all builders)
 - **Dead Code**: not run
 - **Security**: No secrets exposed
-- **Commit**: pending
+- **Commit**: a7eb212
 
 ### P7-10: 基线策略、测试与效果评估完成
 
