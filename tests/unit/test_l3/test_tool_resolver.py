@@ -137,6 +137,128 @@ class TestVersionMatches:
 
 
 # =============================================================================
+# Version Matching Edge Case Tests (P7-10c)
+# =============================================================================
+
+
+class TestVersionMatchesEdgeCases:
+    """Tests for version matching edge cases (P7-10c)."""
+
+    def test_caret_operator_major(self):
+        """Test ^ operator with major version only."""
+        assert version_matches("1.0.0", "^1") is True
+        assert version_matches("1.9.9", "^1") is True
+        assert version_matches("2.0.0", "^1") is False
+
+    def test_caret_operator_minor(self):
+        """Test ^ operator with major.minor."""
+        assert version_matches("1.2.0", "^1.2") is True
+        assert version_matches("1.2.9", "^1.2") is True
+        assert version_matches("1.3.0", "^1.2") is True  # ^1.2 allows 1.x
+        assert version_matches("2.0.0", "^1.2") is False
+
+    def test_caret_operator_patch(self):
+        """Test ^ operator with full semver."""
+        assert version_matches("1.2.3", "^1.2.3") is True
+        assert version_matches("1.2.9", "^1.2.3") is True
+        assert version_matches("1.3.0", "^1.2.3") is True  # ^1.2.3 allows 1.x
+        assert version_matches("2.0.0", "^1.2.3") is False
+
+    def test_caret_operator_zero_major(self):
+        """Test ^ operator with 0.x.x versions."""
+        assert version_matches("0.2.3", "^0.2.3") is True
+        assert version_matches("0.2.9", "^0.2.3") is True
+        assert version_matches("0.3.0", "^0.2.3") is False
+
+    def test_caret_operator_zero_minor(self):
+        """Test ^ operator with 0.0.x versions."""
+        assert version_matches("0.0.3", "^0.0.3") is True
+        assert version_matches("0.0.5", "^0.0.3") is False
+
+    def test_tilde_operator_major(self):
+        """Test ~ operator with major version only."""
+        assert version_matches("1.0.0", "~1") is True
+        assert version_matches("1.9.9", "~1") is True
+        assert version_matches("2.0.0", "~1") is False
+
+    def test_tilde_operator_minor(self):
+        """Test ~ operator with major.minor."""
+        assert version_matches("1.2.0", "~1.2") is True
+        assert version_matches("1.2.9", "~1.2") is True
+        assert version_matches("1.3.0", "~1.2") is False
+
+    def test_tilde_operator_patch(self):
+        """Test ~ operator with full semver."""
+        assert version_matches("1.2.3", "~1.2.3") is True
+        assert version_matches("1.2.9", "~1.2.3") is True
+        assert version_matches("1.3.0", "~1.2.3") is False
+
+    def test_lte_operator(self):
+        """Test <= operator."""
+        assert version_matches("11", "<=17") is True
+        assert version_matches("17", "<=17") is True
+        assert version_matches("18", "<=17") is False
+
+    def test_lt_operator(self):
+        """Test < operator."""
+        assert version_matches("11", "<17") is True
+        assert version_matches("16", "<17") is True
+        assert version_matches("17", "<17") is False
+
+    def test_version_with_v_prefix_in_actual(self):
+        """Test actual version with v prefix."""
+        assert version_matches("v18.17.0", "18") is True
+        assert version_matches("v18.17.0", "18.17") is True
+        assert version_matches("v18.17.0", ">=18") is True
+
+    def test_version_with_build_metadata(self):
+        """Test version with build metadata."""
+        assert version_matches("18.17.0+build.123", "18") is True
+        assert version_matches("18.17.0-beta.1", "18") is True
+
+    def test_version_with_prerelease(self):
+        """Test version with prerelease tags."""
+        assert version_matches("1.2.3-alpha", "^1.2.0") is True
+        assert version_matches("1.2.3-rc.1", "~1.2.0") is True
+
+    def test_partial_version_matching(self):
+        """Test partial version matching."""
+        assert version_matches("11.0.1", "11") is True
+        assert version_matches("11.0.1", "11.0") is True
+        assert version_matches("11.0.1", "11.0.1") is True
+        assert version_matches("11.0.1", "11.0.2") is False
+
+    def test_range_inclusive(self):
+        """Test range with inclusive boundaries."""
+        assert version_matches("11", "11-17") is True
+        assert version_matches("14", "11-17") is True
+        assert version_matches("17", "11-17") is True
+        assert version_matches("10", "11-17") is False
+        assert version_matches("18", "11-17") is False
+
+    def test_complex_scenarios(self):
+        """Test complex real-world scenarios."""
+        # Node.js typical ranges
+        assert version_matches("18.17.0", "^16.14.0 || >=18.0.0") is True
+        assert version_matches("14.21.0", "^16.14.0 || >=18.0.0") is False
+
+    def test_invalid_required_version(self):
+        """Test with invalid required version."""
+        assert version_matches("18", "invalid") is False
+        assert version_matches("18", "") is False
+
+    def test_parse_version_edge_cases(self):
+        """Test parse_version with edge cases."""
+        from src.layers.l3_analysis.build.tool_resolver import parse_version
+
+        assert parse_version("1.2.3.4.5") == (1, 2, 3, 4, 5)
+        assert parse_version("1") == (1,)
+        assert parse_version("") is None
+        assert parse_version("invalid") is None
+        assert parse_version("1.x.3") == (1,)
+
+
+# =============================================================================
 # ToolInfo Tests
 # =============================================================================
 

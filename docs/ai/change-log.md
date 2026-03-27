@@ -1,5 +1,33 @@
 # Change Log
 
+## 2026-03-27
+
+### P7-10: 基线策略、测试与效果评估完成
+
+- **Goal ID**: P7-10
+- **Summary**: 验证 LLM 决策相对规则基线是否有净收益，补充测试覆盖，并建立评估指标体系
+- **Impact**:
+  - `src/layers/l3_analysis/decision/models.py`: 新增 `BaselineStrategy` 枚举和 `LanguageDecisionMetrics` 数据类
+  - `src/layers/l3_analysis/decision/language_decider.py`: 实现 4 种 baseline 策略（hybrid/language_first/attack_surface_first/semgrep_first）
+  - `src/layers/l3_analysis/decision/__init__.py`: 导出新类型
+  - `src/layers/l3_analysis/readiness_gate.py`: 集成 metrics 收集
+  - `src/layers/l3_analysis/build/version_detector.py`: 补充边缘格式支持（.nvmrc lts/*、package.json .x）
+  - `src/layers/l3_analysis/build/tool_resolver.py`: 补充版本范围匹配（>=, ^, ~）
+  - `tests/unit/test_l3/test_decision.py`: 扩展至 51 个单元测试（+16 个）
+  - `tests/unit/test_l3/test_version_detector.py`: 25 个单元测试
+  - `tests/unit/test_l3/test_tool_resolver.py`: 48 个单元测试
+  - `tests/integration/test_decision_e2e.py`: 新增集成测试文件
+- **Test Coverage**:
+  - Baseline 策略切换测试（4 种策略）
+  - LLM 决策器边缘场景（空响应、超时、格式错误、不支持语言过滤）
+  - 版本检测边缘格式（.nvmrc lts/*、package.json .x）
+  - 工具兼容性版本范围匹配（>=, ^, ~）
+  - LanguageDecisionMetrics 收集和汇总
+- **Tests**: 153 passed (decision: 51, version_detector: 25, tool_resolver: 48, + 29 other L3 tests)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
 ## 2026-03-26
 
 ### P7-05e: 集成 Builder 系统到 CodeQL scan 流程完成

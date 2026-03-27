@@ -36,12 +36,14 @@ from .build_assessor import BuildDifficultyAssessor
 from .language_decider import CodeQLLanguageDecider
 from .models import (
     AttackSurfaceSummary,
+    BaselineStrategy,
     BuildDifficulty,
     BuildDifficultyLevel,
     DecisionConstraints,
     DecisionError,
     LanguageDecision,
     LanguageDecisionInput,
+    LanguageDecisionMetrics,
     LanguageRecommendation,
     LanguageStructure,
     ModuleSummary,
@@ -60,12 +62,14 @@ __all__ = [
     "LanguageStructure",
     "BuildDifficulty",
     "BuildDifficultyLevel",
+    "BaselineStrategy",
     "AttackSurfaceSummary",
     "SemgrepSummary",
     "ModuleSummary",
     # Output models
     "LanguageRecommendation",
     "SkippedLanguage",
+    "LanguageDecisionMetrics",
     # Assessors
     "BuildDifficultyAssessor",
 ]

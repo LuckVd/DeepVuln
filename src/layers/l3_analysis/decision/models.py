@@ -20,6 +20,19 @@ class BuildDifficultyLevel(str, Enum):
     UNKNOWN = "unknown"    # Cannot determine
 
 
+class BaselineStrategy(str, Enum):
+    """Deterministic baseline strategies for language selection.
+
+    When LLM decision is unavailable or fails, these strategies provide
+    deterministic fallback decisions.
+    """
+
+    HYBRID = "hybrid"  # 60% language size + 40% attack surface (default)
+    LANGUAGE_FIRST = "language_first"  # Primary/largest language only
+    ATTACK_SURFACE_FIRST = "attack_surface_first"  # Most entry points first
+    SEMGREP_FIRST = "semgrep_first"  # Languages with most Semgrep findings first
+
+
 class LanguageStructure(BaseModel):
     """Language structure information for decision input."""
 
@@ -124,6 +137,10 @@ class DecisionConstraints(BaseModel):
     fallback_strategy: str = Field(
         default="hybrid",
         description="Fallback strategy: 'primary-language', 'attack-surface', or 'hybrid'",
+    )
+    baseline_strategy: BaselineStrategy = Field(
+        default=BaselineStrategy.HYBRID,
+        description="Deterministic baseline strategy for language selection",
     )
 
 
@@ -258,3 +275,73 @@ class DecisionError(BaseModel):
         default=None,
         description="Fallback decision if applied",
     )
+
+
+class LanguageDecisionMetrics(BaseModel):
+    """Metrics for evaluating language decision quality.
+
+    Collects performance and quality metrics for language decision,
+    enabling comparison between LLM and baseline strategies.
+    """
+
+    decision_source: str = Field(
+        ...,
+        description="Source of decision: 'llm', 'baseline', or 'fallback'",
+    )
+    languages_selected: list[str] = Field(
+        default_factory=list,
+        description="Languages selected for scanning",
+    )
+    languages_skipped: list[str] = Field(
+        default_factory=list,
+        description="Languages skipped",
+    )
+
+    # Timing
+    decision_time_ms: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Time taken to make the decision in milliseconds",
+    )
+    total_scan_time_ms: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Total scan time for selected languages in milliseconds",
+    )
+
+    # Results
+    scan_success: bool = Field(
+        default=True,
+        description="Whether the scan completed successfully",
+    )
+    findings_count: int = Field(
+        default=0,
+        ge=0,
+        description="Total findings discovered across all selected languages",
+    )
+
+    # For comparison
+    baseline_languages: list[str] | None = Field(
+        default=None,
+        description="Languages that would have been selected by baseline strategy",
+    )
+    finding_loss_rate: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of findings lost compared to baseline (0.0 = no loss)",
+    )
+
+    def to_summary_dict(self) -> dict[str, Any]:
+        """Convert to a summary dictionary for reporting."""
+        return {
+            "decision_source": self.decision_source,
+            "languages_selected": self.languages_selected,
+            "languages_skipped": self.languages_skipped,
+            "decision_time_ms": self.decision_time_ms,
+            "total_scan_time_ms": self.total_scan_time_ms,
+            "scan_success": self.scan_success,
+            "findings_count": self.findings_count,
+            "baseline_languages": self.baseline_languages,
+            "finding_loss_rate": self.finding_loss_rate,
+        }

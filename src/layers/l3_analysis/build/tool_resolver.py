@@ -289,6 +289,10 @@ def version_matches(actual: str | None, required: str) -> bool:
     - Exact match: "11"
     - Greater or equal: ">=11"
     - Greater than: ">11"
+    - Less than or equal: "<=11"
+    - Less than: "<11"
+    - Caret (compatible): "^1.2.3" (>=1.2.3 <2.0.0)
+    - Tilde (patch): "~1.2.3" (>=1.2.3 <1.3.0)
     - Range: "11-17" (inclusive)
 
     Args:
@@ -307,15 +311,63 @@ def version_matches(actual: str | None, required: str) -> bool:
 
     required = required.strip()
 
+    # Handle || (OR) operator
+    if "||" in required:
+        constraints = [c.strip() for c in required.split("||")]
+        return any(version_matches(actual, c) for c in constraints)
+
     # Handle >= constraint
     if required.startswith(">="):
         required_tuple = parse_version(required[2:])
-        return required_tuple is not None and actual_tuple >= required_tuple
+        return required_tuple is not None and _version_gte(actual_tuple, required_tuple)
 
     # Handle > constraint
     if required.startswith(">"):
         required_tuple = parse_version(required[1:])
-        return required_tuple is not None and actual_tuple > required_tuple
+        return required_tuple is not None and _version_gt(actual_tuple, required_tuple)
+
+    # Handle <= constraint
+    if required.startswith("<="):
+        required_tuple = parse_version(required[2:])
+        return required_tuple is not None and _version_lte(actual_tuple, required_tuple)
+
+    # Handle < constraint
+    if required.startswith("<"):
+        required_tuple = parse_version(required[1:])
+        return required_tuple is not None and _version_lt(actual_tuple, required_tuple)
+
+    # Handle caret ^ constraint (compatible updates)
+    if required.startswith("^"):
+        required_tuple = parse_version(required[1:])
+        if not required_tuple:
+            return False
+        # ^1.2.3 means >=1.2.3 <2.0.0
+        # ^0.2.3 means >=0.2.3 <0.3.0
+        # ^0.0.3 means >=0.0.3 <0.0.4
+        min_version = required_tuple
+        if required_tuple[0] > 0:
+            max_version = (required_tuple[0] + 1,)
+        elif len(required_tuple) >= 2 and required_tuple[1] > 0:
+            max_version = (required_tuple[0], required_tuple[1] + 1)
+        elif len(required_tuple) >= 3:
+            max_version = (required_tuple[0], required_tuple[1], required_tuple[2] + 1)
+        else:
+            max_version = (required_tuple[0] + 1,)
+        return _version_gte(actual_tuple, min_version) and _version_lt(actual_tuple, max_version)
+
+    # Handle tilde ~ constraint (patch updates)
+    if required.startswith("~"):
+        required_tuple = parse_version(required[1:])
+        if not required_tuple:
+            return False
+        # ~1.2.3 means >=1.2.3 <1.3.0
+        # ~1.2 means >=1.2 <1.3
+        min_version = required_tuple
+        if len(required_tuple) >= 2:
+            max_version = (required_tuple[0], required_tuple[1] + 1)
+        else:
+            max_version = (required_tuple[0] + 1,)
+        return _version_gte(actual_tuple, min_version) and _version_lt(actual_tuple, max_version)
 
     # Handle range constraint (e.g., "11-17")
     if "-" in required:
@@ -324,7 +376,7 @@ def version_matches(actual: str | None, required: str) -> bool:
             min_tuple = parse_version(parts[0])
             max_tuple = parse_version(parts[1])
             if min_tuple and max_tuple:
-                return min_tuple <= actual_tuple <= max_tuple
+                return _version_gte(actual_tuple, min_tuple) and _version_lte(actual_tuple, max_tuple)
 
     # Exact match
     required_tuple = parse_version(required)
@@ -335,7 +387,44 @@ def version_matches(actual: str | None, required: str) -> bool:
     if len(required_tuple) == 1:
         return actual_tuple[0] == required_tuple[0]
 
+    # Match major.minor if only major.minor specified
+    if len(required_tuple) == 2 and len(actual_tuple) >= 2:
+        return actual_tuple[0] == required_tuple[0] and actual_tuple[1] == required_tuple[1]
+
     return actual_tuple == required_tuple
+
+
+def _version_gt(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """Compare version tuples: a > b"""
+    # Pad shorter tuple with zeros
+    max_len = max(len(a), len(b))
+    a_padded = a + (0,) * (max_len - len(a))
+    b_padded = b + (0,) * (max_len - len(b))
+    return a_padded > b_padded
+
+
+def _version_gte(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """Compare version tuples: a >= b"""
+    max_len = max(len(a), len(b))
+    a_padded = a + (0,) * (max_len - len(a))
+    b_padded = b + (0,) * (max_len - len(b))
+    return a_padded >= b_padded
+
+
+def _version_lt(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """Compare version tuples: a < b"""
+    max_len = max(len(a), len(b))
+    a_padded = a + (0,) * (max_len - len(a))
+    b_padded = b + (0,) * (max_len - len(b))
+    return a_padded < b_padded
+
+
+def _version_lte(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
+    """Compare version tuples: a <= b"""
+    max_len = max(len(a), len(b))
+    a_padded = a + (0,) * (max_len - len(a))
+    b_padded = b + (0,) * (max_len - len(b))
+    return a_padded <= b_padded
 
 
 # =============================================================================

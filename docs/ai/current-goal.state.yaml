@@ -1,45 +1,42 @@
-goal_id: P7-05e
-title: "集成 Builder 系统到 CodeQL scan 流程"
-stage: completed
+goal_id: P7-10
+title: "基线策略、测试与效果评估"
+stage: done
 status: completed
-selected_option: P7-05e
+selected_option: P7-10
 design_confirmed: true
 blocked_by: []
 open_questions: []
-resolved_questions:
-  - question: "是否需要保留 BuildSystemDetector 作为回退？"
-    resolution: "保留作为未知语言的回退"
-  - question: "Builder.analyze() 是同步方法，是否需要异步包装？"
-    resolution: "直接同步调用（操作轻量）"
+resolved_questions: []
 goal_candidates:
-  - id: P7-05e
-    title: "集成 Builder 系统到 CodeQL scan 流程"
-    reason: "打通完整扫描链路，验证已实现 Builder"
+  - id: P7-10
+    title: "基线策略、测试与效果评估"
+    reason: "验证 LLM 决策收益，完善测试覆盖"
 implementation_steps:
   - id: S1
-    description: "修改 CodeQLEngine._execute_build() 使用 Builder 系统"
+    description: "新增 BaselineStrategy 枚举和策略实现"
     status: completed
   - id: S2
-    description: "修改 CodeQLEngine.scan() 接受 readiness_result 参数"
+    description: "补充 LLM 决策器边缘场景测试"
     status: completed
   - id: S3
-    description: "修改 CLI 层传递 readiness_result"
+    description: "补充版本检测/工具兼容性边缘场景测试"
     status: completed
   - id: S4
-    description: "增强 CLI 输出显示 Builder 警告"
+    description: "新增集成测试"
     status: completed
   - id: S5
-    description: "编写单元测试"
+    description: "新增 LanguageDecisionMetrics 并集成"
     status: completed
   - id: S6
-    description: "集成测试验证"
+    description: "回归测试验证"
     status: completed
 test_scope:
-  - "tests/unit/test_l3/test_codeql_builder_integration.py"
+  - "tests/unit/test_l3/test_decision.py"
+  - "tests/integration/test_decision_e2e.py"
 security_blockers: []
 dead_code_actions: []
 sync_status: synced
-last_check_at: "2026-03-26"
-last_security_scan_at: null
+last_check_at: "2026-03-27T00:00:00Z"
+last_security_scan_at: "2026-03-27T00:00:00Z"
 last_deadcode_scan_at: null
-last_synced_at: "2026-03-26"
+last_synced_at: "2026-03-27T00:00:00Z"

@@ -278,15 +278,15 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P7-10|验证 LLM 决策相对规则基线是否有净收益|P7-01~P7-09|todo|
-|P7-10a|实现 deterministic baseline（主语言优先/攻击面优先/Semgrep 优先）|P7-10|todo|
-|P7-10b|单元测试：LLM 决策器与结果解析|P7-10|todo|
-|P7-10c|单元测试：版本检测/工具兼容性/构建计划|P7-10|todo|
-|P7-10d|集成测试：多语言项目扫描|P7-10|todo|
-|P7-10e|评估指标：耗时、成功率、发现损失率|P7-10d|todo|
-|P7-10f|回归测试：确保不破坏现有功能|P7-10|todo|
+|P7-10|验证 LLM 决策相对规则基线是否有净收益|P7-01~P7-09|done|
+|P7-10a|实现 deterministic baseline（主语言优先/攻击面优先/Semgrep 优先）|P7-10|done|
+|P7-10b|单元测试：LLM 决策器与结果解析|P7-10|done|
+|P7-10c|单元测试：版本检测/工具兼容性/构建计划|P7-10|done|
+|P7-10d|集成测试：多语言项目扫描|P7-10|done|
+|P7-10e|评估指标：耗时、成功率、发现损失率|P7-10d|done|
+|P7-10f|回归测试：确保不破坏现有功能|P7-10|done|
 
-**实现文件**: `tests/unit/test_l3/test_decision.py`, `tests/unit/test_l3/test_build_environment.py`, `tests/integration/test_codeql_build.py`
+**实现文件**: `src/layers/l3_analysis/decision/models.py`, `src/layers/l3_analysis/decision/language_decider.py`, `src/layers/l3_analysis/readiness_gate.py`, `tests/unit/test_l3/test_decision.py`, `tests/unit/test_l3/test_version_detector.py`, `tests/unit/test_l3/test_tool_resolver.py`, `tests/integration/test_decision_e2e.py`
 
 ---
 

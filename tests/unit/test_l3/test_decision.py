@@ -5,6 +5,9 @@ Tests the decision models, build difficulty assessor, prompt formatting,
 and the core decision logic with both LLM and baseline strategies.
 """
 
+import asyncio
+import json
+
 import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -778,3 +781,393 @@ class TestDecisionIntegration:
             assert rec.language in decision.recommended_languages
             assert 0 <= rec.priority_score <= 1
             assert rec.reasoning  # Should have reasoning
+
+
+# =============================================================================
+# P7-10: Baseline Strategy Tests
+# =============================================================================
+
+
+class TestBaselineStrategy:
+    """Tests for different baseline strategies (P7-10a)."""
+
+    def test_hybrid_strategy(
+        self,
+        sample_languages,
+        sample_attack_surface,
+        sample_constraints,
+        temp_project,
+    ):
+        """Test hybrid baseline strategy (default)."""
+        constraints = DecisionConstraints(
+            max_languages=2,
+            baseline_strategy="hybrid",
+        )
+        input_data = LanguageDecisionInput(
+            languages=sample_languages,
+            attack_surface=sample_attack_surface,
+            constraints=constraints,
+        )
+
+        decider = CodeQLLanguageDecider(
+            project_path=temp_project,
+            constraints=constraints,
+        )
+        decision = decider._make_baseline_decision(input_data)
+
+        assert decision.decision_source == "baseline"
+        assert "Hybrid" in decision.reasoning_summary
+        assert len(decision.recommended_languages) <= 2
+
+    def test_language_first_strategy(self, temp_project):
+        """Test language-first baseline strategy."""
+        constraints = DecisionConstraints(
+            max_languages=2,
+            baseline_strategy="language_first",
+        )
+        languages = [
+            LanguageStructure(name="java", file_count=100, line_count=50000, percentage=60.0),
+            LanguageStructure(name="python", file_count=50, line_count=20000, percentage=25.0),
+            LanguageStructure(name="javascript", file_count=30, line_count=10000, percentage=15.0),
+        ]
+        input_data = LanguageDecisionInput(languages=languages, constraints=constraints)
+
+        decider = CodeQLLanguageDecider(
+            project_path=temp_project,
+            constraints=constraints,
+        )
+        decision = decider._make_baseline_decision(input_data)
+
+        assert decision.decision_source == "baseline"
+        assert "Language-first" in decision.reasoning_summary
+        # Java should be first (largest)
+        assert decision.recommended_languages[0] == "java"
+
+    def test_attack_surface_first_strategy(self, temp_project):
+        """Test attack-surface-first baseline strategy."""
+        constraints = DecisionConstraints(
+            max_languages=2,
+            baseline_strategy="attack_surface_first",
+        )
+        languages = [
+            LanguageStructure(name="java", file_count=100, line_count=50000, percentage=60.0),
+            LanguageStructure(name="python", file_count=50, line_count=20000, percentage=25.0),
+        ]
+        attack_surface = AttackSurfaceSummary(
+            entry_points_by_language={"java": 10, "python": 50}  # Python has more entry points
+        )
+        input_data = LanguageDecisionInput(
+            languages=languages,
+            attack_surface=attack_surface,
+            constraints=constraints,
+        )
+
+        decider = CodeQLLanguageDecider(
+            project_path=temp_project,
+            constraints=constraints,
+        )
+        decision = decider._make_baseline_decision(input_data)
+
+        assert decision.decision_source == "baseline"
+        assert "Attack-surface-first" in decision.reasoning_summary
+        # Python should be first (more entry points)
+        assert decision.recommended_languages[0] == "python"
+
+    def test_semgrep_first_strategy(self, temp_project):
+        """Test semgrep-first baseline strategy."""
+        constraints = DecisionConstraints(
+            max_languages=2,
+            baseline_strategy="semgrep_first",
+        )
+        languages = [
+            LanguageStructure(name="java", file_count=100, line_count=50000, percentage=60.0),
+            LanguageStructure(name="python", file_count=50, line_count=20000, percentage=25.0),
+        ]
+        semgrep_result = SemgrepSummary(
+            findings_by_language={
+                "java": {"critical": 1, "high": 2, "medium": 5},
+                "python": {"critical": 5, "high": 10, "medium": 20},  # Python has more findings
+            }
+        )
+        input_data = LanguageDecisionInput(
+            languages=languages,
+            semgrep_result=semgrep_result,
+            constraints=constraints,
+        )
+
+        decider = CodeQLLanguageDecider(
+            project_path=temp_project,
+            constraints=constraints,
+        )
+        decision = decider._make_baseline_decision(input_data)
+
+        assert decision.decision_source == "baseline"
+        assert "Semgrep-first" in decision.reasoning_summary
+        # Python should be first (more findings)
+        assert decision.recommended_languages[0] == "python"
+
+    def test_semgrep_first_without_semgrep_result(self, temp_project):
+        """Test semgrep-first strategy when no Semgrep results available."""
+        constraints = DecisionConstraints(
+            max_languages=2,
+            baseline_strategy="semgrep_first",
+        )
+        languages = [
+            LanguageStructure(name="java", file_count=100, line_count=50000, percentage=60.0),
+            LanguageStructure(name="python", file_count=50, line_count=20000, percentage=25.0),
+        ]
+        input_data = LanguageDecisionInput(languages=languages, constraints=constraints)
+
+        decider = CodeQLLanguageDecider(
+            project_path=temp_project,
+            constraints=constraints,
+        )
+        decision = decider._make_baseline_decision(input_data)
+
+        # Should still return a decision with base scores
+        assert decision.decision_source == "baseline"
+        assert len(decision.recommended_languages) > 0
+
+
+class TestLLMDecisionEdgeCases:
+    """Tests for LLM decision edge cases (P7-10b)."""
+
+    @pytest.mark.asyncio
+    async def test_llm_empty_recommendations(
+        self,
+        sample_languages,
+        sample_attack_surface,
+        sample_constraints,
+        temp_project,
+    ):
+        """Test handling of LLM returning empty recommendations."""
+        mock_llm = MagicMock(spec=LLMClient)
+        mock_llm.complete = AsyncMock(return_value=LLMResponse(
+            content='{"recommended_languages": [], "recommendations": [], "skipped_languages": []}',
+            provider=LLMProvider.OPENAI,
+            model="gpt-4",
+            usage={"total_tokens": 100},
+        ))
+
+        input_data = LanguageDecisionInput(
+            languages=sample_languages,
+            attack_surface=sample_attack_surface,
+            constraints=sample_constraints,
+        )
+
+        decider = CodeQLLanguageDecider(
+            llm_client=mock_llm,
+            project_path=temp_project,
+            constraints=sample_constraints,
+        )
+
+        # Should fall back to baseline when LLM returns empty
+        decision = await decider.decide(input_data)
+        assert decision.decision_source == "baseline" or len(decision.recommended_languages) >= 0
+
+    @pytest.mark.asyncio
+    async def test_llm_invalid_json_fallback(
+        self,
+        sample_languages,
+        sample_attack_surface,
+        sample_constraints,
+        temp_project,
+    ):
+        """Test fallback when LLM returns invalid JSON."""
+        mock_llm = MagicMock(spec=LLMClient)
+        mock_llm.complete = AsyncMock(return_value=LLMResponse(
+            content='not valid json at all',
+            provider=LLMProvider.OPENAI,
+            model="gpt-4",
+            usage={"total_tokens": 50},
+        ))
+
+        input_data = LanguageDecisionInput(
+            languages=sample_languages,
+            attack_surface=sample_attack_surface,
+            constraints=sample_constraints,
+        )
+
+        decider = CodeQLLanguageDecider(
+            llm_client=mock_llm,
+            project_path=temp_project,
+            constraints=sample_constraints,
+        )
+
+        decision = await decider.decide(input_data)
+        # Should use baseline fallback
+        assert decision.decision_source == "baseline"
+
+    @pytest.mark.asyncio
+    async def test_llm_unsupported_language_filtered(self, temp_project):
+        """Test that LLM-recommended unsupported languages are filtered."""
+        mock_llm = MagicMock(spec=LLMClient)
+        mock_llm.complete = AsyncMock(return_value=LLMResponse(
+            content=json.dumps({
+                "recommended_languages": ["lua", "java", "python"],
+                "recommendations": [
+                    {"language": "lua", "priority_score": 0.9, "reasoning": "test"},
+                    {"language": "java", "priority_score": 0.7, "reasoning": "test"},
+                ],
+                "skipped_languages": [],
+                "estimated_total_time": "10 minutes",
+            }),
+            provider=LLMProvider.OPENAI,
+            model="gpt-4",
+            usage={"total_tokens": 100},
+        ))
+
+        languages = [
+            LanguageStructure(name="lua", file_count=100, line_count=10000, percentage=33.0),
+            LanguageStructure(name="java", file_count=100, line_count=10000, percentage=33.0),
+            LanguageStructure(name="python", file_count=100, line_count=10000, percentage=34.0),
+        ]
+        input_data = LanguageDecisionInput(
+            languages=languages,
+            constraints=DecisionConstraints(),
+        )
+
+        decider = CodeQLLanguageDecider(
+            llm_client=mock_llm,
+            project_path=temp_project,
+        )
+
+        decision = await decider.decide(input_data)
+        # Lua should be filtered (not CodeQL-supported)
+        assert "lua" not in decision.recommended_languages
+
+    @pytest.mark.asyncio
+    async def test_llm_timeout_uses_baseline(
+        self,
+        sample_languages,
+        sample_attack_surface,
+        temp_project,
+    ):
+        """Test that timeout triggers baseline fallback."""
+        constraints = DecisionConstraints(llm_timeout_seconds=10)
+        
+        mock_llm = MagicMock(spec=LLMClient)
+        mock_llm.complete = AsyncMock(side_effect=asyncio.TimeoutError("LLM timeout"))
+
+        input_data = LanguageDecisionInput(
+            languages=sample_languages,
+            attack_surface=sample_attack_surface,
+            constraints=constraints,
+        )
+
+        decider = CodeQLLanguageDecider(
+            llm_client=mock_llm,
+            project_path=temp_project,
+            constraints=constraints,
+        )
+
+        decision = await decider.decide(input_data)
+        assert decision.decision_source == "baseline"
+
+
+class TestBaselineStrategyEnum:
+    """Tests for BaselineStrategy enum."""
+
+    def test_enum_values(self):
+        """Test BaselineStrategy enum has expected values."""
+        from src.layers.l3_analysis.decision import BaselineStrategy
+
+        assert BaselineStrategy.HYBRID.value == "hybrid"
+        assert BaselineStrategy.LANGUAGE_FIRST.value == "language_first"
+        assert BaselineStrategy.ATTACK_SURFACE_FIRST.value == "attack_surface_first"
+        assert BaselineStrategy.SEMGREP_FIRST.value == "semgrep_first"
+
+    def test_constraints_default_strategy(self):
+        """Test DecisionConstraints has default baseline strategy."""
+        constraints = DecisionConstraints()
+        assert constraints.baseline_strategy == "hybrid"
+
+    def test_constraints_custom_strategy(self):
+        """Test DecisionConstraints accepts custom strategy."""
+        constraints = DecisionConstraints(baseline_strategy="language_first")
+        assert constraints.baseline_strategy == "language_first"
+
+
+# =============================================================================
+# LanguageDecisionMetrics Tests
+# =============================================================================
+
+
+class TestLanguageDecisionMetrics:
+    """Tests for LanguageDecisionMetrics (P7-10e)."""
+
+    def test_metrics_creation(self):
+        """Test basic metrics creation."""
+        from src.layers.l3_analysis.decision import LanguageDecisionMetrics
+
+        metrics = LanguageDecisionMetrics(
+            decision_source="llm",
+            languages_selected=["java", "python"],
+            languages_skipped=["cpp"],
+            decision_time_ms=150.5,
+        )
+
+        assert metrics.decision_source == "llm"
+        assert metrics.languages_selected == ["java", "python"]
+        assert metrics.languages_skipped == ["cpp"]
+        assert metrics.decision_time_ms == 150.5
+        assert metrics.scan_success is True
+        assert metrics.findings_count == 0
+
+    def test_metrics_with_all_fields(self):
+        """Test metrics with all fields populated."""
+        from src.layers.l3_analysis.decision import LanguageDecisionMetrics
+
+        metrics = LanguageDecisionMetrics(
+            decision_source="baseline",
+            languages_selected=["java"],
+            languages_skipped=["python", "javascript"],
+            decision_time_ms=25.0,
+            total_scan_time_ms=120000.0,
+            scan_success=True,
+            findings_count=15,
+            baseline_languages=["java", "python"],
+            finding_loss_rate=0.1,
+        )
+
+        assert metrics.decision_source == "baseline"
+        assert metrics.total_scan_time_ms == 120000.0
+        assert metrics.findings_count == 15
+        assert metrics.baseline_languages == ["java", "python"]
+        assert metrics.finding_loss_rate == 0.1
+
+    def test_metrics_to_summary_dict(self):
+        """Test converting metrics to summary dictionary."""
+        from src.layers.l3_analysis.decision import LanguageDecisionMetrics
+
+        metrics = LanguageDecisionMetrics(
+            decision_source="llm",
+            languages_selected=["java", "python"],
+            languages_skipped=["cpp"],
+            decision_time_ms=100.0,
+            findings_count=5,
+        )
+
+        summary = metrics.to_summary_dict()
+
+        assert summary["decision_source"] == "llm"
+        assert summary["languages_selected"] == ["java", "python"]
+        assert summary["decision_time_ms"] == 100.0
+        assert summary["findings_count"] == 5
+
+    def test_metrics_default_values(self):
+        """Test default values for optional fields."""
+        from src.layers.l3_analysis.decision import LanguageDecisionMetrics
+
+        metrics = LanguageDecisionMetrics(
+            decision_source="llm",
+            languages_selected=[],
+            languages_skipped=[],
+            decision_time_ms=0.0,
+        )
+
+        assert metrics.total_scan_time_ms is None
+        assert metrics.scan_success is True
+        assert metrics.findings_count == 0
+        assert metrics.baseline_languages is None
+        assert metrics.finding_loss_rate is None

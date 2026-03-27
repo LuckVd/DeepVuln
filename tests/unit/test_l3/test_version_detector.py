@@ -431,6 +431,136 @@ class TestMultiRuntimeDetection:
 
 
 # =============================================================================
+# Edge Case Tests (P7-10c)
+# =============================================================================
+
+
+class TestVersionDetectionEdgeCases:
+    """Tests for version detection edge cases (P7-10c)."""
+
+    def test_nvmrc_lts_hydrogen(self, temp_repo):
+        """Test .nvmrc with lts/hydrogen format."""
+        (temp_repo / ".nvmrc").write_text("lts/hydrogen\n")
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        # lts/* formats should return None
+        assert result.node_version is None
+
+    def test_nvmrc_lts_latest(self, temp_repo):
+        """Test .nvmrc with lts/* format."""
+        (temp_repo / ".nvmrc").write_text("lts/*\n")
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        assert result.node_version is None
+
+    def test_nvmrc_node(self, temp_repo):
+        """Test .nvmrc with 'node' (latest)."""
+        (temp_repo / ".nvmrc").write_text("node\n")
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        assert result.node_version is None
+
+    def test_package_json_engines_tilde(self, temp_repo):
+        """Test package.json engines with ~18.0.0."""
+        package_json = {"engines": {"node": "~18.0.0"}}
+        (temp_repo / "package.json").write_text(json.dumps(package_json))
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        assert result.node_version == "18.0.0"
+
+    def test_package_json_engines_caret(self, temp_repo):
+        """Test package.json engines with ^18.0.0."""
+        package_json = {"engines": {"node": "^18.0.0"}}
+        (temp_repo / "package.json").write_text(json.dumps(package_json))
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        assert result.node_version == "18.0.0"
+
+    def test_package_json_engines_double_x(self, temp_repo):
+        """Test package.json engines with 18.x.x."""
+        package_json = {"engines": {"node": "18.x.x"}}
+        (temp_repo / "package.json").write_text(json.dumps(package_json))
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        assert result.node_version == "18"
+
+    def test_package_json_engines_or_operator(self, temp_repo):
+        """Test package.json engines with || operator."""
+        package_json = {"engines": {"node": "16.x || 18.x || 20.x"}}
+        (temp_repo / "package.json").write_text(json.dumps(package_json))
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        # Should take first version
+        assert result.node_version == "16"
+
+    def test_package_json_engines_with_spaces(self, temp_repo):
+        """Test package.json engines with spaces around operator."""
+        package_json = {"engines": {"node": " >= 18.0.0 "}}
+        (temp_repo / "package.json").write_text(json.dumps(package_json))
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        assert result.node_version == "18.0.0"
+
+    def test_java_version_with_preview(self, temp_repo):
+        """Test Java version with preview features."""
+        pom_content = """<?xml version="1.0"?>
+<project>
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <maven.compiler.enablePreview>true</maven.compiler.enablePreview>
+    </properties>
+</project>
+"""
+        (temp_repo / "pom.xml").write_text(pom_content)
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        assert result.java_version == "21"
+
+    def test_go_version_with_prerelease(self, temp_repo):
+        """Test go.mod with prerelease version."""
+        (temp_repo / "go.mod").write_text("module test\n\ngo 1.22rc1\n")
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        assert result.go_version == "1.22"
+
+    def test_gradle_with_property_interpolation(self, temp_repo):
+        """Test Gradle with property interpolation."""
+        (temp_repo / "build.gradle").write_text("""
+def javaTarget = 17
+java {
+    sourceCompatibility = javaTarget
+    targetCompatibility = javaTarget
+}
+""")
+
+        detector = VersionDetector(temp_repo)
+        result = detector.detect()
+
+        # Property interpolation not supported, should return None
+        assert result.java_version is None
+
+
+# =============================================================================
 # Convenience Function Tests
 # =============================================================================
 

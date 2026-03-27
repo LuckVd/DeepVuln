@@ -16,6 +16,7 @@ from src.layers.l3_analysis.llm.client import LLMClient, LLMError, LLMJSONParseE
 
 from .build_assessor import BuildDifficultyAssessor
 from .models import (
+    BaselineStrategy,
     DecisionConstraints,
     DecisionError,
     LanguageDecision,
@@ -275,17 +276,37 @@ class CodeQLLanguageDecider:
 
     def _make_baseline_decision(self, input_data: LanguageDecisionInput) -> LanguageDecision:
         """
-        Make decision using deterministic baseline (hybrid strategy).
+        Make decision using deterministic baseline strategy.
 
-        Uses a combination of:
-        - 60% weight on language size (primary language priority)
-        - 40% weight on attack surface (entry points)
+        Dispatches to specific strategy implementation based on constraints.
 
         Args:
             input_data: Input data for decision.
 
         Returns:
             LanguageDecision from baseline algorithm.
+        """
+        strategy = self.constraints.baseline_strategy
+
+        if strategy == BaselineStrategy.LANGUAGE_FIRST:
+            return self._language_first_baseline(input_data)
+        elif strategy == BaselineStrategy.ATTACK_SURFACE_FIRST:
+            return self._attack_surface_first_baseline(input_data)
+        elif strategy == BaselineStrategy.SEMGREP_FIRST:
+            return self._semgrep_first_baseline(input_data)
+        else:
+            # Default: hybrid strategy
+            return self._hybrid_baseline(input_data)
+
+    def _hybrid_baseline(self, input_data: LanguageDecisionInput) -> LanguageDecision:
+        """
+        Hybrid baseline: 60% language size + 40% attack surface.
+
+        Args:
+            input_data: Input data for decision.
+
+        Returns:
+            LanguageDecision from hybrid algorithm.
         """
         # Calculate scores for each language
         scores: dict[str, float] = {}
@@ -317,6 +338,117 @@ class CodeQLLanguageDecider:
                     boost = min(0.3, (critical * 0.1 + high * 0.05))  # Cap at 0.3
                     scores[lang_lower] = min(1.0, scores[lang_lower] + boost)
 
+        return self._build_decision_from_scores(
+            input_data, scores, "Hybrid baseline: 60% language size + 40% attack surface weight"
+        )
+
+    def _language_first_baseline(self, input_data: LanguageDecisionInput) -> LanguageDecision:
+        """
+        Language-first baseline: select primary/largest language(s).
+
+        Args:
+            input_data: Input data for decision.
+
+        Returns:
+            LanguageDecision with largest languages prioritized.
+        """
+        scores: dict[str, float] = {}
+
+        for lang in input_data.languages:
+            lang_name = lang.name.lower()
+            # Pure language size score
+            scores[lang_name] = lang.percentage / 100.0
+
+        return self._build_decision_from_scores(
+            input_data, scores, "Language-first baseline: prioritized by code size"
+        )
+
+    def _attack_surface_first_baseline(self, input_data: LanguageDecisionInput) -> LanguageDecision:
+        """
+        Attack-surface-first baseline: select languages with most entry points.
+
+        Args:
+            input_data: Input data for decision.
+
+        Returns:
+            LanguageDecision with highest attack surface languages.
+        """
+        scores: dict[str, float] = {}
+        max_entry_points = max(
+            input_data.attack_surface.entry_points_by_language.values()
+        ) if input_data.attack_surface.entry_points_by_language else 1
+
+        for lang in input_data.languages:
+            lang_name = lang.name.lower()
+            entry_points = input_data.attack_surface.entry_points_by_language.get(lang_name, 0)
+            # Normalize to 0-1
+            scores[lang_name] = entry_points / max_entry_points if max_entry_points > 0 else 0
+
+        return self._build_decision_from_scores(
+            input_data, scores, "Attack-surface-first baseline: prioritized by entry points"
+        )
+
+    def _semgrep_first_baseline(self, input_data: LanguageDecisionInput) -> LanguageDecision:
+        """
+        Semgrep-first baseline: select languages with most Semgrep findings.
+
+        Args:
+            input_data: Input data for decision.
+
+        Returns:
+            LanguageDecision with highest Semgrep findings languages.
+        """
+        scores: dict[str, float] = {}
+
+        # Initialize all languages with base score
+        for lang in input_data.languages:
+            lang_name = lang.name.lower()
+            scores[lang_name] = 0.1  # Small base score
+
+        # Score based on Semgrep findings
+        if input_data.semgrep_result:
+            max_weighted = 1
+            # Find max weighted score for normalization
+            for counts in input_data.semgrep_result.findings_by_language.values():
+                critical = counts.get("critical", 0) * 3
+                high = counts.get("high", 0) * 2
+                medium = counts.get("medium", 0) * 1
+                low = counts.get("low", 0) * 0.5
+                weighted = critical + high + medium + low
+                max_weighted = max(max_weighted, weighted)
+
+            for lang_name, counts in input_data.semgrep_result.findings_by_language.items():
+                lang_lower = lang_name.lower()
+                # Weight by severity
+                critical = counts.get("critical", 0) * 3
+                high = counts.get("high", 0) * 2
+                medium = counts.get("medium", 0) * 1
+                low = counts.get("low", 0) * 0.5
+                total_weighted = critical + high + medium + low
+                # Normalize to 0-1 range
+                scores[lang_lower] = min(1.0, total_weighted / max_weighted) if max_weighted > 0 else 0.1
+
+        return self._build_decision_from_scores(
+            input_data, scores, "Semgrep-first baseline: prioritized by finding severity"
+        )
+
+    def _build_decision_from_scores(
+        self,
+        input_data: LanguageDecisionInput,
+        scores: dict[str, float],
+        reasoning_summary: str,
+    ) -> LanguageDecision:
+        """
+        Build LanguageDecision from computed scores.
+
+        Args:
+            input_data: Input data for decision.
+            scores: Language scores (0-1 range).
+            reasoning_summary: Summary of scoring method.
+
+        Returns:
+            LanguageDecision with selected/skipped languages.
+        """
         # Sort by score and apply constraints
         sorted_langs = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
@@ -371,7 +503,7 @@ class CodeQLLanguageDecider:
             confidence=0.7,  # Baseline has fixed confidence
             time_budget_applied=len(skipped) > 0,
             decision_source="baseline",
-            reasoning_summary="Hybrid baseline: 60% language size + 40% attack surface weight",
+            reasoning_summary=reasoning_summary,
         )
 
     def _get_baseline_reasoning(

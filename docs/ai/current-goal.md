@@ -2,263 +2,274 @@
 
 ## Status
 
-Completed - 2026-03-26
+Design - 2026-03-26
 
 ## Goal
 
-P7-05e: 集成 Builder 系统到 CodeQL scan 流程
+P7-10: 基线策略、测试与效果评估
 
 ## Summary
 
-将已实现的 PythonBuilder、JavaScriptBuilder、GoBuilder、JavaBuilder 集成到 CodeQL 引擎的 scan 流程，替换旧的 BuildSystemDetector，实现完整的智能构建分析链路。
+验证 LLM 决策相对规则基线是否有净收益，补充测试覆盖，并建立评估指标体系。
 
 ## Context
 
-### 现有架构
+### 现有测试覆盖
 
+| 模块 | 测试文件 | 测试数 | 状态 |
+|------|----------|--------|------|
+| 决策模型 | `test_decision.py` | 35 | ✅ 基础覆盖 |
+| 版本检测 | `test_version_detector.py` | 25 | ✅ 完整覆盖 |
+| 工具兼容性 | `test_tool_resolver.py` | 48 | ✅ 完整覆盖 |
+| 构建计划 | `test_build_plan.py` | 39 | ✅ 完整覆盖 |
+| Readiness Gate | `test_readiness_gate.py` | 23 | ✅ 完整覆盖 |
+| Builder 集成 | `test_codeql_builder_integration.py` | 12 | ✅ 新增 |
+
+### 现有 Baseline 实现
+
+```python
+# _make_baseline_decision() 使用混合策略
+scores[lang] = 0.6 * language_score + 0.4 * attack_score
+# + Semgrep severity boost (cap at 0.3)
 ```
-CLI (main.py)
-    ↓
-_apply_codeql_readiness_gate() → ReadinessGateResult
-    ↓                                    ↓ (build_warnings/skip_reasons 未使用)
-CodeQLEngine.scan() → _execute_build() → BuildSystemDetector (旧)
-                     → _create_database()
-                     → _analyze_database()
-```
 
-### 问题
+### 缺失部分
 
-1. **双重检测**：ReadinessGate 使用 Builder 分析，但 CodeQLEngine 又用 BuildSystemDetector
-2. **信息丢失**：Builder 的 warnings/skip_reasons 没有传递给用户
-3. **代码冗余**：两套构建检测逻辑
-
-### 目标架构
-
-```
-CLI (main.py)
-    ↓
-_apply_codeql_readiness_gate() → ReadinessGateResult
-    ↓                                    ↓
-    ↓                              (传递 build_info)
-    ↓                                    ↓
-CodeQLEngine.scan() → _execute_build() → Builder 系统 (新)
-                     → _create_database()
-                     → _analyze_database()
-```
+1. **Baseline 策略可配置** - 当前固定权重，缺少其他策略选项
+2. **LLM vs Baseline 对照测试** - 缺少对比验证
+3. **评估指标收集** - 缺少耗时/成功率/发现损失率统计
+4. **集成测试** - 缺少多语言项目端到端测试
 
 ## Scope
 
 ### In Scope
 
-- 修改 `CodeQLEngine._execute_build()` 使用 Builder 系统
-- 新增 `CodeQLEngine.scan()` 接受 `readiness_result` 参数
-- 传递 Builder 的 warnings 到 CLI 输出
-- 更新 CLI 层集成逻辑
+- P7-10a: 增强可配置 baseline 策略
+- P7-10b: 补充 LLM 决策器测试
+- P7-10c: 补充版本检测/工具兼容性/构建计划边缘场景
+- P7-10d: 集成测试：多语言项目扫描
+- P7-10e: 评估指标收集与报告
+- P7-10f: 回归测试
 
 ### Out of Scope
 
-- C/C++ Builder（P7-08）
-- 效果评估测试（P7-10）
+- P7-08: C/C++ 构建支持
 - 新增 Builder
+- CodeQL 引擎修改
 
 ## Design
 
-### 1. CodeQLEngine 修改
+### 1. P7-10a: 增强 Baseline 策略
 
-**文件**: `src/layers/l3_analysis/engines/codeql.py`
-
-**修改 `_execute_build()` 方法:**
+**新增 `BaselineStrategy` 枚举:**
 
 ```python
-async def _execute_build(
-    self,
-    source_path: Path,
-    language: str,
-    build_command: str | None = None,
-    readiness_info: BuildReadinessInfo | None = None,  # 新增参数
-    llm_client: Any = None,
-) -> dict[str, Any] | None:
-    """Execute build using Builder system."""
+class BaselineStrategy(str, Enum):
+    """Deterministic baseline strategies for language selection."""
 
-    # 优先使用 ReadinessGate 的分析结果
-    if readiness_info:
-        if readiness_info.skip_reason:
-            return {
-                "success": False,
-                "skipped": True,
-                "reason": readiness_info.skip_reason,
-                "warnings": readiness_info.warnings,
-            }
+    HYBRID = "hybrid"           # 60% size + 40% attack surface (default)
+    LANGUAGE_FIRST = "language_first"  # Primary language only
+    ATTACK_SURFACE_FIRST = "attack_surface_first"  # Most entry points
+    SEMGREP_FIRST = "semgrep_first"  # Most findings first
+```
 
-        # 使用 Builder 提供的 build_command（如果有）
-        if readiness_info.build_command:
-            build_command = readiness_info.build_command
+**修改 `DecisionConstraints`:**
 
-    # 回退到 Builder 系统直接分析
-    if not readiness_info:
-        from src.layers.l3_analysis.build.builders import BuilderRegistry
-        builder = BuilderRegistry.get(language)
-        if builder:
-            output = builder.analyze(source_path)
-            if output.skip_reason:
-                return {"success": False, "skipped": True, "reason": output.skip_reason}
-            if output.build_command:
-                build_command = output.build_command
+```python
+@dataclass
+class DecisionConstraints:
+    # ... existing fields ...
+    baseline_strategy: BaselineStrategy = BaselineStrategy.HYBRID
+```
 
-    # 执行构建（如果有）
-    if build_command:
-        # ... 现有构建逻辑
+**新增策略实现:**
+
+```python
+def _make_baseline_decision(self, input_data: LanguageDecisionInput) -> LanguageDecision:
+    if self.constraints.baseline_strategy == BaselineStrategy.LANGUAGE_FIRST:
+        return self._language_first_baseline(input_data)
+    elif self.constraints.baseline_strategy == BaselineStrategy.ATTACK_SURFACE_FIRST:
+        return self._attack_surface_first_baseline(input_data)
+    elif self.constraints.baseline_strategy == BaselineStrategy.SEMGREP_FIRST:
+        return self._semgrep_first_baseline(input_data)
     else:
-        # 免构建语言或无构建需求
-        return {"success": True, "skipped": True, "reason": "No build required"}
+        return self._hybrid_baseline(input_data)  # default
 ```
 
-**修改 `scan()` 方法签名:**
+### 2. P7-10b/c: 补充单元测试
+
+**新增测试场景:**
+
+| 测试类别 | 测试场景 |
+|----------|----------|
+| LLM 决策器 | LLM 返回空推荐、超时、格式错误 |
+| LLM 决策器 | Baseline 策略切换 |
+| LLM 决策器 | 时间预算裁剪 |
+| 版本检测 | 边缘格式（.nvmrc lts/*、package.json .x） |
+| 工具兼容性 | 版本范围匹配（>=, ^, ~） |
+| 构建计划 | 失败回退、超时处理 |
+
+### 3. P7-10d: 集成测试
+
+**新增测试文件:** `tests/integration/test_decision_e2e.py`
 
 ```python
-async def scan(
-    self,
-    source_path: Path,
-    language: str | None = None,
-    # ... 现有参数 ...
-    readiness_result: ReadinessGateResult | None = None,  # 新增
-    **options,
-) -> ScanResult:
+class TestDecisionE2E:
+    """End-to-end tests for language decision."""
+
+    async def test_monorepo_python_java(self):
+        """Test decision for Python+Java monorepo."""
+
+    async def test_javascript_typescript_mixed(self):
+        """Test decision for JS+TS project."""
+
+    async def test_llm_vs_baseline_comparison(self):
+        """Compare LLM decision vs baseline on same project."""
 ```
 
-### 2. CLI 层修改
+### 4. P7-10e: 评估指标
 
-**文件**: `src/cli/main.py`
-
-**修改 `_apply_codeql_readiness_gate()` 返回值使用:**
+**新增 `LanguageDecisionMetrics` 数据类:**
+（注意：命名为 LanguageDecisionMetrics 以避免与 rounds/termination.py 中的 DecisionMetrics 冲突）
 
 ```python
-# 现有代码获取 readiness_result
-engines, codeql_gate = await _apply_codeql_readiness_gate(...)
+@dataclass
+class LanguageDecisionMetrics:
+    """Metrics for evaluating language decision quality."""
 
-# 新增：传递给 CodeQLEngine
-if "codeql" in engines:
-    scan_tasks.append(("codeql", codeql_engine.scan(
-        source_path=source_path,
-        language=primary_lang.lower(),
-        readiness_result=codeql_gate,  # 新增
-        # ...
-    )))
+    decision_source: str  # "llm" or "baseline"
+    languages_selected: list[str]
+    languages_skipped: list[str]
+
+    # Timing
+    decision_time_ms: float
+    total_scan_time_ms: float | None = None
+
+    # Results
+    scan_success: bool = True
+    findings_count: int = 0
+
+    # For comparison
+    baseline_languages: list[str] | None = None
+    finding_loss_rate: float | None = None  # vs baseline
 ```
 
-### 3. 输出增强
+**集成点:** `CodeQLReadinessGate.check()` 返回 metrics
 
-**在 scan 结果中显示 Builder 警告:**
+### 5. P7-10f: 回归测试
 
-```python
-# CLI 输出
-if codeql_gate and codeql_gate.build_warnings:
-    console.print("\n[bold yellow]Build Warnings:[/]")
-    for target, warnings in codeql_gate.build_warnings.items():
-        for warning in warnings:
-            console.print(f"  ⚠ {target}: {warning}")
-```
+运行完整 L3 测试套件，确保无破坏。
 
 ## Acceptance Criteria
 
-1. **CodeQLEngine 集成**
-   - [x] `_execute_build()` 使用 Builder 系统
-   - [x] `scan()` 接受 `readiness_result` 参数
-   - [x] 传递 Builder 的 warnings 和 skip_reasons
+1. **Baseline 策略**
+   - [ ] 新增 `BaselineStrategy` 枚举
+   - [ ] 支持 4 种策略：hybrid、language_first、attack_surface_first、semgrep_first
+   - [ ] `DecisionConstraints` 可配置策略
 
-2. **CLI 集成**
-   - [x] `readiness_result` 传递给 `CodeQLEngine.scan()`
-   - [x] CLI 输出显示 Builder 警告
-   - [x] 正确处理 skip 情况
+2. **测试覆盖**
+   - [ ] 新增 LLM 决策器边缘场景测试（10+ tests）
+   - [ ] 新增 baseline 策略切换测试（8+ tests）
+   - [ ] 新增集成测试（5+ tests）
 
-3. **向后兼容**
-   - [x] 无 `readiness_result` 时回退到 Builder 直接分析
-   - [x] 不破坏现有 API
+3. **评估指标**
+   - [ ] 新增 `LanguageDecisionMetrics` 数据类
+   - [ ] ReadinessGate 返回决策指标
+   - [ ] CLI 输出显示指标摘要
 
-4. **测试**
-   - [x] 单元测试：`_execute_build()` 使用 Builder
-   - [x] 单元测试：`scan()` 接受 `readiness_result`
-   - [x] 集成测试：完整扫描流程
+4. **回归测试**
+   - [ ] 全部 L3 测试通过
 
 ## Test Plan
 
 ### 单元测试
 
-**文件**: `tests/unit/test_l3/test_codeql_builder_integration.py`
+**文件:** `tests/unit/test_l3/test_decision.py` (扩展)
 
 ```python
-class TestCodeQLBuilderIntegration:
-    """Tests for Builder integration in CodeQL engine."""
+class TestBaselineStrategies:
+    """Tests for different baseline strategies."""
 
-    def test_execute_build_with_readiness_info(self):
-        """Test _execute_build uses ReadinessInfo."""
+    def test_hybrid_strategy(self): ...
+    def test_language_first_strategy(self): ...
+    def test_attack_surface_first_strategy(self): ...
+    def test_semgrep_first_strategy(self): ...
+    def test_strategy_with_no_semgrep(self): ...
 
-    def test_execute_build_without_readiness_info(self):
-        """Test _execute_build falls back to Builder directly."""
+class TestLLMDecisionEdgeCases:
+    """Tests for LLM decision edge cases."""
 
-    def test_execute_build_skip_reason(self):
-        """Test _execute_build respects skip_reason."""
-
-    def test_scan_accepts_readiness_result(self):
-        """Test scan() accepts readiness_result parameter."""
+    async def test_llm_empty_response(self): ...
+    async def test_llm_invalid_json(self): ...
+    async def test_llm_timeout_fallback(self): ...
+    async def test_llm_unsupported_language_filtered(self): ...
 ```
 
 ### 集成测试
 
-**文件**: `tests/integration/test_codeql_scan_flow.py`
+**文件:** `tests/integration/test_decision_e2e.py` (新增)
 
 ```python
-class TestCodeQLScanFlow:
-    """Integration tests for full scan flow."""
+class TestDecisionE2E:
+    """End-to-end decision tests."""
 
-    async def test_python_project_no_build(self):
-        """Test Python project uses no-build path."""
-
-    async def test_java_project_with_build(self):
-        """Test Java project uses build path."""
-
-    async def test_warnings_displayed(self):
-        """Test Builder warnings are displayed in output."""
+    async def test_python_project_baseline(self): ...
+    async def test_java_maven_project_llm(self): ...
+    async def test_multi_language_project_comparison(self): ...
 ```
 
 ## Steps
 
-### Phase 1: CodeQLEngine 修改
+### Phase 1: Baseline 策略增强 (P7-10a)
 
-1. 修改 `_execute_build()` 方法
-2. 修改 `scan()` 方法签名
-3. 添加 Builder 警告到 scan 结果
+1. 新增 `BaselineStrategy` 枚举到 `decision/models.py`
+2. 修改 `DecisionConstraints` 添加策略配置
+3. 实现各策略方法
+4. 编写策略切换测试
 
-### Phase 2: CLI 集成
+### Phase 2: 单元测试补充 (P7-10b/c)
 
-1. 修改 `_apply_codeql_readiness_gate()` 调用处
-2. 传递 `readiness_result` 给 `CodeQLEngine.scan()`
-3. 增强 CLI 输出显示警告
+1. 补充 LLM 决策器边缘场景测试
+2. 补充版本检测边缘场景测试
+3. 补充构建计划边缘场景测试
 
-### Phase 3: 测试与验证
+### Phase 3: 集成测试 (P7-10d)
 
-1. 编写单元测试
-2. 编写集成测试
-3. 手动测试完整流程
+1. 创建测试项目 fixture
+2. 编写端到端决策测试
+3. 编写 LLM vs baseline 对比测试
+
+### Phase 4: 评估指标 (P7-10e)
+
+1. 新增 `DecisionMetrics` 数据类
+2. 集成到 ReadinessGate
+3. CLI 输出指标摘要
+
+### Phase 5: 回归测试 (P7-10f)
+
+1. 运行完整 L3 测试套件
+2. 修复发现的回归问题
 
 ## Files
 
 | 文件 | 操作 | 描述 |
 |------|------|------|
-| `src/layers/l3_analysis/engines/codeql.py` | 修改 | 集成 Builder 系统 |
-| `src/cli/main.py` | 修改 | 传递 readiness_result |
-| `tests/unit/test_l3/test_codeql_builder_integration.py` | 新增 | 单元测试 |
+| `src/layers/l3_analysis/decision/models.py` | 修改 | 新增 BaselineStrategy |
+| `src/layers/l3_analysis/decision/language_decider.py` | 修改 | 实现策略切换 |
+| `src/layers/l3_analysis/readiness_gate.py` | 修改 | 添加 DecisionMetrics |
+| `tests/unit/test_l3/test_decision.py` | 修改 | 扩展测试 |
+| `tests/integration/test_decision_e2e.py` | 新增 | 集成测试 |
 
 ## Risks
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|----------|
-| 向后兼容性 | 可能破坏现有调用 | 使用 Optional 参数，默认 None |
-| 异步调用 | Builder.analyze() 是同步的 | 在异步上下文中正确调用 |
-| 测试覆盖 | 需要真实项目测试 | 使用 fixture 项目 |
+| LLM API 不可用 | 集成测试失败 | Mock LLM 响应 |
+| 测试项目准备 | 时间消耗 | 使用 fixture 创建简单项目 |
+| 指标收集开销 | 性能影响 | 仅在需要时收集 |
 
 ## Next Recommended
 
-完成 P7-05e 后:
-- P7-10: 基线策略与效果评估
+完成 P7-10 后:
 - P7-08: C/C++ 标准构建系统支持
+- v0.75 里程碑发布准备

@@ -443,8 +443,11 @@ class VersionDetector:
     def _parse_node_engine_version(self, engine: str) -> str | None:
         """Parse Node version from engines field."""
         # Handle: ">=18.0.0", "^18.0.0", "~18.0.0", "18.x", "18", "18.0.0"
-        # Remove operators
-        cleaned = re.sub(r"^[>=<~^]+", "", engine.strip())
+        # First strip all whitespace
+        engine = engine.strip()
+
+        # Remove operators (allow whitespace after operators)
+        cleaned = re.sub(r"^[>=<~^]+\s*", "", engine)
 
         # Handle "18.x" -> "18"
         cleaned = cleaned.replace(".x", "")

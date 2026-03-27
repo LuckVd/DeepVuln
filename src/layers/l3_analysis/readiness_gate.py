@@ -6,6 +6,7 @@ integrating LLM language decision, build profiling, and tool compatibility.
 """
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from src.layers.l3_analysis.decision import (
     DecisionError,
     LanguageDecision,
     LanguageDecisionInput,
+    LanguageDecisionMetrics,
     LanguageRecommendation,
     LanguageStructure,
     SkippedLanguage,
@@ -69,6 +71,11 @@ class ReadinessGateResult:
     skipped_languages: list[SkippedLanguage] = field(default_factory=list)
     decision_source: str = "none"  # "llm", "baseline", "forced", "none"
 
+    # Decision metrics
+    decision_metrics: LanguageDecisionMetrics | None = field(
+        default=None,
+    )
+
     # Build profile
     modules: list[Any] = field(default_factory=list)  # ModuleSummary list
     build_targets: list[BuildTarget] = field(default_factory=list)
@@ -82,7 +89,7 @@ class ReadinessGateResult:
     build_skip_reasons: dict[str, str] = field(default_factory=dict)  # target_name -> skip_reason
 
     # Reasons
-    skip_reasons: dict[str, str] = field(default_factory=dict)
+    skip_reasons: dict[str, str] = field(default_factory=list)
     message: str = ""
 
     # Error info
@@ -99,6 +106,7 @@ class ReadinessGateResult:
                 for s in self.skipped_languages
             ],
             "decision_source": self.decision_source,
+            "decision_metrics": self.decision_metrics.to_summary_dict() if self.decision_metrics else None,
             "modules_count": len(self.modules),
             "build_targets_count": len(self.build_targets),
             "tool_report": self.tool_report.to_dict() if self.tool_report else None,
@@ -238,8 +246,11 @@ class CodeQLReadinessGate:
         # Step 3: Tool readiness
         tool_report = self._check_tools(build_targets, version_req)
 
-        # Step 4: LLM decision
+        # Step 4: LLM decision (with timing)
+        decision_start_time = time.perf_counter()
         decision_result = await self._make_decision(modules, build_targets, tool_report)
+        decision_end_time = time.perf_counter()
+        decision_time_ms = (decision_end_time - decision_start_time) * 1000
 
         if isinstance(decision_result, DecisionError):
             # Fallback to baseline
@@ -253,6 +264,7 @@ class CodeQLReadinessGate:
         selected = []
         skipped = []
         skip_reasons = {}
+        decision_metrics = None
 
         if isinstance(decision_result, LanguageDecision):
             selected = decision_result.recommended_languages
@@ -264,12 +276,21 @@ class CodeQLReadinessGate:
             skip_reasons = decision_result.skip_reasons
             decision_source = decision_result.decision_source
 
+            # Create decision metrics
+            decision_metrics = LanguageDecisionMetrics(
+                decision_source=decision_source,
+                languages_selected=selected,
+                languages_skipped=decision_result.skipped_languages,
+                decision_time_ms=decision_time_ms,
+            )
+
         return ReadinessGateResult(
             ready=True,
             status="enabled",
             selected_languages=selected,
             skipped_languages=skipped,
             decision_source=decision_source,
+            decision_metrics=decision_metrics,
             modules=modules,
             build_targets=build_targets,
             version_requirement=version_req,
@@ -384,12 +405,20 @@ class CodeQLReadinessGate:
             all_languages = []
             modules = []
 
+        decision_metrics = LanguageDecisionMetrics(
+            decision_source="forced",
+            languages_selected=all_languages,
+            languages_skipped=[],
+            decision_time_ms=0.0,
+        )
+
         return ReadinessGateResult(
             ready=True,
             status="forced",
             selected_languages=all_languages,
             skipped_languages=[],
             decision_source="forced",
+            decision_metrics=decision_metrics,
             modules=modules,
             build_targets=[],
             version_requirement=None,
@@ -406,6 +435,7 @@ class CodeQLReadinessGate:
             selected_languages=[],
             skipped_languages=[],
             decision_source="none",
+            decision_metrics=None,
             message=basic_result.get("message", "CodeQL basic check failed"),
             error=basic_result.get("reason"),
         )
