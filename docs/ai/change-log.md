@@ -26,7 +26,7 @@
 - **Tests**: 153 passed (decision: 51, version_detector: 25, tool_resolver: 48, + 29 other L3 tests)
 - **Dead Code**: not run
 - **Security**: No secrets exposed
-- **Commit**: pending
+- **Commit**: c3205d3
 
 ## 2026-03-26
 
