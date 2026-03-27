@@ -252,15 +252,15 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P7-08|仅支持标准构建系统，避免无边界猜测式构建|P7-05|todo|
-|P7-08a|实现 CppBuilder 基础框架|P7-08|todo|
-|P7-08b|实现现有 compile_commands.json 检测与验证|P7-08a|todo|
-|P7-08c|实现 CMake 导出策略（cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON）|P7-08a|todo|
-|P7-08d|实现 Makefile 保守策略（必要时结合 Bear/compiledb）|P7-08a|todo|
-|P7-08e|实现 header-only/无标准构建系统的跳过与说明|P7-08a|todo|
-|P7-08f|明确止损线：高风险场景直接跳过，不做无限回退|P7-08e|todo|
+|P7-08|仅支持标准构建系统，避免无边界猜测式构建|P7-05|done|
+|P7-08a|实现 CppBuilder 基础框架|P7-08|done|
+|P7-08b|实现现有 compile_commands.json 检测与验证|P7-08a|done|
+|P7-08c|实现 CMake 导出策略（cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON）|P7-08a|done|
+|P7-08d|实现 Makefile 保守策略（必要时结合 Bear/compiledb）|P7-08a|done|
+|P7-08e|实现 header-only/无标准构建系统的跳过与说明|P7-08a|done|
+|P7-08f|明确止损线：高风险场景直接跳过，不做无限回退|P7-08e|done|
 
-**实现文件**: `src/layers/l3_analysis/build/builders/cpp.py`
+**实现文件**: `src/layers/l3_analysis/build/builders/cpp.py`, `src/layers/l3_analysis/build/builders/__init__.py`, `tests/unit/test_l3/test_builders/test_cpp_builder.py`
 
 ### P7-09: Readiness Gate 与 CLI 集成（P0）
 

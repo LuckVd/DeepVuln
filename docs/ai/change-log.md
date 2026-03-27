@@ -2,6 +2,26 @@
 
 ## 2026-03-27
 
+### P7-08: C/C++ 标准构建系统支持完成
+
+- **Goal ID**: P7-08
+- **Summary**: 为 C/C++ 项目提供标准构建系统支持，仅支持标准构建系统（compile_commands.json、CMake、Makefile），明确止损线，避免无边界猜测式构建
+- **Impact**:
+  - `src/layers/l3_analysis/build/builders/cpp.py`: CppBuilder 实现（643 行）
+  - `src/layers/l3_analysis/build/builders/__init__.py`: 导出 CppBuilder
+  - `tests/unit/test_l3/test_builders/test_cpp_builder.py`: 28 个单元测试（428 行）
+- **Test Coverage**:
+  - compile_commands.json 检测（根目录、build/、out/）
+  - CMake 支持（生成 compile_commands，复杂选项跳过）
+  - Makefile 保守策略（简单/复杂区分）
+  - Header-only 检测与说明
+  - 止损线验证（非标准系统、sudo、复杂配置）
+  - 失败诊断（编译器错误、链接错误、CMake 错误、权限错误）
+- **Tests**: 28 passed (CppBuilder), 152 passed (all builders)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
 ### P7-10: 基线策略、测试与效果评估完成
 
 - **Goal ID**: P7-10

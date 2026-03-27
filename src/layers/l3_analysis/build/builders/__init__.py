@@ -13,6 +13,7 @@ from .base import (
     FailureDiagnosis,
     LanguageBuilder,
 )
+from .cpp import CppBuilder
 from .go import GoBuilder
 from .java import JavaBuilder
 from .javascript import JavaScriptBuilder
@@ -25,6 +26,7 @@ __all__ = [
     "FailureCategory",
     "FailureDiagnosis",
     "LanguageBuilder",
+    "CppBuilder",
     "GoBuilder",
     "JavaBuilder",
     "JavaScriptBuilder",
