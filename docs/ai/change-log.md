@@ -1,5 +1,47 @@
 # Change Log
 
+## 2026-03-28
+
+### P7-11b 系列: Docker 集成测试完成
+
+- **Goal ID**: P7-11b
+- **Summary**: 在 Docker 环境中验证各语言 Builder 和运行时版本管理的端到端流程
+- **Impact**:
+  - `tests/integration/docker/__init__.py`: 模块入口
+  - `tests/integration/docker/conftest.py`: 测试 fixture 和共享配置
+  - `tests/integration/docker/test_python_integration.py`: Python 集成测试 (7 tests)
+  - `tests/integration/docker/test_javascript_integration.py`: JS/TS 集成测试 (11 tests)
+  - `tests/integration/docker/test_go_integration.py`: Go 集成测试 (8 tests)
+  - `tests/integration/docker/test_java_integration.py`: Java 集成测试 (14 tests)
+  - `tests/integration/docker/test_cpp_integration.py`: C/C++ 集成测试 (9 tests)
+- **Test Coverage**:
+  - Python: Builder 分析、依赖检测、Cython 警告
+  - JavaScript: npm/yarn/pnpm 检测、TypeScript 支持
+  - Go: go.mod 解析、CGO 检测、vendor 模式
+  - Java: Maven/Gradle 支持、wrapper 检测、多版本 (8/11/17/21)
+  - C/C++: CMake/Makefile/compile_commands.json 检测
+- **Tests**: 47 passed, 9 skipped (CodeQL tests require build environment)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: 1e2b926
+
+### P8-01-S11: Dockerfile 修改支持动态安装
+
+- **Goal ID**: P8-01-S11
+- **Summary**: 修改 Dockerfile 和 Dockerfile.lite 支持运行时动态安装
+- **Impact**:
+  - `Dockerfile`: 添加 xz-utils, 创建 /opt/runtimes 目录并授权
+  - `Dockerfile.lite`: 同步修改
+- **Changes**:
+  - 添加 `xz-utils` 用于 Node.js tar.xz 解压
+  - 创建 `/opt/runtimes` 目录用于运行时安装
+  - 授予 deepvuln 用户 /opt/runtimes 写权限
+- **Supported Runtimes**: Java (8,11,17,21), Python (3.8-3.12), Node.js (16,18,20), Go (1.20-1.22)
+- **Tests**: 29 passed (runtime unit tests)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: 1e2b926
+
 ## 2026-03-27
 
 ### P8-01: 多版本运行时环境管理器完成
