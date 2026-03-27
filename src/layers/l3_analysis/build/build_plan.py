@@ -260,7 +260,7 @@ class BuildPlanGenerator:
     """
 
     # Languages that have specialized builders
-    BUILDER_LANGUAGES = {"go", "java"}
+    BUILDER_LANGUAGES = {"go", "java", "python", "javascript", "cpp"}
 
     def __init__(
         self,

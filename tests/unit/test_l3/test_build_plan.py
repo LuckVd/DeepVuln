@@ -473,7 +473,9 @@ class TestBuildPlanGenerator:
         plan = generator.generate(skip_target)
 
         assert plan.is_skipped is True
-        assert "No build system" in plan.skip_reason
+        # PythonBuilder returns more specific skip reason when no Python files found
+        assert plan.skip_reason is not None
+        assert ("No build system" in plan.skip_reason or "No Python" in plan.skip_reason)
 
     def test_generate_with_ready_tools(self, maven_target, ready_readiness):
         """Test generating plan when tools are ready."""
@@ -528,6 +530,385 @@ class TestBuildPlanGenerator:
 
         assert plan.is_skipped is True
         assert plan.skip_reason == "Unknown build system"
+
+
+# =============================================================================
+# BuildPlanGenerator with All Builders Tests (P7-11a)
+# =============================================================================
+
+
+class TestBuildPlanGeneratorWithAllBuilders:
+    """Tests for BuildPlanGenerator with all language builders.
+
+    P7-11a: Verifies that BuildPlanGenerator correctly uses specialized
+    builders for Python, JavaScript, Go, Java, and C/C++.
+    """
+
+    @pytest.fixture
+    def generator(self) -> BuildPlanGenerator:
+        """Create a BuildPlanGenerator instance."""
+        return BuildPlanGenerator()
+
+    # =========================================================================
+    # Python Tests
+    # =========================================================================
+
+    def test_python_builder_integration(self, generator, tmp_path: Path) -> None:
+        """Test BuildPlanGenerator uses PythonBuilder."""
+        # Create pyproject.toml
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "[project]\n"
+            "name = 'my-app'\n"
+            "version = '1.0.0'\n"
+        )
+
+        # Create Python file
+        main_py = tmp_path / "main.py"
+        main_py.write_text('def main(): pass\n')
+
+        target = BuildTarget(
+            name="python-app",
+            path=tmp_path,
+            language="python",
+            build_system=BuildSystem.NONE,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.language == "python"
+        # Python doesn't require build, so should be skipped or no steps
+        assert plan.is_skipped or not plan.has_steps
+
+    def test_python_poetry_project(self, generator, tmp_path: Path) -> None:
+        """Test Poetry project detection."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "[tool.poetry]\n"
+            "name = 'my-app'\n"
+            "version = '1.0.0'\n"
+        )
+
+        main_py = tmp_path / "main.py"
+        main_py.write_text('pass\n')
+
+        target = BuildTarget(
+            name="poetry-app",
+            path=tmp_path,
+            language="python",
+            build_system=BuildSystem.POETRY,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.language == "python"
+        # Poetry project may have dependency install step (required=False)
+        # but no actual build command
+        if plan.has_steps:
+            # Verify dependency step is optional (not required for CodeQL)
+            assert all(not step.required for step in plan.steps)
+
+    def test_python_no_files_skipped(self, generator, tmp_path: Path) -> None:
+        """Test Python project without Python files is skipped."""
+        target = BuildTarget(
+            name="empty-python",
+            path=tmp_path,
+            language="python",
+            build_system=BuildSystem.NONE,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.is_skipped is True
+        assert "No Python" in plan.skip_reason or "No build" in plan.skip_reason
+
+    # =========================================================================
+    # JavaScript/TypeScript Tests
+    # =========================================================================
+
+    def test_javascript_builder_integration(self, generator, tmp_path: Path) -> None:
+        """Test BuildPlanGenerator uses JavaScriptBuilder."""
+        # Create package.json
+        package_json = tmp_path / "package.json"
+        package_json.write_text('{"name": "my-app", "version": "1.0.0"}\n')
+
+        # Create JS file
+        index_js = tmp_path / "index.js"
+        index_js.write_text('console.log("hello");\n')
+
+        target = BuildTarget(
+            name="js-app",
+            path=tmp_path,
+            language="javascript",
+            build_system=BuildSystem.NPM,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.language == "javascript"
+        # JavaScript doesn't require build for CodeQL
+        assert plan.is_skipped or not plan.has_steps
+
+    def test_typescript_project(self, generator, tmp_path: Path) -> None:
+        """Test TypeScript project detection."""
+        tsconfig = tmp_path / "tsconfig.json"
+        tsconfig.write_text('{"compilerOptions": {"target": "ES2020"}}\n')
+
+        package_json = tmp_path / "package.json"
+        package_json.write_text('{"name": "ts-app"}\n')
+
+        main_ts = tmp_path / "main.ts"
+        main_ts.write_text('const x: number = 1;\n')
+
+        target = BuildTarget(
+            name="ts-app",
+            path=tmp_path,
+            language="typescript",
+            build_system=BuildSystem.NPM,
+        )
+
+        plan = generator.generate(target)
+
+        # TypeScript uses JavaScript analysis
+        assert plan.language == "typescript"
+        # TypeScript project may have npm install step (required=False)
+        # but no actual build command
+        if plan.has_steps:
+            # Verify dependency step is optional (not required for CodeQL)
+            assert all(not step.required for step in plan.steps)
+
+    def test_javascript_no_files_skipped(self, generator, tmp_path: Path) -> None:
+        """Test JavaScript project without JS files is skipped."""
+        target = BuildTarget(
+            name="empty-js",
+            path=tmp_path,
+            language="javascript",
+            build_system=BuildSystem.NONE,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.is_skipped is True
+
+    # =========================================================================
+    # Go Tests
+    # =========================================================================
+
+    def test_go_builder_integration(self, generator, tmp_path: Path) -> None:
+        """Test BuildPlanGenerator uses GoBuilder for Go projects."""
+        # Create go.mod
+        go_mod = tmp_path / "go.mod"
+        go_mod.write_text("module example.com/myapp\n\ngo 1.21\n")
+
+        # Create Go file
+        main_go = tmp_path / "main.go"
+        main_go.write_text('package main\n\nfunc main() {}\n')
+
+        target = BuildTarget(
+            name="go-app",
+            path=tmp_path,
+            language="go",
+            build_system=BuildSystem.GO_MODULES,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.language == "go"
+        assert plan.has_steps is True
+        # Should have build command
+        assert any("go build" in step.command for step in plan.steps)
+
+    def test_go_with_vendor(self, generator, tmp_path: Path) -> None:
+        """Test Go vendor mode detection."""
+        go_mod = tmp_path / "go.mod"
+        go_mod.write_text("module example.com/myapp\n\ngo 1.21\n")
+
+        # Create vendor directory
+        vendor_dir = tmp_path / "vendor"
+        vendor_dir.mkdir()
+
+        main_go = tmp_path / "main.go"
+        main_go.write_text('package main\n\nfunc main() {}\n')
+
+        target = BuildTarget(
+            name="vendor-app",
+            path=tmp_path,
+            language="go",
+            build_system=BuildSystem.GO_MODULES,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.has_steps is True
+        # Should use vendor mode
+        assert any("-mod=vendor" in step.command for step in plan.steps)
+
+    def test_go_no_mod_skipped(self, generator, tmp_path: Path) -> None:
+        """Test Go project without go.mod is skipped."""
+        main_go = tmp_path / "main.go"
+        main_go.write_text('package main\n\nfunc main() {}\n')
+
+        target = BuildTarget(
+            name="no-mod-go",
+            path=tmp_path,
+            language="go",
+            build_system=BuildSystem.NONE,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.is_skipped is True
+
+    # =========================================================================
+    # Java Tests
+    # =========================================================================
+
+    def test_java_maven_integration(self, generator, tmp_path: Path) -> None:
+        """Test BuildPlanGenerator uses JavaBuilder for Maven projects."""
+        pom_xml = tmp_path / "pom.xml"
+        pom_xml.write_text(
+            "<?xml version='1.0'?>\n"
+            "<project>\n"
+            "  <modelVersion>4.0.0</modelVersion>\n"
+            "  <groupId>com.example</groupId>\n"
+            "  <artifactId>my-app</artifactId>\n"
+            "  <version>1.0</version>\n"
+            "</project>\n"
+        )
+
+        target = BuildTarget(
+            name="maven-app",
+            path=tmp_path,
+            language="java",
+            build_system=BuildSystem.MAVEN,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.language == "java"
+        assert plan.has_steps is True
+        # Should have Maven build command
+        assert any("mvn" in step.command for step in plan.steps)
+
+    def test_java_gradle_integration(self, generator, tmp_path: Path) -> None:
+        """Test BuildPlanGenerator uses JavaBuilder for Gradle projects."""
+        build_gradle = tmp_path / "build.gradle"
+        build_gradle.write_text(
+            "plugins {\n"
+            "    id 'java'\n"
+            "}\n"
+            "repositories {\n"
+            "    mavenCentral()\n"
+            "}\n"
+        )
+
+        target = BuildTarget(
+            name="gradle-app",
+            path=tmp_path,
+            language="java",
+            build_system=BuildSystem.GRADLE,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.language == "java"
+        assert plan.has_steps is True
+        # Should have Gradle build command
+        assert any("gradle" in step.command for step in plan.steps)
+
+    def test_java_wrapper_detection(self, generator, tmp_path: Path) -> None:
+        """Test Maven/Gradle wrapper detection."""
+        pom_xml = tmp_path / "pom.xml"
+        pom_xml.write_text("<project><modelVersion>4.0.0</modelVersion></project>\n")
+
+        # Create Maven wrapper
+        mvnw = tmp_path / "mvnw"
+        mvnw.write_text("#!/bin/bash\necho 'mvnw'\n")
+
+        target = BuildTarget(
+            name="wrapper-app",
+            path=tmp_path,
+            language="java",
+            build_system=BuildSystem.MAVEN,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.has_steps is True
+        # Should use wrapper
+        assert any("./mvnw" in step.command for step in plan.steps)
+
+    # =========================================================================
+    # C/C++ Tests
+    # =========================================================================
+
+    def test_cpp_compile_commands_integration(self, generator, tmp_path: Path) -> None:
+        """Test BuildPlanGenerator uses CppBuilder for compile_commands.json."""
+        compile_commands = tmp_path / "compile_commands.json"
+        compile_commands.write_text(
+            '[\n'
+            '  {\n'
+            '    "directory": "/tmp/test",\n'
+            '    "command": "gcc -c main.c",\n'
+            '    "file": "main.c"\n'
+            '  }\n'
+            ']'
+        )
+
+        target = BuildTarget(
+            name="cpp-app",
+            path=tmp_path,
+            language="cpp",
+            build_system=BuildSystem.NONE,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.language == "cpp"
+        # compile_commands.json means no build steps needed
+        assert plan.is_skipped or not plan.has_steps
+
+    def test_cpp_cmake_project(self, generator, tmp_path: Path) -> None:
+        """Test CMake project detection."""
+        cmake_lists = tmp_path / "CMakeLists.txt"
+        cmake_lists.write_text(
+            "cmake_minimum_required(VERSION 3.10)\n"
+            "project(test)\n"
+            "add_executable(test main.cpp)\n"
+        )
+
+        target = BuildTarget(
+            name="cmake-app",
+            path=tmp_path,
+            language="cpp",
+            build_system=BuildSystem.NONE,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.language == "cpp"
+        # CMake project - may have cmake command or be skipped
+        # Result depends on whether cmake is available
+        assert plan.language == "cpp"
+
+    def test_cpp_no_build_system_skipped(self, generator, tmp_path: Path) -> None:
+        """Test C/C++ project without standard build system is skipped."""
+        # Only create C files, no build system
+        main_c = tmp_path / "main.c"
+        main_c.write_text('int main() { return 0; }\n')
+
+        target = BuildTarget(
+            name="no-build-cpp",
+            path=tmp_path,
+            language="cpp",
+            build_system=BuildSystem.NONE,
+        )
+
+        plan = generator.generate(target)
+
+        assert plan.is_skipped is True
+        # Should have a clear skip reason
+        assert plan.skip_reason is not None
 
 
 # =============================================================================

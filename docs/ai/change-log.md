@@ -2,6 +2,26 @@
 
 ## 2026-03-27
 
+### P7-11a: 完整 Builder 集成与单元测试完成
+
+- **Goal ID**: P7-11a
+- **Summary**: 扩展 BuildPlanGenerator 支持所有 5 种语言（Python、JavaScript、Go、Java、C/C++），并使用 pytest tmp_path 动态创建测试场景，验证各语言 Builder 与 BuildPlanGenerator 的协同工作
+- **Impact**:
+  - `src/layers/l3_analysis/build/build_plan.py:263`: BUILDER_LANGUAGES 扩展为 `{"go", "java", "python", "javascript", "cpp"}`
+  - `tests/unit/test_l3/test_build_plan.py`: 新增 `TestBuildPlanGeneratorWithAllBuilders` 测试类（17 个测试）
+  - `tests/unit/test_l3/test_readiness_gate.py`: 新增 `TestReadinessGateBuilderIntegration` 测试类（7 个测试）
+- **Test Coverage**:
+  - Python: pyproject.toml/Poetry/无文件跳过（3 tests）
+  - JavaScript: npm/TypeScript/无文件跳过（3 tests）
+  - Go: go.mod/vendor 模式/无 mod 跳过（3 tests）
+  - Java: Maven/Gradle/wrapper 检测（3 tests）
+  - C/C++: compile_commands.json/CMake/无构建系统跳过（3 tests）
+  - ReadinessGate Builder 集成（7 tests）
+- **Tests**: 83 passed (test_build_plan: 54, test_readiness_gate: 29)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: 99b6685
+
 ### P7-08: C/C++ 标准构建系统支持完成
 
 - **Goal ID**: P7-08

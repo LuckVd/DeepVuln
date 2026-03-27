@@ -510,3 +510,222 @@ class TestEdgeCases:
             except Exception as e:
                 # Exception is acceptable
                 assert "Test error" in str(e)
+
+
+# =============================================================================
+# Builder Integration Tests (P7-11a)
+# =============================================================================
+
+
+class TestReadinessGateBuilderIntegration:
+    """Tests for ReadinessGate with language-specific builders.
+
+    P7-11a: Verifies that ReadinessGate correctly uses specialized
+    builders for analyzing build readiness.
+    """
+
+    @pytest.fixture
+    def project_with_python(self, tmp_path: Path) -> Path:
+        """Create a Python project."""
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "[project]\n"
+            "name = 'my-app'\n"
+            "version = '1.0.0'\n"
+        )
+        main_py = tmp_path / "main.py"
+        main_py.write_text('def main(): pass\n')
+        return tmp_path
+
+    @pytest.fixture
+    def project_with_javascript(self, tmp_path: Path) -> Path:
+        """Create a JavaScript project."""
+        package_json = tmp_path / "package.json"
+        package_json.write_text('{"name": "js-app", "version": "1.0.0"}\n')
+        index_js = tmp_path / "index.js"
+        index_js.write_text('console.log("hello");\n')
+        return tmp_path
+
+    @pytest.fixture
+    def project_with_go(self, tmp_path: Path) -> Path:
+        """Create a Go project."""
+        go_mod = tmp_path / "go.mod"
+        go_mod.write_text("module example.com/myapp\n\ngo 1.21\n")
+        main_go = tmp_path / "main.go"
+        main_go.write_text('package main\n\nfunc main() {}\n')
+        return tmp_path
+
+    @pytest.fixture
+    def project_with_java_maven(self, tmp_path: Path) -> Path:
+        """Create a Java Maven project."""
+        pom_xml = tmp_path / "pom.xml"
+        pom_xml.write_text(
+            "<?xml version='1.0'?>\n"
+            "<project>\n"
+            "  <modelVersion>4.0.0</modelVersion>\n"
+            "  <groupId>com.example</groupId>\n"
+            "  <artifactId>my-app</artifactId>\n"
+            "  <version>1.0</version>\n"
+            "</project>\n"
+        )
+        return tmp_path
+
+    @pytest.fixture
+    def project_with_cpp(self, tmp_path: Path) -> Path:
+        """Create a C/C++ project with compile_commands.json."""
+        compile_commands = tmp_path / "compile_commands.json"
+        compile_commands.write_text(
+            '[\n'
+            '  {\n'
+            '    "directory": "/tmp/test",\n'
+            '    "command": "gcc -c main.c",\n'
+            '    "file": "main.c"\n'
+            '  }\n'
+            ']'
+        )
+        return tmp_path
+
+    def test_analyze_build_readiness_python(
+        self, project_with_python: Path
+    ) -> None:
+        """Test _analyze_build_readiness for Python."""
+        from src.layers.l3_analysis.build import BuildTarget
+        from src.layers.l3_analysis.readiness_gate import CodeQLReadinessGate
+
+        gate = CodeQLReadinessGate(project_path=project_with_python)
+
+        target = BuildTarget(
+            name="python-app",
+            path=project_with_python,
+            language="python",
+            build_system=BuildSystem.NONE,
+        )
+
+        results = gate._analyze_build_readiness([target])
+
+        assert len(results) == 1
+        assert results[0].language == "python"
+        # Python is interpreted - no build command needed
+        # buildable=False is correct (no build required)
+        # But detected_files should have pyproject.toml
+        assert "pyproject.toml" in results[0].detected_files
+
+    def test_analyze_build_readiness_javascript(
+        self, project_with_javascript: Path
+    ) -> None:
+        """Test _analyze_build_readiness for JavaScript."""
+        from src.layers.l3_analysis.build import BuildTarget
+        from src.layers.l3_analysis.readiness_gate import CodeQLReadinessGate
+
+        gate = CodeQLReadinessGate(project_path=project_with_javascript)
+
+        target = BuildTarget(
+            name="js-app",
+            path=project_with_javascript,
+            language="javascript",
+            build_system=BuildSystem.NPM,
+        )
+
+        results = gate._analyze_build_readiness([target])
+
+        assert len(results) == 1
+        assert results[0].language == "javascript"
+
+    def test_analyze_build_readiness_go(
+        self, project_with_go: Path
+    ) -> None:
+        """Test _analyze_build_readiness for Go."""
+        from src.layers.l3_analysis.build import BuildTarget
+        from src.layers.l3_analysis.readiness_gate import CodeQLReadinessGate
+
+        gate = CodeQLReadinessGate(project_path=project_with_go)
+
+        target = BuildTarget(
+            name="go-app",
+            path=project_with_go,
+            language="go",
+            build_system=BuildSystem.GO_MODULES,
+        )
+
+        results = gate._analyze_build_readiness([target])
+
+        assert len(results) == 1
+        assert results[0].language == "go"
+        # Go requires build
+        assert results[0].buildable is True
+        assert results[0].build_command is not None
+
+    def test_analyze_build_readiness_java(
+        self, project_with_java_maven: Path
+    ) -> None:
+        """Test _analyze_build_readiness for Java."""
+        from src.layers.l3_analysis.build import BuildTarget
+        from src.layers.l3_analysis.readiness_gate import CodeQLReadinessGate
+
+        gate = CodeQLReadinessGate(project_path=project_with_java_maven)
+
+        target = BuildTarget(
+            name="java-app",
+            path=project_with_java_maven,
+            language="java",
+            build_system=BuildSystem.MAVEN,
+        )
+
+        results = gate._analyze_build_readiness([target])
+
+        assert len(results) == 1
+        assert results[0].language == "java"
+        # Java requires build
+        assert results[0].buildable is True
+        assert "mvn" in results[0].build_command
+
+    def test_analyze_build_readiness_cpp(
+        self, project_with_cpp: Path
+    ) -> None:
+        """Test _analyze_build_readiness for C/C++."""
+        from src.layers.l3_analysis.build import BuildTarget
+        from src.layers.l3_analysis.readiness_gate import CodeQLReadinessGate
+
+        gate = CodeQLReadinessGate(project_path=project_with_cpp)
+
+        target = BuildTarget(
+            name="cpp-app",
+            path=project_with_cpp,
+            language="cpp",
+            build_system=BuildSystem.NONE,
+        )
+
+        results = gate._analyze_build_readiness([target])
+
+        assert len(results) == 1
+        assert results[0].language == "cpp"
+        # compile_commands.json means no build command needed
+        # buildable=False is correct (compile_commands already exists)
+        # But detected_files should have compile_commands.json
+        assert "compile_commands.json" in results[0].detected_files
+
+    def test_build_warnings_propagation(
+        self, project_with_python: Path
+    ) -> None:
+        """Test that build warnings are propagated correctly."""
+        from src.layers.l3_analysis.build import BuildTarget
+        from src.layers.l3_analysis.readiness_gate import CodeQLReadinessGate
+
+        gate = CodeQLReadinessGate(project_path=project_with_python)
+
+        target = BuildTarget(
+            name="python-app",
+            path=project_with_python,
+            language="python",
+            build_system=BuildSystem.NONE,
+        )
+
+        results = gate._analyze_build_readiness([target])
+
+        # BuildReadinessInfo should have correct structure
+        info = results[0]
+        assert hasattr(info, "warnings")
+        assert hasattr(info, "skip_reason")
+        assert hasattr(info, "build_command")
+        assert hasattr(info, "detected_files")
+

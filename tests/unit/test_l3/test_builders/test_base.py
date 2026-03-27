@@ -206,10 +206,6 @@ class TestLanguageBuilder:
 class TestBuilderRegistry:
     """Tests for BuilderRegistry."""
 
-    def setup_method(self) -> None:
-        """Clear registry before each test."""
-        BuilderRegistry._builders.clear()
-
     def test_register_builder(self) -> None:
         """Test registering a builder."""
 

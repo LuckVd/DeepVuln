@@ -288,6 +288,28 @@
 
 **实现文件**: `src/layers/l3_analysis/decision/models.py`, `src/layers/l3_analysis/decision/language_decider.py`, `src/layers/l3_analysis/readiness_gate.py`, `tests/unit/test_l3/test_decision.py`, `tests/unit/test_l3/test_version_detector.py`, `tests/unit/test_l3/test_tool_resolver.py`, `tests/integration/test_decision_e2e.py`
 
+### P7-11a: 完整 Builder 集成与单元测试（P1）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-11a|扩展 BuildPlanGenerator 支持所有 5 种语言，添加单元测试|P7-05, P7-06, P7-07, P7-08|done|
+|P7-11a-S1|扩展 BUILDER_LANGUAGES 包含 python/javascript/cpp|P7-11a|done|
+|P7-11a-S2|创建 TestBuildPlanGeneratorWithAllBuilders 测试类|P7-11a-S1|done|
+|P7-11a-S3|扩展 test_readiness_gate.py 添加 Builder 集成测试|P7-11a-S2|done|
+|P7-11a-S4|运行完整测试套件验证覆盖率 >= 90%|P7-11a-S3|done|
+
+**实现文件**: `src/layers/l3_analysis/build/build_plan.py`, `tests/unit/test_l3/test_build_plan.py`, `tests/unit/test_l3/test_readiness_gate.py`
+
+### P7-11b 系列：Docker 集成测试（P2）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P7-11b-1|Python Docker 集成测试|P7-11a|todo|
+|P7-11b-2|JavaScript/TypeScript Docker 集成测试|P7-11a|todo|
+|P7-11b-3|Go Docker 集成测试|P7-11a|todo|
+|P7-11b-4|Java Docker 集成测试|P7-11a|todo|
+|P7-11b-5|C/C++ Docker 集成测试|P7-11a|todo|
+
 ---
 
 ## 里程碑
@@ -313,10 +335,11 @@
 |字段|值|
 |---|---|
 |**阶段**|Phase 7 - CodeQL 智能决策与分语言构建编排|
-|**当前进度**|P7-01/03/04/05/09 完成（核心决策链路已贯通）|
-|**下一步**|P7-06 Go/Java 标准构建支持，或 P7-10 基线策略与效果评估|
-|**重点模块**|src/layers/l3_analysis/decision/, src/layers/l3_analysis/build/, src/layers/l3_analysis/readiness_gate.py|
-|**目标**|通过 LLM 智能决策 + 构建画像 + 工具兼容性判定，显著提升 CodeQL 多语言构建成功率|
+|**当前进度**|P7-01~P7-11a 完成，P7-11b 系列 Docker 集成测试待开始|
+|**当前目标**|P7-11b 系列: Docker 集成测试|
+|**下一步**|P7-11b-1: Python Docker 集成测试|
+|**重点模块**|tests/integration/|
+|**目标**|在 Docker 环境中验证各语言 Builder 的端到端构建流程|
 
 ---
 

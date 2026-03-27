@@ -1,44 +1,36 @@
-goal_id: P7-08
-title: "C/C++ 标准构建系统支持"
-stage: done
+goal_id: P7-11a
+title: "完整 Builder 集成与单元测试"
+stage: completed
 status: completed
-selected_option: P7-08
+selected_option: P7-11a
 design_confirmed: true
 blocked_by: []
 open_questions: []
-resolved_questions:
-  - "是否需要支持 autotools/meson/scons/bazel 等非标准构建系统？→ 不支持"
-  - "是否需要自动调用 Bear/compiledb 工具来生成 compile_commands.json？→ 仅检测，不自动运行"
-  - "Makefile 检测的保守程度：检测到什么特征时应该跳过？→ shell调用、include、sudo、超过10个target"
+resolved_questions: []
 goal_candidates:
-  - id: P7-08
-    title: "C/C++ 标准构建系统支持"
-    reason: "仅支持标准构建系统，避免无边界猜测式构建"
+  - id: P7-11a
+    title: "完整 Builder 集成与单元测试"
+    reason: "扩展 BuildPlanGenerator 支持所有 5 种语言，使用 tmp_path 动态创建测试场景"
 implementation_steps:
   - id: S1
-    description: "实现 CppBuilder 基础框架"
+    description: "扩展 BuildPlanGenerator.BUILDER_LANGUAGES 包含所有语言"
     status: completed
   - id: S2
-    description: "实现 compile_commands.json 检测与验证"
+    description: "创建 TestBuildPlanGeneratorWithAllBuilders 测试类"
     status: completed
   - id: S3
-    description: "实现 CMake 导出策略"
+    description: "扩展 test_readiness_gate.py 添加 Builder 集成测试"
     status: completed
   - id: S4
-    description: "实现 Makefile 保守策略"
-    status: completed
-  - id: S5
-    description: "实现 header-only/无标准构建系统的跳过与说明"
-    status: completed
-  - id: S6
-    description: "验证止损线：高风险场景直接跳过"
+    description: "运行完整测试套件验证覆盖率"
     status: completed
 test_scope:
-  - "tests/unit/test_l3/test_builders/test_cpp_builder.py"
+  - "tests/unit/test_l3/test_build_plan.py"
+  - "tests/unit/test_l3/test_readiness_gate.py"
 security_blockers: []
 dead_code_actions: []
 sync_status: synced
-last_check_at: "2026-03-27T00:00:00Z"
+last_check_at: "2026-03-27"
 last_security_scan_at: null
 last_deadcode_scan_at: null
-last_synced_at: "2026-03-27T00:00:00Z"
+last_synced_at: "2026-03-27"

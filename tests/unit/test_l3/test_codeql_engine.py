@@ -645,14 +645,28 @@ class TestCodeQLStabilityFixes:
 
     @pytest.mark.asyncio
     async def test_execute_build_uses_build_timeout(self, tmp_path):
+        """Test that build_timeout is passed to BuildExecutor when build is needed."""
         engine = CodeQLEngine(timeout=123, build_timeout=987)
+
+        # Create a Java project with pom.xml so JavaBuilder won't skip
+        pom_xml = tmp_path / "pom.xml"
+        pom_xml.write_text(
+            "<?xml version='1.0'?>\n"
+            "<project>\n"
+            "  <modelVersion>4.0.0</modelVersion>\n"
+            "  <groupId>com.example</groupId>\n"
+            "  <artifactId>test</artifactId>\n"
+            "  <version>1.0</version>\n"
+            "</project>\n"
+        )
 
         with patch("src.layers.l3_analysis.build.BuildExecutor") as mock_executor_cls:
             mock_executor = mock_executor_cls.return_value
             mock_executor.execute = AsyncMock(return_value=MagicMock(success=True, skipped=True))
 
-            await engine._execute_build(tmp_path, "java")
+            result = await engine._execute_build(tmp_path, "java")
 
+        # BuildExecutor should be called with build_timeout
         mock_executor_cls.assert_called_once_with(timeout=987)
 
     @pytest.mark.asyncio
