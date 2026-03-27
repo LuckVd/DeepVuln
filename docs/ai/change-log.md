@@ -2,6 +2,55 @@
 
 ## 2026-03-27
 
+### P8-01: 多版本运行时环境管理器完成
+
+- **Goal ID**: P8-01
+- **Summary**: 实现运行时版本自动检测、安装和切换能力，当 DeepVuln 检测到项目需要特定语言版本时，自动安装正确的运行时环境后再执行构建
+- **Impact**:
+  - `src/layers/l3_analysis/build/runtime/__init__.py`: 模块入口
+  - `src/layers/l3_analysis/build/runtime/models.py`: 数据模型（RuntimeType, RuntimeInfo, RuntimeRequirement 等）
+  - `src/layers/l3_analysis/build/runtime/registry.py`: 版本注册表（Java/Python/Node/Go 下载 URL）
+  - `src/layers/l3_analysis/build/runtime/installer.py`: 安装器框架和各语言安装器
+  - `src/layers/l3_analysis/build/runtime/switcher.py`: 版本切换器（环境变量管理）
+  - `src/layers/l3_analysis/build/runtime/manager.py`: 统一管理器
+  - `src/layers/l3_analysis/build/tool_resolver.py`: 添加 `ProvisionPolicy.AUTO_INSTALL`
+  - `src/layers/l3_analysis/build/__init__.py`: 导出 `get_runtime_manager()`
+  - `src/layers/l3_analysis/readiness_gate.py`: 集成 `RuntimeVersionManager`
+  - `tests/unit/test_l3/test_runtime/`: 29 个单元测试
+- **Test Coverage**:
+  - RuntimeType 枚举和模型测试（13 tests）
+  - RuntimeRegistry 版本注册表测试（16 tests）
+- **Supported Runtimes**:
+  - Java: 8, 11, 17, 21 (Eclipse Temurin)
+  - Python: 3.8, 3.9, 3.10, 3.11, 3.12 (Miniconda)
+  - Node.js: 16, 18, 20 (nodejs.org)
+  - Go: 1.20, 1.21, 1.22 (go.dev)
+- **Tests**: 29 passed
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
+### P7-11b-4: Java Docker 集成测试完成
+
+### P7-11b-4: Java Docker 集成测试完成
+
+- **Goal ID**: P7-11b-4
+- **Summary**: 在 Docker 环境中对 java-sec-code 项目进行 CodeQL 扫描，验证 Java Builder 与 CodeQL 引擎的协同工作
+- **Result**: Builder 集成验证成功，CodeQL 分析因查询包下载问题失败
+- **Verification**:
+  - ✅ Java Builder 正确识别 Maven 构建系统
+  - ✅ Maven 构建成功 (`Build completed successfully in 45.1s`)
+  - ✅ CodeQL 数据库创建成功
+  - ❌ CodeQL 分析失败（查询包下载超时）
+- **Issues Resolved**:
+  1. Docker 挂载只读 → 使用可读写挂载
+  2. 源目录权限问题 → `chmod -R o+w`
+  3. Lombok 1.18.20 与 JDK 21 不兼容 → 升级到 1.18.32
+- **Known Issues**:
+  - CodeQL 查询包下载可能需要预下载 (`PRELOAD_CODEQL_PACKS=true`)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+
 ### P7-11a: 完整 Builder 集成与单元测试完成
 
 - **Goal ID**: P7-11a

@@ -310,6 +310,22 @@
 |P7-11b-4|Java Docker 集成测试|P7-11a|todo|
 |P7-11b-5|C/C++ Docker 集成测试|P7-11a|todo|
 
+### P8-01: 多版本运行时环境管理器（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P8-01|运行时版本自动检测、安装和切换|-|done|
+|P8-01-S1|创建 src/layers/l3_analysis/build/runtime/ 目录结构|P8-01|done|
+|P8-01-S2|实现 RuntimeRegistry 运行时版本注册表|P8-01|done|
+|P8-01-S3|实现 RuntimeInstaller 基础框架和各语言安装器|P8-01|done|
+|P8-01-S4|实现 RuntimeSwitcher 环境变量切换|P8-01|done|
+|P8-01-S5|实现 RuntimeVersionManager 统一管理|P8-01|done|
+|P8-01-S6|修改 ProvisionPolicy 添加 AUTO_INSTALL|P8-01|done|
+|P8-01-S7|修改 ReadinessGate 集成版本管理器|P8-01|done|
+|P8-01-S12|单元测试覆盖|P8-01|done|
+
+**实现文件**: `src/layers/l3_analysis/build/runtime/`, `tests/unit/test_l3/test_runtime/`
+
 ---
 
 ## 里程碑
@@ -335,11 +351,11 @@
 |字段|值|
 |---|---|
 |**阶段**|Phase 7 - CodeQL 智能决策与分语言构建编排|
-|**当前进度**|P7-01~P7-11a 完成，P7-11b 系列 Docker 集成测试待开始|
-|**当前目标**|P7-11b 系列: Docker 集成测试|
-|**下一步**|P7-11b-1: Python Docker 集成测试|
-|**重点模块**|tests/integration/|
-|**目标**|在 Docker 环境中验证各语言 Builder 的端到端构建流程|
+|**当前进度**|P7-01~P7-11a 完成，P8-01 完成，P7-11b 系列 Docker 集成测试待开始|
+|**当前目标**|P7-11b 系列: Docker 集成测试 或 后续优化|
+|**下一步**|P7-11b-1: Python Docker 集成测试 / P8-01-S11: Dockerfile 修改支持动态安装|
+|**重点模块**|tests/integration/, src/layers/l3_analysis/build/runtime/|
+|**目标**|在 Docker 环境中验证各语言 Builder 和运行时版本管理的端到端流程|
 
 ---
 

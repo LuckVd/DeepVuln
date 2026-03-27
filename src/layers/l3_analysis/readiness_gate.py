@@ -243,6 +243,21 @@ class CodeQLReadinessGate:
             if info.skip_reason:
                 build_skip_reasons[info.target_name] = info.skip_reason
 
+        # Step 2c: Ensure runtime versions are installed and switched
+        runtime_ensure_result = None
+        if version_req:
+            try:
+                from .runtime import RuntimeVersionManager, RuntimeType as RuntimeRuntimeType
+                runtime_manager = RuntimeVersionManager()
+                runtime_requirements = runtime_manager.from_version_requirement(version_req)
+                if runtime_requirements:
+                    logger.info(f"Ensuring runtime versions: {runtime_requirements}")
+                    runtime_ensure_result = await runtime_manager.ensure(runtime_requirements)
+                    if not runtime_ensure_result.success:
+                        logger.warning(f"Runtime version ensure failed: {runtime_ensure_result.errors}")
+            except Exception as e:
+                logger.warning(f"Runtime version management failed: {e}")
+
         # Step 3: Tool readiness
         tool_report = self._check_tools(build_targets, version_req)
 

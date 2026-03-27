@@ -55,6 +55,7 @@ class ProvisionPolicy(str, Enum):
     STRICT = "strict"  # Fail if requirements not met
     REUSE_ONLY = "reuse_only"  # Use available tools, warn on issues
     MANAGED_CACHE = "managed_cache"  # Try to use managed cache
+    AUTO_INSTALL = "auto_install"  # Automatically install missing versions
 
 
 class CompatibilityStatus(str, Enum):

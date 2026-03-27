@@ -136,3 +136,9 @@ __all__ = [
     "generate_build_plan",
     "create_build_cache",
 ]
+
+# Runtime version management (lazy import to avoid circular dependencies)
+def get_runtime_manager(*args, **kwargs):
+    """Get RuntimeVersionManager instance."""
+    from .runtime import RuntimeVersionManager
+    return RuntimeVersionManager(*args, **kwargs)

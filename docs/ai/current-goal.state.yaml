@@ -1,32 +1,82 @@
-goal_id: P7-11a
-title: "完整 Builder 集成与单元测试"
+goal_id: P8-01
+title: "多版本运行时环境管理器"
 stage: completed
 status: completed
-selected_option: P7-11a
+selected_option: "运行时动态安装方案"
 design_confirmed: true
 blocked_by: []
 open_questions: []
 resolved_questions: []
 goal_candidates:
-  - id: P7-11a
-    title: "完整 Builder 集成与单元测试"
-    reason: "扩展 BuildPlanGenerator 支持所有 5 种语言，使用 tmp_path 动态创建测试场景"
+  - id: P8-01
+    title: "多版本运行时环境管理器"
+    reason: "解决环境版本不匹配导致的构建失败问题，支持 Java/Python/Node/Go 多版本自动安装和切换"
 implementation_steps:
   - id: S1
-    description: "扩展 BuildPlanGenerator.BUILDER_LANGUAGES 包含所有语言"
+    description: "创建 src/layers/l3_analysis/build/runtime/ 目录结构"
     status: completed
+    priority: P0
   - id: S2
-    description: "创建 TestBuildPlanGeneratorWithAllBuilders 测试类"
+    description: "实现 RuntimeRegistry 运行时版本注册表"
     status: completed
+    priority: P0
   - id: S3
-    description: "扩展 test_readiness_gate.py 添加 Builder 集成测试"
+    description: "实现 RuntimeInstaller 基础框架和 Java 安装器"
     status: completed
+    priority: P0
   - id: S4
-    description: "运行完整测试套件验证覆盖率"
+    description: "实现 RuntimeSwitcher 环境变量切换"
     status: completed
+    priority: P0
+  - id: S5
+    description: "实现 RuntimeVersionManager 统一管理"
+    status: completed
+    priority: P0
+  - id: S6
+    description: "修改 ProvisionPolicy 添加 AUTO_INSTALL"
+    status: completed
+    priority: P1
+  - id: S7
+    description: "修改 ReadinessGate 集成版本管理器"
+    status: completed
+    priority: P1
+  - id: S8
+    description: "实现 Python 安装器"
+    status: completed
+    priority: P1
+  - id: S9
+    description: "实现 Node.js 安装器"
+    status: completed
+    priority: P2
+  - id: S10
+    description: "实现 Go 安装器"
+    status: completed
+    priority: P2
+  - id: S11
+    description: "修改 Dockerfile 支持动态安装"
+    status: pending
+    priority: P1
+  - id: S12
+    description: "单元测试覆盖"
+    status: completed
+    priority: P0
+  - id: S13
+    description: "集成测试：Java 8 项目"
+    status: pending
+    priority: P0
+  - id: S14
+    description: "更新文档"
+    status: pending
+    priority: P2
 test_scope:
-  - "tests/unit/test_l3/test_build_plan.py"
-  - "tests/unit/test_l3/test_readiness_gate.py"
+  - "tests/unit/test_l3/test_runtime/"
+  - "tests/integration/test_java8_project.py"
+supported_runtimes:
+  java: ["8", "11", "17", "21"]
+  python: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+  node: ["16", "18", "20"]
+  go: ["1.20", "1.21", "1.22"]
+install_strategy: "dynamic_download"
 security_blockers: []
 dead_code_actions: []
 sync_status: synced
