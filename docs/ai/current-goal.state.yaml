@@ -1,54 +1,18 @@
-goal_id: P7-11b
-title: "Docker 集成测试"
-stage: completed
-status: completed
-selected_option: "Docker 集成测试框架"
-design_confirmed: true
+goal_id: null
+title: null
+stage: null
+status: null
+selected_option: null
+design_confirmed: false
 blocked_by: []
 open_questions: []
 resolved_questions: []
-implementation_steps:
-  - id: S1
-    description: "创建 tests/integration/docker/ 目录结构"
-    status: completed
-    priority: P0
-  - id: S2
-    description: "创建 conftest.py (Docker fixture)"
-    status: completed
-    priority: P0
-  - id: S3
-    description: "创建 Python 集成测试 (P7-11b-1)"
-    status: completed
-    priority: P1
-  - id: S4
-    description: "创建 JavaScript 集成测试 (P7-11b-2)"
-    status: completed
-    priority: P1
-  - id: S5
-    description: "创建 Go 集成测试 (P7-11b-3)"
-    status: completed
-    priority: P1
-  - id: S6
-    description: "完善 Java 集成测试 (P7-11b-4)"
-    status: completed
-    priority: P1
-  - id: S7
-    description: "创建 C/C++ 集成测试 (P7-11b-5)"
-    status: completed
-    priority: P1
-test_scope:
-  - "tests/integration/docker/"
-test_result: "47 passed, 9 skipped, 6 warnings"
-new_files:
-  - "tests/integration/docker/__init__.py"
-  - "tests/integration/docker/conftest.py"
-  - "tests/integration/docker/test_python_integration.py"
-  - "tests/integration/docker/test_javascript_integration.py"
-  - "tests/integration/docker/test_go_integration.py"
-  - "tests/integration/docker/test_java_integration.py"
-  - "tests/integration/docker/test_cpp_integration.py"
+implementation_steps: []
+test_scope: []
+test_result: null
+new_files: []
 security_blockers: []
 dead_code_actions: []
-sync_status: pending
-last_check_at: "2026-03-27"
-last_synced_at: null
+sync_status: synced
+last_check_at: "2026-03-30"
+last_synced_at: "2026-03-30"

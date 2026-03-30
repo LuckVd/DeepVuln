@@ -352,12 +352,12 @@
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 7 - CodeQL 智能决策与分语言构建编排|
-|**当前进度**|P7-01~P7-11a 完成，P8-01 完成，P7-11b 系列 Docker 集成测试待开始|
-|**当前目标**|P7-11b 系列: Docker 集成测试 或 后续优化|
-|**下一步**|P7-11b-1: Python Docker 集成测试 / P8-01-S11: Dockerfile 修改支持动态安装|
-|**重点模块**|tests/integration/, src/layers/l3_analysis/build/runtime/|
-|**目标**|在 Docker 环境中验证各语言 Builder 和运行时版本管理的端到端流程|
+|**阶段**|Phase 7 - CodeQL 智能决策与分语言构建编排（基本完成）|
+|**当前进度**|P7-01~P7-11b 完成，P8-01 完成|
+|**当前目标**|无活跃目标|
+|**下一步**|待定: Phase 7 收尾 或 Phase 6.5 后续任务|
+|**最近完成**|P7-11b (Docker 集成测试), P8-01 (运行时管理), bugfix (Semgrep CLI 兼容性)|
+|**重点模块**|src/layers/l3_analysis/engines/, src/cli/|
 
 ---
 

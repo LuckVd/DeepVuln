@@ -545,7 +545,11 @@ def _collect_failed_engines(
     # Process unavailable engines
     for engine_name in unavailable_engines:
         # Don't duplicate if already in failed_engines
-        if any(fe["name"] == engine_name for fe in failed_engines):
+        # Handle both dict and FailedEngineInfo objects
+        if any(
+            (fe.name if hasattr(fe, 'name') else fe.get("name")) == engine_name
+            for fe in failed_engines
+        ):
             continue
 
         failed_engines.append({
@@ -603,7 +607,10 @@ def _determine_scan_status(
         return ScanStatus.FAILED.value
 
     # Check for core engine failures
-    core_engine_failures = [fe for fe in failed_engines if fe.get("is_core_engine")]
+    core_engine_failures = [
+        fe for fe in failed_engines
+        if (fe.is_core_engine if hasattr(fe, 'is_core_engine') else fe.get('is_core_engine'))
+    ]
     core_engine_success = any(
         phases.get(name, {}).get("success")
         for name in CORE_EVIDENCE_ENGINES
@@ -1887,7 +1894,7 @@ async def run_full_security_scan(
                 result["partial_success"] = True
                 logger.warning(
                     f"Partial success: {successful_engines}/{total_engines} engines succeeded. "
-                    f"Failed: {[fe['name'] for fe in failed_engines_structured]}"
+                    f"Failed: {[fe.name if hasattr(fe, 'name') else fe['name'] for fe in failed_engines_structured]}"
                 )
             else:
                 logger.info(f"All {total_engines} engines succeeded")
@@ -2132,11 +2139,19 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
         lines.append("Failed Engines")
         lines.append("-" * 70)
         for fe in failed_engines:
-            core_marker = " [CORE]" if fe.get("is_core_engine") else ""
-            lines.append(f"  • {fe['name']}{core_marker}: {fe['error_type']}")
-            lines.append(f"    Message: {fe['message']}")
-            if fe.get("languages"):
-                lines.append(f"    Languages: {', '.join(fe['languages'])}")
+            # Handle both dict and FailedEngineInfo objects
+            name = fe.name if hasattr(fe, 'name') else fe.get('name', 'unknown')
+            error_type = fe.error_type if hasattr(fe, 'error_type') else fe.get('error_type', 'unknown')
+            message = fe.message if hasattr(fe, 'message') else fe.get('message', '')
+            is_core = fe.is_core_engine if hasattr(fe, 'is_core_engine') else fe.get('is_core_engine', False)
+            languages = fe.languages if hasattr(fe, 'languages') else fe.get('languages')
+
+            core_marker = " [CORE]" if is_core else ""
+            lines.append(f"  • {name}{core_marker}: {error_type}")
+            lines.append(f"    Message: {message}")
+            if languages:
+                lang_str = ', '.join(languages) if isinstance(languages, list) else languages
+                lines.append(f"    Languages: {lang_str}")
         lines.append("")
 
     codeql_gate = result.get("codeql_gate") or {}

@@ -330,6 +330,9 @@ class SemgrepEngine(BaseEngine):
             result.metadata["ast_validation"] = ast_validation_result.to_dict()
 
         try:
+            # DEBUG: Log the command before running
+            self.logger.info(f"Semgrep command: {' '.join(cmd)}")
+
             # Run semgrep
             returncode, stdout, stderr = await self.run_command(
                 cmd,
@@ -448,8 +451,12 @@ class SemgrepEngine(BaseEngine):
         configs = []
         using_auto = use_auto_config
 
+        # DEBUG: Log input parameters
+        self.logger.debug(f"_build_scan_command: use_auto_config={use_auto_config}, rules={rules}, rule_sets={rule_sets}, languages={languages}")
+
         if use_auto_config:
             configs.append("auto")
+            self.logger.debug(f"Added auto to configs: {configs}")
         else:
             # Add custom rules
             if rules:
@@ -479,7 +486,9 @@ class SemgrepEngine(BaseEngine):
             cmd.extend(["--config", ",".join(configs)])
 
         # Add language filter
-        if languages:
+        # NOTE: --lang is only valid with --pattern or explicit --config (NOT --config auto)
+        # When using --config auto, Semgrep auto-detects languages, so --lang causes an error
+        if languages and configs and not using_auto:
             for lang in languages:
                 cmd.extend(["--lang", lang])
 
@@ -505,6 +514,10 @@ class SemgrepEngine(BaseEngine):
 
         # Add target path
         cmd.append(str(source_path))
+
+        # DEBUG: Log the command being built
+        self.logger.debug(f"Semgrep command: {' '.join(cmd)}")
+        self.logger.debug(f"Configs: {configs}, Languages: {languages}")
 
         return cmd
 

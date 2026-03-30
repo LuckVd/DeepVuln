@@ -1,5 +1,23 @@
 # Change Log
 
+## 2026-03-30
+
+### Bug 修复: Semgrep CLI 兼容性与类型安全
+
+- **Goal ID**: bugfix-semgrep-cli-compat
+- **Summary**: 修复 Semgrep 引擎 CLI 参数冲突和 FailedEngineInfo 类型处理问题
+- **Impact**:
+  - `Dockerfile`: CodeQL 版本升级 `2.24.2` → `2.25.1`
+  - `src/cli/main.py`: 修复 `FailedEngineInfo` 对象/字典兼容性（3 处）
+  - `src/layers/l3_analysis/engines/semgrep.py`: 修复 `--lang` 与 `--config auto` 冲突 + 添加调试日志
+- **Issues Fixed**:
+  - Semgrep 使用 `--config auto` 时加 `--lang` 参数导致命令失败
+  - CLI 导出时 `FailedEngineInfo` dataclass 与 dict 混用导致属性访问错误
+- **Tests**: 47 passed, 9 skipped (Docker 集成测试验证无回归)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+- **Commit**: pending
+
 ## 2026-03-28
 
 ### P7-11b 系列: Docker 集成测试完成
