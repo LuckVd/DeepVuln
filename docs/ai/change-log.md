@@ -16,7 +16,7 @@
 - **Tests**: 47 passed, 9 skipped (Docker 集成测试验证无回归)
 - **Dead Code**: not run
 - **Security**: No secrets exposed
-- **Commit**: pending
+- **Commit**: 6c32401
 
 ## 2026-03-28
 
