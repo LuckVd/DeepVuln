@@ -493,7 +493,7 @@ def adjudicate_findings(
         # Create LLM client for cluster-based deduplication
         llm_client = None
         try:
-            from src.core.config import get_llm_model, get_llm_provider
+            from src.core.config import get_llm_model, get_llm_provider, get_openai_config, get_ollama_config
             from src.layers.l3_analysis.llm.openai_client import OpenAIClient
             from src.layers.l3_analysis.engines.opencode_agent import DEFAULT_MODELS, LLMProvider
 
@@ -501,16 +501,23 @@ def adjudicate_findings(
             model = get_llm_model()
 
             if provider.lower() == "openai":
+                # Get OpenAI config with api_key and base_url
+                openai_config = get_openai_config()
                 llm_client = OpenAIClient(
                     model=model or DEFAULT_MODELS[LLMProvider.OPENAI],
+                    api_key=openai_config.get("api_key"),
+                    base_url=openai_config.get("base_url"),
                     max_tokens=1000,
                     temperature=0.1,
                     timeout=30,
                 )
             elif provider.lower() == "ollama":
                 from src.layers.l3_analysis.llm.ollama_client import OllamaClient
+                # Get Ollama config with base_url
+                ollama_config = get_ollama_config()
                 llm_client = OllamaClient(
                     model=model or DEFAULT_MODELS[LLMProvider.OLLAMA],
+                    base_url=ollama_config.get("base_url"),
                     max_tokens=1000,
                     temperature=0.1,
                     timeout=30,
@@ -532,7 +539,7 @@ def adjudicate_findings(
                 config=ClusterDeduplicatorConfig(
                     line_tolerance=10,
                     enable_llm_dedup=True,
-                    llm_timeout=30,
+                    llm_timeout=180,  # Increased for GLM-5 reasoning models
                     max_cluster_size=10,
                 ),
             )

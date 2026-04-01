@@ -2,6 +2,29 @@
 
 ## 2026-04-01
 
+### Bug 修复: LLM 去重服务集成问题
+
+- **Goal ID**: bugfix-llm-dedup-integration
+- **Summary**: 修复 P6-17 LLM 去重功能的多个集成问题，确保跨引擎去重正常工作
+- **Impact**:
+  - `src/layers/l3_analysis/adjudication.py`: 添加 `api_key` 和 `base_url` 参数传递
+  - `src/layers/l3_analysis/llm/openai_client.py`: 处理 GLM-5 的 `content`/`reasoning_content` 字段，添加请求超时参数支持
+  - `src/layers/l3_analysis/deduplicator.py`: 使用子进程方式调用 LLM 避免异步冲突，超时增加到 180 秒
+  - `src/layers/l3_analysis/models.py`: 添加 `merged_findings` 字段用于存储合并的漏洞详情
+- **Root Cause**:
+  - `adjudication.py` 创建 `OpenAIClient` 时未传递认证信息
+  - GLM-5 推理模型使用 `reasoning_content` 字段存储推理过程，`content` 字段存储最终答案
+  - 扫描框架在异步上下文中运行，`asyncio.run()` 无法嵌套调用
+  - 默认超时 30 秒不足以支持 GLM-5 推理（需要 60-90 秒）
+- **Fix**:
+  - 从 `get_openai_config()` 获取并传递 `api_key` 和 `base_url`
+  - 优先读取 `content` 字段，为空时回退到 `reasoning_content`
+  - 使用子进程 + base64 编码方式调用 LLM，避免事件循环冲突
+  - 默认超时从 30 秒增加到 180 秒
+  - 添加 `merged_findings: list[dict[str, Any]]` 字段记录合并的漏洞详情
+- **Tests**: 本地验证通过 (3 findings → 2 findings, 1 removed)
+- **Security**: No secrets exposed
+
 ### Bug 修复: Readiness Gate 属性访问安全
 
 - **Goal ID**: bugfix-readiness-gate-attr

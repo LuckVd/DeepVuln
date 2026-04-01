@@ -696,8 +696,8 @@ class ClusterDeduplicatorConfig(BaseModel):
     enable_llm_dedup: bool = True
     """Whether to enable LLM-based deduplication (default: True)."""
 
-    llm_timeout: int = 30
-    """LLM timeout in seconds (default: 30)."""
+    llm_timeout: int = 180
+    """LLM timeout in seconds (default: 180, GLM-5 reasoning models can take 60+ seconds)."""
 
     max_cluster_size: int = 10
     """Maximum findings per cluster before splitting (default: 10)."""
@@ -949,17 +949,104 @@ class ClusterBasedDeduplicator:
             # Build prompt for LLM
             prompt = self._build_dedup_prompt(cluster)
 
-            # Call LLM
+            # Call LLM (handle async method)
+            import asyncio
+            import sys
             from src.layers.l3_analysis.llm.client import LLMError
 
-            response = self.llm_client.complete(
-                prompt=prompt,
-                max_tokens=1000,
-                timeout=self.config.llm_timeout,
-            )
+            try:
+                response = asyncio.run(self.llm_client.complete(
+                    prompt=prompt,
+                    max_tokens=3000,
+                    timeout=self.config.llm_timeout,
+                ))
+            except RuntimeError as e:
+                # We're in an async context - use subprocess to avoid event loop conflict
+                if "asyncio.run()" in str(e) or "running event loop" in str(e):
+                    self.logger.warning("In async context, using subprocess for LLM call")
+                    import subprocess
+                    import tempfile
+                    import os
+                    import base64
 
-            # Parse response
-            result = self._parse_llm_response(cluster.findings, response.text)
+                    # Encode the prompt as base64 to avoid escaping issues
+                    prompt_b64 = base64.b64encode(prompt.encode()).decode()
+
+                    # Create a temporary script to run the LLM call
+                    script = f'''
+import asyncio
+import sys
+import base64
+sys.path.insert(0, "{os.path.abspath("/opt/projects/DeepVuln")}")
+
+from src.core.config import load_config, get_llm_model, get_openai_config
+from src.layers.l3_analysis.llm.openai_client import OpenAIClient
+
+config = load_config()
+model = get_llm_model()
+openai_config = get_openai_config()
+
+llm_client = OpenAIClient(
+    model=model,
+    api_key=openai_config.get("api_key"),
+    base_url=openai_config.get("base_url"),
+    max_tokens=3000,
+    temperature=0.1,
+    timeout={self.config.llm_timeout},
+)
+
+# Decode prompt
+prompt_bytes = base64.b64decode("{prompt_b64}")
+prompt_str = prompt_bytes.decode()
+
+async def call_llm():
+    response = await llm_client.complete(
+        prompt=prompt_str,
+        timeout={self.config.llm_timeout},
+    )
+    return response.content
+
+result = asyncio.run(call_llm())
+print(result)
+'''
+
+                    # Write to temp file and run
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                        f.write(script)
+                        script_path = f.name
+
+                    try:
+                        result = subprocess.run(
+                            [sys.executable, script_path],
+                            capture_output=True,
+                            text=True,
+                            timeout=self.config.llm_timeout + 30,  # Extra buffer for subprocess overhead
+                        )
+
+                        if result.returncode != 0:
+                            self.logger.error(f"Subprocess stderr: {result.stderr}")
+                            raise LLMError(f"Subprocess LLM call failed: {result.stderr}")
+
+                        # Create a mock response object
+                        class MockResponse:
+                            def __init__(self, content):
+                                self.content = content
+
+                        response = MockResponse(result.stdout)
+                    finally:
+                        # Clean up temp file
+                        try:
+                            os.unlink(script_path)
+                        except:
+                            pass
+                else:
+                    raise
+
+            # Parse response (use content, not text)
+            result = self._parse_llm_response(cluster.findings, response.content)
+
+            # Log LLM response for debugging
+            self.logger.info(f"LLM dedup response: {result.reasoning}")
 
             return result
 
@@ -1008,31 +1095,68 @@ class ClusterBasedDeduplicator:
 - 代码: {snippet if snippet else '(无代码片段)'}
 """)
 
-        prompt = f"""你是一个安全专家，需要判断以下漏洞检测结果是否指向同一个漏洞。
+        prompt = f"""你是一个安全专家，需要判断以下漏洞检测结果是否指向同一个**根本安全缺陷**。
+
+【核心原则】关注**漏洞本质**，**参考**代码位置差异
+- 即使两个检测由不同规则触发，只要它们源于**同一处未验证的用户输入**，很可能是重复
+- 代码行差异是**参考因素**，不是决定性因素
 
 这些检测结果位于同一个文件的相近位置（行号范围 {cluster.start_line}-{cluster.end_line}）。
 
 {''.join(findings_list)}
 
-问题：这些检测结果中，哪些是同一漏洞的不同检测，哪些是不同的漏洞？
+问题：这些检测结果中，哪些是同一根本缺陷的不同检测，哪些是不同的安全缺陷？
 
-请仔细分析：
-1. 漏洞类型是否相同（如：都是命令注入、都是 SQL 注入）
-2. 漏洞位置是否相同（如：都指向同一个函数调用）
-3. 数据流是否相似（如：都是用户输入→危险函数）
+【判断标准 - 按优先级排序】
+
+1. 【根本原因】是否源于同一处未验证的输入？
+   - 例如：两个检测都指向同一个用户参数 `ip`，这就是同一缺陷
+
+2. 【攻击路径】数据流起点是否相同？
+   - 例如：都是 `用户输入` → `字符串拼接` → `命令执行`，这就是同一缺陷
+
+3. 【影响范围】是否影响同一个端点/函数？
+   - 例如：都影响 `/ping` 接口，很可能是同一缺陷
+
+4. 【代码位置】作为参考因素
+   - 同一行或相邻行（差距<5行）：很可能是同一缺陷的不同检测面
+   - 相隔较远（差距>10行）：需要仔细分析是否是不同缺陷
+   - 代码位置**不能单独决定**是否合并，需要结合上述标准
+
+【不要被以下表面差异迷惑】
+
+- ❌ 不同的规则 ID（rule_id）- 规则只是检测方式，不是漏洞本身
+- ❌ 不同的描述文字（description）- 描述角度不同不代表漏洞不同
+
+【示例分析】
+
+示例 1 - 应该合并（同一缺陷的不同检测）：
+- 检测 A：第 37 行，规则 "java.lang.string-format-command"，"用户输入拼接到命令字符串"
+- 检测 B：第 41 行，规则 "java.lang.process-injection"，"ProcessBuilder 执行用户命令"
+- 判断：✅ 合并！都源于同一处未验证的 `ip` 参数，代码行相邻（4行差）
+
+示例 2 - 不应该合并（不同的安全缺陷）：
+- 检测 A：`ping` 接口的 `ip` 参数未验证
+- 检测 B：`info` 接口的 `lang` 参数未验证
+- 判断：❌ 不合并！两个不同的参数，两个不同的端点
+
+示例 3 - 需要仔细分析（代码行相隔较远）：
+- 检测 A：第 10 行，`password` 参数未验证
+- 检测 B：第 85 行，使用同一个 `password` 参数进行数据库操作
+- 判断：✅ 合并！代码行相隔较远，但都源于同一处未验证的 `password` 参数
 
 回答格式（JSON）：
 {{
+  "analysis": "简要分析根本原因、数据流、影响范围和代码位置",
   "groups": [
-    {{"indices": [0, 1], "reason": "都是命令注入漏洞，同一位置的 ProcessBuilder 调用"}},
-    {{"indices": [2], "reason": "这是另一个不同的漏洞"}}
+    {{"indices": [0, 1], "reason": "同一缺陷：都是 /ping 接口的 ip 参数未验证，代码行相邻（37行和41行）"}}
   ]
 }}
 
 注意：
-- indices 使用从 0 开始的索引
-- 同一组的 indices 表示是同一漏洞的不同检测（重复）
-- 不同组的 indices 表示是不同的漏洞（不重复）
+- 优先判断"根本原因"，代码位置作为参考因素
+- 同一组的 indices 表示是同一根本缺陷的不同检测（应该合并）
+- 不同组的 indices 表示是不同的根本缺陷（不应该合并）
 """
 
         return prompt
@@ -1055,6 +1179,9 @@ class ClusterBasedDeduplicator:
         import json
 
         try:
+            # Log raw response for debugging
+            self.logger.debug(f"Raw LLM response: {response[:500]}...")
+
             # Extract JSON from response
             response = response.strip()
             if "```json" in response:
@@ -1062,8 +1189,19 @@ class ClusterBasedDeduplicator:
             elif "```" in response:
                 response = response.split("```")[1].split("```")[0].strip()
 
-            data = json.loads(response)
+            # Try to parse JSON
+            try:
+                data = json.loads(response)
+            except json.JSONDecodeError as e:
+                # Log the failed JSON for debugging
+                self.logger.error(f"Failed to parse JSON: {e}")
+                self.logger.error(f"Response content: {response[:1000]}")
+                raise
+
             groups = data.get("groups", [])
+
+            # Extract analysis if available
+            analysis = data.get("analysis", "")
 
             # Build keep list (one from each group)
             keep: list[Any] = []
@@ -1098,16 +1236,50 @@ class ClusterBasedDeduplicator:
                         if not hasattr(keep[-1], "duplicate_count"):
                             keep[-1].duplicate_count = 1
 
+                        # Initialize merged_findings to track all merged findings with their code snippets
+                        if not hasattr(keep[-1], "merged_findings"):
+                            keep[-1].merged_findings = []
+                        if not hasattr(keep[-1], "metadata"):
+                            keep[-1].metadata = {}
+
+                        # Track all merged findings with their code snippets
                         for f in group_findings[1:]:
                             engine = getattr(f, "source", "unknown")
+                            rule_id = getattr(f, "rule_id", "unknown")
+
+                            # Record engine
                             if engine not in keep[-1].related_engines:
                                 keep[-1].related_engines.append(engine)
-                        keep[-1].duplicate_count += len(group_findings) - 1
+
+                            # Record merged finding with code snippet
+                            merged_info = {
+                                "engine": engine,
+                                "rule_id": rule_id,
+                            }
+
+                            # Add code snippet if available
+                            if hasattr(f, "location") and f.location:
+                                loc = f.location
+                                if hasattr(loc, "snippet") and loc.snippet:
+                                    merged_info["snippet"] = loc.snippet[:200]  # Limit snippet length
+                                if hasattr(loc, "line"):
+                                    merged_info["line"] = loc.line
+
+                            keep[-1].merged_findings.append(merged_info)
+
+                        keep[-1].duplicate_count = len(group_findings) - 1
+
+            # Build reasoning string with analysis
+            reasoning_parts = []
+            if analysis:
+                reasoning_parts.append(f"分析: {analysis}")
+            if reasons:
+                reasoning_parts.append(f"分组: {'; '.join(reasons)}")
 
             return LLMClusterResult(
                 keep=keep,
                 removed=removed,
-                reasoning="; ".join(reasons),
+                reasoning=" | ".join(reasoning_parts),
                 confidence=0.8,
             )
 

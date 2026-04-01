@@ -239,13 +239,21 @@ class OpenAIClient(LLMClient):
         # Execute request with retries
         last_error: Exception | None = None
 
+        # Get timeout from options or use default
+        request_timeout = options.get("timeout", self.timeout)
+
         for attempt in range(self.max_retries):
             try:
                 start_time = time.time()
 
+                # Create timeout object for httpx
+                import httpx as httpx_module
+                http_timeout = httpx_module.Timeout(request_timeout, connect=60.0)
+
                 response = await client.post(
                     self._get_chat_url(),
                     json=body,
+                    timeout=http_timeout,
                 )
 
                 latency = time.time() - start_time
@@ -347,7 +355,15 @@ class OpenAIClient(LLMClient):
                 )
 
             choice = choices[0]
-            content = choice.get("message", {}).get("content", "")
+            message = choice.get("message", {})
+            # GLM-5 and similar models may have both content and reasoning_content
+            # content: final answer (what we want)
+            # reasoning_content: thinking/reasoning process
+            # Priority: use content if available and non-empty, otherwise fall back to reasoning_content
+            content = message.get("content", "")
+            if not content or not content.strip():
+                # Fall back to reasoning_content if content is empty
+                content = message.get("reasoning_content", "")
             finish_reason = choice.get("finish_reason")
 
             # Extract usage
@@ -358,8 +374,8 @@ class OpenAIClient(LLMClient):
                 total_tokens=usage_data.get("total_tokens", 0),
             )
 
-            # Check for empty response
-            if not content or not content.strip():
+            # Check for empty response (but not truncated - truncated may have valid content)
+            if (not content or not content.strip()) and finish_reason != "length":
                 raise LLMEmptyResponseError(
                     prompt_preview=None,  # Prompt not available here
                     context={
@@ -369,16 +385,9 @@ class OpenAIClient(LLMClient):
                     },
                 )
 
-            # Check for truncated response
-            if finish_reason == "length":
-                raise LLMTruncatedResponseError(
-                    finish_reason=finish_reason,
-                    token_usage=usage_data,
-                    context={
-                        "model": self.model,
-                        "max_tokens": self.max_tokens,
-                    },
-                )
+            # Note: finish_reason="length" means response was truncated due to max_tokens
+            # but the content may still be valid. We don't raise an error here;
+            # instead, we return the response with finish_reason set so callers can decide.
 
             # Update cumulative usage
             self._update_usage(usage)

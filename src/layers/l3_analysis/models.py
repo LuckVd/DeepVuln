@@ -478,6 +478,10 @@ class Finding(BaseModel):
         ge=0,
         description="Number of duplicate findings merged into this one",
     )
+    merged_findings: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Details of findings merged into this one (engine, rule_id, code snippet, line)",
+    )
     ast_hash: str | None = Field(
         default=None,
         description="Semantic hash for AST-level deduplication",
