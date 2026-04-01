@@ -139,6 +139,22 @@
 **完成日期**: 2026-04-01
 **提交**: 51f58a6
 
+### P6-17: 两阶段混合去重策略（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P6-17|两阶段混合去重：位置聚类 + LLM 判断|-|done|
+|P6-17a|位置聚类实现：按 file_path + line_range 分组|P6-17|done|
+|P6-17b|LLM 判断实现：判断聚类内 findings 是否重复|P6-17a|done|
+|P6-17c|保留策略实现：保留 final_score 最高的|P6-17b|done|
+|P6-17d|集成到 adjudication：替换 ASTDeduplicator|P6-17c|done|
+|P6-17e|单元测试：覆盖核心逻辑|P6-17d|done|
+|P6-17f|集成测试：验证跨引擎去重效果|P6-17d|done|
+
+**实现文件**: `src/layers/l3_analysis/deduplicator.py`, `src/layers/l3_analysis/adjudication.py`, `tests/integration/test_deduplication.py`
+**完成日期**: 2026-04-01
+**目标**: 解决不同引擎 rule_id 不同导致的跨引擎去重失效问题
+
 ### P6-08~P6-12: 覆盖率矩阵与测试
 
 |任务|描述|依赖|状态|
@@ -367,11 +383,11 @@
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 6.6 - Readiness Gate 自动修复机制|
-|**当前进度**|P6-16 已完成|
+|**阶段**|Phase 6 - 报告可信度|
+|**当前进度**|P6-17 已完成|
 |**当前目标**|无活跃目标|
 |**下一步**|等待下一个目标|
-|**最近完成**|P6-16 (Readiness Gate 自动修复)|
+|**最近完成**|P6-17 (两阶段混合去重策略)|
 |**重点模块**|src/layers/l3_analysis/engines/codeql.py, src/layers/l3_analysis/readiness_gate.py, docker-compose-tun.yml|
 
 ---

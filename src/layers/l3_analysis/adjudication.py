@@ -36,6 +36,8 @@ from src.layers.l3_analysis.consistency import (
 )
 from src.layers.l3_analysis.deduplicator import (
     ASTDeduplicator,
+    ClusterBasedDeduplicator,
+    ClusterDeduplicatorConfig,
     DeduplicationResult,
 )
 from src.layers.l3_analysis.reporting import (
@@ -482,10 +484,60 @@ def adjudicate_findings(
                 summary.conflicts_detected += 1
                 logger.error(f"Conflict detected: {e}")
 
-    # P4-04: Semantic Deduplication
+    # P4-04: Semantic Deduplication (P6-17: Cluster-based)
     # Deduplicate AFTER adjudication but BEFORE consistency check
     if enable_deduplication:
-        deduplicator = ASTDeduplicator()
+        # P6-17: Use ClusterBasedDeduplicator instead of ASTDeduplicator
+        # to solve cross-engine deduplication failure
+
+        # Create LLM client for cluster-based deduplication
+        llm_client = None
+        try:
+            from src.core.config import get_llm_model, get_llm_provider
+            from src.layers.l3_analysis.llm.openai_client import OpenAIClient
+            from src.layers.l3_analysis.engines.opencode_agent import DEFAULT_MODELS, LLMProvider
+
+            provider = get_llm_provider()
+            model = get_llm_model()
+
+            if provider.lower() == "openai":
+                llm_client = OpenAIClient(
+                    model=model or DEFAULT_MODELS[LLMProvider.OPENAI],
+                    max_tokens=1000,
+                    temperature=0.1,
+                    timeout=30,
+                )
+            elif provider.lower() == "ollama":
+                from src.layers.l3_analysis.llm.ollama_client import OllamaClient
+                llm_client = OllamaClient(
+                    model=model or DEFAULT_MODELS[LLMProvider.OLLAMA],
+                    max_tokens=1000,
+                    temperature=0.1,
+                    timeout=30,
+                )
+        except Exception as e:
+            logger.warning(f"Failed to create LLM client for deduplication: {e}")
+            logger.info("Falling back to ASTDeduplicator (no LLM support)")
+
+        # Choose deduplicator based on LLM availability
+        if llm_client is None:
+            # Fallback to AST deduplicator when LLM is not available
+            deduplicator = ASTDeduplicator()
+            logger.info("Using ASTDeduplicator (LLM unavailable)")
+        else:
+            # Use ClusterBasedDeduplicator with LLM support
+            from src.layers.l3_analysis.deduplicator import ClusterBasedDeduplicator
+            deduplicator = ClusterBasedDeduplicator(
+                llm_client=llm_client,
+                config=ClusterDeduplicatorConfig(
+                    line_tolerance=10,
+                    enable_llm_dedup=True,
+                    llm_timeout=30,
+                    max_cluster_size=10,
+                ),
+            )
+            logger.info("Using ClusterBasedDeduplicator (LLM enabled)")
+
         dedup_result = deduplicator.deduplicate(findings)
 
         # Update findings to deduplicated list

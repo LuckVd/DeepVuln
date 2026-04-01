@@ -18,6 +18,12 @@ from src.layers.l3_analysis.deduplicator import (
     merge_findings,
     ASTDeduplicator,
     deduplicate_findings,
+    # P6-17: Cluster-based deduplication
+    LocationCluster,
+    LLMClusterResult,
+    ClusterDeduplicatorConfig,
+    ClusterBasedDeduplicator,
+    cluster_findings_by_location,
 )
 
 
@@ -37,6 +43,8 @@ class MockFinding:
         metadata=None,
         cwe=None,
         owasp=None,
+        title="Test Finding",
+        description="A test vulnerability",
     ):
         self.id = finding_id
         self.rule_id = rule_id
@@ -45,12 +53,20 @@ class MockFinding:
         self.final_score = final_score
         self.exploitability = exploitability
         self.final_status = final_status
-        self.location = location or MockLocation()
+        # Only create MockLocation if location is explicitly provided
+        # For location=None testing, we need to handle this specially
+        if location is False:
+            # Sentinel value for testing missing location
+            self.location = None
+        else:
+            self.location = location or MockLocation()
         self.metadata = metadata or {}
         self.cwe = cwe
         self.owasp = owasp
         self.related_engines = []
         self.duplicate_count = 0
+        self.title = title
+        self.description = description
 
 
 class MockLocation:
@@ -828,3 +844,235 @@ class TestMetadataIntegration:
         assert "removed" in d
         assert "groups" in d
         assert "unique_count" in d
+
+
+# ============================================================
+# P6-17: Cluster-Based Deduplication Tests
+# ============================================================
+
+class TestClusterDeduplicatorConfig:
+    """Test ClusterDeduplicatorConfig."""
+
+    def test_default_config(self):
+        """Test default configuration values."""
+        config = ClusterDeduplicatorConfig()
+        assert config.line_tolerance == 10
+        assert config.enable_llm_dedup is True
+        assert config.llm_timeout == 30
+        assert config.max_cluster_size == 10
+
+    def test_custom_config(self):
+        """Test custom configuration values."""
+        config = ClusterDeduplicatorConfig(
+            line_tolerance=5,
+            enable_llm_dedup=False,
+            llm_timeout=60,
+            max_cluster_size=5,
+        )
+        assert config.line_tolerance == 5
+        assert config.enable_llm_dedup is False
+        assert config.llm_timeout == 60
+        assert config.max_cluster_size == 5
+
+
+class TestLocationCluster:
+    """Test LocationCluster dataclass."""
+
+    def test_create_cluster(self):
+        """Test creating a location cluster."""
+        cluster = LocationCluster(
+            file_path="test.py",
+            start_line=10,
+            end_line=20,
+            findings=[MockFinding()],
+        )
+        assert cluster.file_path == "test.py"
+        assert cluster.start_line == 10
+        assert cluster.end_line == 20
+        assert len(cluster.findings) == 1
+
+
+class TestClusterFindingsByLocation:
+    """Test location clustering logic (P6-17a)."""
+
+    def test_empty_list(self):
+        """Test clustering empty findings list."""
+        clusters = cluster_findings_by_location([])
+        assert clusters == []
+
+    def test_single_finding(self):
+        """Test clustering single finding."""
+        findings = [MockFinding(location=MockLocation(file="test.py", line=10))]
+        clusters = cluster_findings_by_location(findings)
+        assert len(clusters) == 1
+        assert len(clusters[0].findings) == 1
+
+    def test_same_file_within_tolerance(self):
+        """Test findings in same file within line tolerance."""
+        findings = [
+            MockFinding(location=MockLocation(file="test.py", line=10)),
+            MockFinding(location=MockLocation(file="test.py", line=15)),
+            MockFinding(location=MockLocation(file="test.py", line=20)),
+        ]
+        clusters = cluster_findings_by_location(
+            findings,
+            ClusterDeduplicatorConfig(line_tolerance=10)
+        )
+        assert len(clusters) == 1
+        assert len(clusters[0].findings) == 3
+
+    def test_same_file_outside_tolerance(self):
+        """Test findings in same file outside line tolerance."""
+        findings = [
+            MockFinding(location=MockLocation(file="test.py", line=10)),
+            MockFinding(location=MockLocation(file="test.py", line=50)),
+        ]
+        clusters = cluster_findings_by_location(
+            findings,
+            ClusterDeduplicatorConfig(line_tolerance=10)
+        )
+        assert len(clusters) == 2
+        assert clusters[0].start_line == 10
+        assert clusters[1].start_line == 50
+
+    def test_different_files(self):
+        """Test findings in different files."""
+        findings = [
+            MockFinding(location=MockLocation(file="test1.py", line=10)),
+            MockFinding(location=MockLocation(file="test2.py", line=10)),
+        ]
+        clusters = cluster_findings_by_location(findings)
+        assert len(clusters) == 2
+        assert clusters[0].file_path == "test1.py"
+        assert clusters[1].file_path == "test2.py"
+
+    def test_sorting_by_line_number(self):
+        """Test findings are sorted by line number within cluster."""
+        findings = [
+            MockFinding(location=MockLocation(file="test.py", line=20)),
+            MockFinding(location=MockLocation(file="test.py", line=10)),
+            MockFinding(location=MockLocation(file="test.py", line=15)),
+        ]
+        clusters = cluster_findings_by_location(findings)
+        assert len(clusters) == 1
+        assert clusters[0].findings[0].location.line == 10
+        assert clusters[0].findings[1].location.line == 15
+        assert clusters[0].findings[2].location.line == 20
+
+    def test_finding_without_location(self):
+        """Test findings without location are skipped."""
+        findings = [
+            MockFinding(location=MockLocation(file="test.py", line=10)),
+            MockFinding(location=False),  # Use False as sentinel for None
+        ]
+        clusters = cluster_findings_by_location(findings)
+        assert len(clusters) == 1
+        assert len(clusters[0].findings) == 1
+
+    def test_path_normalization(self):
+        """Test file paths are normalized for clustering."""
+        findings = [
+            MockFinding(location=MockLocation(file="./src/test.py", line=10)),
+            MockFinding(location=MockLocation(file="src/test.py", line=15)),
+        ]
+        clusters = cluster_findings_by_location(findings)
+        # Both should be in same cluster (same normalized path)
+        assert len(clusters) == 1
+        assert len(clusters[0].findings) == 2
+
+
+class TestClusterBasedDeduplicator:
+    """Test ClusterBasedDeduplicator (P6-17b, P6-17c)."""
+
+    def test_empty_list(self):
+        """Test deduplicating empty list."""
+        dedup = ClusterBasedDeduplicator()
+        result = dedup.deduplicate([])
+        assert len(result.unique_findings) == 0
+        assert result.removed_count == 0
+        assert result.merged_groups == 0
+
+    def test_single_finding(self):
+        """Test deduplicating single finding."""
+        findings = [MockFinding(location=MockLocation(file="test.py", line=10))]
+        dedup = ClusterBasedDeduplicator()
+        result = dedup.deduplicate(findings)
+        assert len(result.unique_findings) == 1
+        assert result.removed_count == 0
+
+    def test_no_llm_client_keeps_all(self):
+        """Test without LLM client, all findings in cluster are kept."""
+        findings = [
+            MockFinding(location=MockLocation(file="test.py", line=10)),
+            MockFinding(location=MockLocation(file="test.py", line=15)),
+        ]
+        dedup = ClusterBasedDeduplicator(llm_client=None)
+        result = dedup.deduplicate(findings)
+        # Without LLM, should keep all findings in cluster
+        assert len(result.unique_findings) == 2
+        assert result.removed_count == 0
+
+    def test_llm_dedup_disabled_keeps_all(self):
+        """Test with LLM dedup disabled, all findings are kept."""
+        findings = [
+            MockFinding(location=MockLocation(file="test.py", line=10)),
+            MockFinding(location=MockLocation(file="test.py", line=15)),
+        ]
+        config = ClusterDeduplicatorConfig(enable_llm_dedup=False)
+        dedup = ClusterBasedDeduplicator(config=config)
+        result = dedup.deduplicate(findings)
+        assert len(result.unique_findings) == 2
+        assert result.removed_count == 0
+
+    def test_separate_clusters_kept(self):
+        """Test findings in separate clusters are all kept."""
+        findings = [
+            MockFinding(location=MockLocation(file="test1.py", line=10)),
+            MockFinding(location=MockLocation(file="test2.py", line=10)),
+        ]
+        dedup = ClusterBasedDeduplicator()
+        result = dedup.deduplicate(findings)
+        assert len(result.unique_findings) == 2
+        assert result.removed_count == 0
+
+    def test_build_dedup_prompt_structure(self):
+        """Test prompt structure for LLM judgment."""
+        findings = [
+            MockFinding(
+                location=MockLocation(file="test.py", line=10),
+                source="semgrep",
+                rule_id="java.lang.security.audit.command-injection",
+                title="Command Injection",
+                description="Process builder with user input",
+            ),
+        ]
+        cluster = LocationCluster(
+            file_path="test.py",
+            start_line=10,
+            end_line=10,
+            findings=findings,
+        )
+        dedup = ClusterBasedDeduplicator()
+        prompt = dedup._build_dedup_prompt(cluster)
+        assert "检测结果" in prompt
+        assert "semgrep" in prompt
+        assert "Command Injection" in prompt
+        assert "Process builder with user input" in prompt
+        assert "test.py" in prompt
+
+
+class TestLLMClusterResult:
+    """Test LLMClusterResult dataclass."""
+
+    def test_create_result(self):
+        """Test creating LLM cluster result."""
+        result = LLMClusterResult(
+            keep=[MockFinding()],
+            removed=[],
+            reasoning="All unique",
+            confidence=0.9,
+        )
+        assert len(result.keep) == 1
+        assert len(result.removed) == 0
+        assert result.reasoning == "All unique"
+        assert result.confidence == 0.9

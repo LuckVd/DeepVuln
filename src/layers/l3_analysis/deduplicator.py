@@ -34,6 +34,9 @@ from typing import Any
 
 from src.core.logger.logger import get_logger
 
+# P6-17: Cluster-based deduplication
+from pydantic import BaseModel
+
 
 @dataclass
 class DeduplicationResult:
@@ -657,6 +660,468 @@ def deduplicate_findings(
     return deduplicator.deduplicate(findings)
 
 
+# =============================================================================
+# P6-17: Cluster-Based Deduplication (Location + LLM)
+# =============================================================================
+
+@dataclass
+class LocationCluster:
+    """
+    A cluster of findings at the same or nearby file location.
+
+    Findings in the same cluster may be duplicates that need LLM judgment.
+    """
+    file_path: str
+    """Normalized file path."""
+
+    start_line: int
+    """Start line of the cluster (minimum line number)."""
+
+    end_line: int
+    """End line of the cluster (maximum line number)."""
+
+    findings: list[Any] = field(default_factory=list)
+    """Findings in this cluster."""
+
+
+class ClusterDeduplicatorConfig(BaseModel):
+    """
+    Configuration for cluster-based deduplication.
+
+    P6-17: Two-stage hybrid deduplication using location clustering + LLM judgment.
+    """
+    line_tolerance: int = 10
+    """Line number tolerance for clustering (default: 10 lines)."""
+
+    enable_llm_dedup: bool = True
+    """Whether to enable LLM-based deduplication (default: True)."""
+
+    llm_timeout: int = 30
+    """LLM timeout in seconds (default: 30)."""
+
+    max_cluster_size: int = 10
+    """Maximum findings per cluster before splitting (default: 10)."""
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+def cluster_findings_by_location(
+    findings: list[Any],
+    config: ClusterDeduplicatorConfig | None = None,
+) -> list[LocationCluster]:
+    """
+    Cluster findings by file location and line number range.
+
+    P6-17a: Location-based clustering as the first stage of hybrid deduplication.
+
+    Algorithm:
+    1. Group findings by file_path
+    2. Within each file, sort by line_number
+    3. Create clusters where line number difference <= line_tolerance
+
+    Args:
+        findings: List of Finding objects to cluster.
+        config: Configuration for clustering behavior.
+
+    Returns:
+        List of LocationCluster objects.
+
+    Example:
+        >>> findings = [
+        ...     Finding(location=Location(file="foo.java", line=10)),
+        ...     Finding(location=Location(file="foo.java", line=15)),
+        ...     Finding(location=Location(file="bar.java", line=100)),
+        ... ]
+        >>> clusters = cluster_findings_by_location(findings)
+        >>> # Cluster 1: foo.java:10-15 (tolerance=10)
+        >>> # Cluster 2: bar.java:100 (single finding)
+    """
+    config = config or ClusterDeduplicatorConfig()
+    logger = get_logger(__name__)
+
+    if not findings:
+        return []
+
+    logger.info(f"Clustering {len(findings)} findings by location")
+
+    # Step 1: Group by file path
+    from collections import defaultdict
+    by_file: dict[str, list[Any]] = defaultdict(list)
+
+    for finding in findings:
+        if not hasattr(finding, "location") or finding.location is None:
+            logger.debug("Finding without location, skipping")
+            continue
+
+        file_path = normalize_file_path(finding.location.file)
+        by_file[file_path].append(finding)
+
+    # Step 2 & 3: Create clusters within each file
+    all_clusters: list[LocationCluster] = []
+
+    for file_path, file_findings in by_file.items():
+        # Sort by line number
+        file_findings.sort(
+            key=lambda f: getattr(f.location, "line", 0) if f.location else 0
+        )
+
+        # Create clusters
+        current_cluster: LocationCluster | None = None
+
+        for finding in file_findings:
+            line = getattr(finding.location, "line", 0)
+
+            if current_cluster is None:
+                # Start first cluster
+                current_cluster = LocationCluster(
+                    file_path=file_path,
+                    start_line=line,
+                    end_line=line,
+                    findings=[finding],
+                )
+            elif line - current_cluster.end_line <= config.line_tolerance:
+                # Extend current cluster
+                current_cluster.findings.append(finding)
+                current_cluster.end_line = line
+            else:
+                # Start new cluster
+                all_clusters.append(current_cluster)
+                current_cluster = LocationCluster(
+                    file_path=file_path,
+                    start_line=line,
+                    end_line=line,
+                    findings=[finding],
+                )
+
+        # Add last cluster
+        if current_cluster:
+            all_clusters.append(current_cluster)
+
+    # Log clustering statistics
+    multi_clusters = [c for c in all_clusters if len(c.findings) > 1]
+    logger.info(
+        f"Created {len(all_clusters)} clusters: "
+        f"{len(multi_clusters)} with multiple findings, "
+        f"{len(all_clusters) - len(multi_clusters)} with single finding"
+    )
+
+    return all_clusters
+
+
+@dataclass
+class LLMClusterResult:
+    """
+    Result of LLM-based deduplication on a single cluster.
+    """
+    keep: list[Any]
+    """Findings to keep (not duplicates)."""
+
+    removed: list[Any]
+    """Findings removed as duplicates."""
+
+    reasoning: str
+    """LLM's reasoning for the decision."""
+
+    confidence: float = 0.8
+    """Confidence in this decision (0-1)."""
+
+
+class ClusterBasedDeduplicator:
+    """
+    Two-stage hybrid deduplicator using location clustering + LLM judgment.
+
+    P6-17: Replaces ASTDeduplicator to solve cross-engine deduplication failure.
+
+    Stage 1: Location clustering (rule-based)
+        Groups findings by file_path + line_range
+
+    Stage 2: LLM judgment (AI-based)
+        For each cluster with >1 finding, LLM determines which are duplicates
+
+    Stage 3: Preservation strategy
+        - Duplicates: Keep the one with highest final_score
+        - Non-duplicates: Keep all
+    """
+
+    def __init__(
+        self,
+        llm_client: Any = None,
+        config: ClusterDeduplicatorConfig | None = None,
+    ):
+        """
+        Initialize the cluster-based deduplicator.
+
+        Args:
+            llm_client: LLM client for judgment (optional, for testing).
+            config: Configuration for deduplication behavior.
+        """
+        self.config = config or ClusterDeduplicatorConfig()
+        self.llm_client = llm_client
+        self.logger = get_logger(__name__)
+
+    def deduplicate(self, findings: list[Any]) -> DeduplicationResult:
+        """
+        Execute cluster-based deduplication on findings.
+
+        This is the main entry point compatible with ASTDeduplicator interface.
+
+        Args:
+            findings: List of Finding objects to deduplicate.
+
+        Returns:
+            DeduplicationResult with unique findings and statistics.
+        """
+        if not findings:
+            return DeduplicationResult(unique_findings=[], removed_count=0, merged_groups=0)
+
+        self.logger.info(
+            f"Starting cluster-based deduplication of {len(findings)} findings"
+        )
+
+        # Stage 1: Cluster by location
+        clusters = cluster_findings_by_location(findings, self.config)
+
+        # Stage 2 & 3: Process each cluster
+        unique_findings: list[Any] = []
+        removed_count = 0
+        merged_groups = 0
+        merge_details: list[dict[str, Any]] = []
+
+        for cluster in clusters:
+            if len(cluster.findings) == 1:
+                # Single finding - keep as is
+                unique_findings.append(cluster.findings[0])
+            elif not self.config.enable_llm_dedup:
+                # LLM disabled - keep all in cluster
+                unique_findings.extend(cluster.findings)
+                self.logger.debug(
+                    f"LLM dedup disabled, keeping {len(cluster.findings)} findings "
+                    f"in cluster {cluster.file_path}:{cluster.start_line}-{cluster.end_line}"
+                )
+            else:
+                # Use LLM to deduplicate this cluster
+                result = self._deduplicate_cluster(cluster)
+                unique_findings.extend(result.keep)
+                removed_count += len(result.removed)
+                if result.removed:
+                    merged_groups += 1
+                    merge_details.append({
+                        "cluster": f"{cluster.file_path}:{cluster.start_line}-{cluster.end_line}",
+                        "kept": len(result.keep),
+                        "removed": len(result.removed),
+                        "reasoning": result.reasoning,
+                    })
+
+        self.logger.info(
+            f"Cluster deduplication complete: {len(findings)} -> {len(unique_findings)} findings, "
+            f"{removed_count} removed, {merged_groups} clusters merged"
+        )
+
+        return DeduplicationResult(
+            unique_findings=unique_findings,
+            removed_count=removed_count,
+            merged_groups=merged_groups,
+            merge_details=merge_details,
+        )
+
+    def _deduplicate_cluster(self, cluster: LocationCluster) -> LLMClusterResult:
+        """
+        Deduplicate findings within a single cluster using LLM judgment.
+
+        Args:
+            cluster: LocationCluster with findings to deduplicate.
+
+        Returns:
+            LLMClusterResult with keep/remove lists.
+        """
+        if self.llm_client is None:
+            # No LLM available - keep all
+            self.logger.warning("No LLM client available, keeping all findings in cluster")
+            return LLMClusterResult(
+                keep=cluster.findings,
+                removed=[],
+                reasoning="No LLM client available",
+                confidence=0.0,
+            )
+
+        try:
+            # Build prompt for LLM
+            prompt = self._build_dedup_prompt(cluster)
+
+            # Call LLM
+            from src.layers.l3_analysis.llm.client import LLMError
+
+            response = self.llm_client.complete(
+                prompt=prompt,
+                max_tokens=1000,
+                timeout=self.config.llm_timeout,
+            )
+
+            # Parse response
+            result = self._parse_llm_response(cluster.findings, response.text)
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"LLM deduplication failed: {e}")
+            # On failure, keep all findings
+            return LLMClusterResult(
+                keep=cluster.findings,
+                removed=[],
+                reasoning=f"LLM failed: {e}",
+                confidence=0.0,
+            )
+
+    def _build_dedup_prompt(self, cluster: LocationCluster) -> str:
+        """
+        Build a prompt for LLM to judge duplicates within a cluster.
+
+        Args:
+            cluster: LocationCluster with findings to judge.
+
+        Returns:
+            Prompt string for LLM.
+        """
+        findings_list = []
+
+        for i, finding in enumerate(cluster.findings):
+            # Extract key information
+            engine = getattr(finding, "source", "unknown")
+            rule_id = getattr(finding, "rule_id", "unknown")
+            title = getattr(finding, "title", "No title")
+            description = getattr(finding, "description", "")[:200]
+
+            # Get code snippet
+            snippet = ""
+            if hasattr(finding, "location") and finding.location:
+                snippet = getattr(finding.location, "snippet", "") or ""
+                if len(snippet) > 100:
+                    snippet = snippet[:100] + "..."
+
+            findings_list.append(f"""
+【检测结果 {i + 1}】
+- 引擎: {engine}
+- 规则: {rule_id}
+- 描述: {title}: {description}
+- 位置: {cluster.file_path}:{getattr(finding.location, 'line', '?') if finding.location else '?'}
+- 代码: {snippet if snippet else '(无代码片段)'}
+""")
+
+        prompt = f"""你是一个安全专家，需要判断以下漏洞检测结果是否指向同一个漏洞。
+
+这些检测结果位于同一个文件的相近位置（行号范围 {cluster.start_line}-{cluster.end_line}）。
+
+{''.join(findings_list)}
+
+问题：这些检测结果中，哪些是同一漏洞的不同检测，哪些是不同的漏洞？
+
+请仔细分析：
+1. 漏洞类型是否相同（如：都是命令注入、都是 SQL 注入）
+2. 漏洞位置是否相同（如：都指向同一个函数调用）
+3. 数据流是否相似（如：都是用户输入→危险函数）
+
+回答格式（JSON）：
+{{
+  "groups": [
+    {{"indices": [0, 1], "reason": "都是命令注入漏洞，同一位置的 ProcessBuilder 调用"}},
+    {{"indices": [2], "reason": "这是另一个不同的漏洞"}}
+  ]
+}}
+
+注意：
+- indices 使用从 0 开始的索引
+- 同一组的 indices 表示是同一漏洞的不同检测（重复）
+- 不同组的 indices 表示是不同的漏洞（不重复）
+"""
+
+        return prompt
+
+    def _parse_llm_response(
+        self,
+        findings: list[Any],
+        response: str,
+    ) -> LLMClusterResult:
+        """
+        Parse LLM response and determine which findings to keep.
+
+        Args:
+            findings: Original findings in the cluster.
+            response: LLM response text.
+
+        Returns:
+            LLMClusterResult with keep/remove lists.
+        """
+        import json
+
+        try:
+            # Extract JSON from response
+            response = response.strip()
+            if "```json" in response:
+                response = response.split("```json")[1].split("```")[0].strip()
+            elif "```" in response:
+                response = response.split("```")[1].split("```")[0].strip()
+
+            data = json.loads(response)
+            groups = data.get("groups", [])
+
+            # Build keep list (one from each group)
+            keep: list[Any] = []
+            removed: list[Any] = []
+            reasons: list[str] = []
+
+            for group in groups:
+                indices = group.get("indices", [])
+                if not indices:
+                    continue
+
+                reason = group.get("reason", "")
+                reasons.append(reason)
+
+                # Sort by final_score, keep the best one
+                group_findings = [findings[i] for i in indices if i < len(findings)]
+
+                if group_findings:
+                    group_findings.sort(
+                        key=lambda f: getattr(f, "final_score", 0) or 0,
+                        reverse=True,
+                    )
+
+                    # Keep the best, remove the rest
+                    keep.append(group_findings[0])
+                    removed.extend(group_findings[1:])
+
+                    # Update metadata on kept finding
+                    if len(group_findings) > 1:
+                        if not hasattr(keep[-1], "related_engines"):
+                            keep[-1].related_engines = []
+                        if not hasattr(keep[-1], "duplicate_count"):
+                            keep[-1].duplicate_count = 1
+
+                        for f in group_findings[1:]:
+                            engine = getattr(f, "source", "unknown")
+                            if engine not in keep[-1].related_engines:
+                                keep[-1].related_engines.append(engine)
+                        keep[-1].duplicate_count += len(group_findings) - 1
+
+            return LLMClusterResult(
+                keep=keep,
+                removed=removed,
+                reasoning="; ".join(reasons),
+                confidence=0.8,
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to parse LLM response: {e}")
+            # On parse failure, keep all findings
+            return LLMClusterResult(
+                keep=findings,
+                removed=[],
+                reasoning=f"Parse failed: {e}",
+                confidence=0.0,
+            )
+
+
 # Module exports
 __all__ = [
     "DeduplicationResult",
@@ -674,4 +1139,10 @@ __all__ = [
     "merge_findings",
     "ASTDeduplicator",
     "deduplicate_findings",
+    # P6-17: Cluster-based deduplication
+    "LocationCluster",
+    "LLMClusterResult",
+    "ClusterDeduplicatorConfig",
+    "ClusterBasedDeduplicator",
+    "cluster_findings_by_location",
 ]

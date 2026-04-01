@@ -2,6 +2,24 @@
 
 ## 2026-04-01
 
+### P6-17: 两阶段混合去重策略完成
+
+- **Goal ID**: P6-17
+- **Summary**: 实现基于位置聚类 + LLM 判断的两阶段混合去重，解决跨引擎去重失效问题
+- **Impact**:
+  - `src/layers/l3_analysis/deduplicator.py`: +280 行（ClusterBasedDeduplicator, LocationCluster, cluster_findings_by_location）
+  - `src/layers/l3_analysis/adjudication.py`: +50 行（集成 LLM 客户端，降级到 ASTDeduplicator）
+  - `tests/unit/test_l3/test_deduplicator.py`: +240 行（18 个新测试用例）
+  - `tests/integration/test_deduplication.py`: 新文件（7 个集成测试）
+- **Features**:
+  - 位置聚类：按 file_path + line_range (容差 10 行) 分组
+  - LLM 判断：对聚类内 findings 进行语义级去重判断
+  - 保留策略：重复的保留 final_score 最高的，更新 related_engines
+  - 降级机制：LLM 不可用时降级到 ASTDeduplicator
+- **Tests**: 101 passed (deduplicator) + 54 passed (adjudication)
+- **Dead Code**: not run
+- **Security**: No secrets exposed
+
 ### P6-16: Readiness Gate 自动修复机制完成
 
 - **Goal ID**: P6-16

@@ -1,48 +1,61 @@
-goal_id: "P6-16"
-title: "Readiness Gate 自动修复机制"
-stage: "done"
-status: "synced"
+goal_id: "P6-17"
+title: "两阶段混合去重策略（位置聚类 + LLM 判断）"
+stage: "sync"
+status: "completed"
 selected_option: "A"
-design_confirmed: true
+design_confirmed: false
 blocked_by: []
 open_questions:
-  - question: "是否需要同时更新 docker-compose-china.yml?"
-    answer: "是，一并更新"
-  - question: "构建工具安装是否需要设置超时?"
-    answer: "是，设置 300 秘超时"
+  - question: "无当前开放问题"
+    answer: ""
 resolved_questions:
-  - question: "是否需要同时更新 docker-compose-china.yml?"
-    answer: "是，一并更新"
-  - question: "构建工具安装是否需要设置超时?"
-    answer: "是，设置 300 秒超时"
+  - question: "LLM 去重判断应该在哪个阶段执行？"
+    answer: "替换 ASTDeduplicator，在 adjudication 内部执行"
+  - question: "行号容差范围应该设为多少？"
+    answer: "可配置，默认 10 行"
+  - question: "LLM 判断时应该使用哪个模型？"
+    answer: "使用项目配置的默认模型"
+  - question: "是否保留 AST 哈希去重作为兜底策略？"
+    answer: "否，完全替换为两阶段混合去重"
 implementation_steps:
-  - step: "P6-16a: 修改 readiness_gate.py _basic_check 方法，调用 _ensure_query_pack"
-    file: "src/layers/l3_analysis/readiness_gate.py"
+  - step: "P6-17a: 位置聚类实现"
+    file: "src/layers/l3_analysis/deduplicator.py"
     status: "completed"
-  - step: "P6-16b: 集成 RuntimeVersionManager 到 Readiness Gate"
-    file: "src/layers/l3_analysis/readiness_gate.py"
+  - step: "P6-17b: LLM 判断实现"
+    file: "src/layers/l3_analysis/deduplicator.py"
     status: "completed"
-  - step: "P6-16c: 移除 docker-compose-tun.yml 空代理环境变量"
-    file: "docker-compose-tun.yml"
+  - step: "P6-17c: 保留策略实现"
+    file: "src/layers/l3_analysis/deduplicator.py"
     status: "completed"
-  - step: "P6-16c-扩展: 移除 docker-compose-china.yml 空代理环境变量"
-    file: "docker-compose-china.yml"
+  - step: "P6-17d: 集成到 adjudication"
+    file: "src/layers/l3_analysis/adjudication.py"
     status: "completed"
-  - step: "P6-16d: 增强日志输出"
-    files: ["readiness_gate.py"]
+  - step: "P6-17e: 单元测试"
+    file: "tests/unit/test_l3/test_deduplicator.py"
+    status: "completed"
+  - step: "P6-17f: 集成测试"
+    file: "tests/integration/test_deduplication.py"
     status: "completed"
 test_scope:
-  - test: "验证 CodeQL pack 自动下载"
+  - test: "位置聚类逻辑测试"
     type: "unit"
-  - test: "验证构建工具自动安装"
+  - test: "LLM 判断逻辑测试（mock）"
+    type: "unit"
+  - test: "保留策略测试"
+    type: "unit"
+  - test: "端到端去重测试"
     type: "integration"
-  - test: "验证 Semgrep 在无代理环境变量下正常工作"
+  - test: "跨引擎去重效果验证"
     type: "integration"
-test_result: "31 passed"
-new_files: ["docker-compose-tun.yml", "docker-compose-china.yml", ".env.docker.build", "docs/docker-china-setup.md"]
+test_result: "101 passed (deduplicator) + 54 passed (adjudication)"
+new_files: [
+    "src/layers/l3_analysis/deduplicator.py (扩展)",
+    "tests/unit/test_l3/test_deduplicator.py (扩展)",
+    "tests/integration/test_deduplication.py (新增)"
+]
 security_blockers: []
 dead_code_actions: []
 sync_status: "synced"
 last_check_at: "2026-04-01"
-last_synced_at: "2026-04-01"
-commit_id: "51f58a6"
+last_synced_at: null
+commit_id: null
