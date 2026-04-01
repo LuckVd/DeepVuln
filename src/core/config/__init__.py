@@ -15,6 +15,7 @@ def _get_logger():
 
 # Default config paths
 DEFAULT_CONFIG_PATHS = [
+    Path("/app/config.local.toml"),  # Docker container path
     Path("config.local.toml"),
     Path("config.toml"),
     Path.home() / ".deepvuln" / "config.toml",

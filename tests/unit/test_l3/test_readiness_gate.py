@@ -273,6 +273,75 @@ class TestBasicCheck:
             assert result["ready"] is False
             assert result["reason"] == "codeql_unavailable"
 
+    @pytest.mark.asyncio
+    async def test_basic_check_query_pack_auto_download(self, readiness_gate):
+        """Test P6-16a: auto-download query pack when missing."""
+        from src.layers.l3_analysis.engines.codeql import CodeQLEngine
+
+        # Mock CodeQLEngine methods
+        with patch.object(
+            CodeQLEngine,
+            "check_readiness",
+            new_callable=AsyncMock,
+            side_effect=[
+                # First call: pack missing
+                {
+                    "ready": False,
+                    "reason": "query_pack_missing",
+                    "message": "Required query pack is not installed: codeql/python-queries",
+                    "query_pack": "codeql/python-queries",
+                    "pack_installed": False,
+                },
+                # Second call after download: ready
+                {
+                    "ready": True,
+                    "reason": "ready",
+                    "message": "CodeQL passed the fast readiness check",
+                },
+            ],
+        ), patch.object(
+            CodeQLEngine,
+            "_ensure_query_pack",
+            new_callable=AsyncMock,
+            return_value=True,  # Download succeeds
+        ):
+            result = await readiness_gate._basic_check()
+
+            # After successful auto-download, should be ready
+            assert result["ready"] is True
+            assert result.get("auto_fixed") is True
+            assert "auto-downloaded query pack" in result.get("auto_fix_message", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_basic_check_query_pack_auto_download_failure(self, readiness_gate):
+        """Test P6-16a: handle auto-download failure gracefully."""
+        from src.layers.l3_analysis.engines.codeql import CodeQLEngine
+
+        # Mock CodeQLEngine methods
+        with patch.object(
+            CodeQLEngine,
+            "check_readiness",
+            new_callable=AsyncMock,
+            return_value={
+                "ready": False,
+                "reason": "query_pack_missing",
+                "message": "Required query pack is not installed: codeql/python-queries",
+                "query_pack": "codeql/python-queries",
+                "pack_installed": False,
+            },
+        ), patch.object(
+            CodeQLEngine,
+            "_ensure_query_pack",
+            new_callable=AsyncMock,
+            return_value=False,  # Download fails
+        ):
+            result = await readiness_gate._basic_check()
+
+            # Should still be not ready, but indicate auto-fix was attempted
+            assert result["ready"] is False
+            assert result.get("auto_fix_attempted") is True
+            assert result.get("auto_fix_failed") is True
+
 
 # =============================================================================
 # Decision Tests

@@ -893,12 +893,13 @@ async def run_full_security_scan(
                         # Agent engine (if available and requested)
                         if "agent" in engines_requested or scan_options.get("full_scan"):
                             try:
+                                from src.core.config import get_llm_model
                                 llm_config = get_llm_config()
                                 openai_config = get_openai_config()
                                 api_key = openai_config.get("api_key")
                                 if api_key:
                                     llm_client_for_agent = OpenAIClient(
-                                        model=scan_options.get("model", "gpt-4"),
+                                        model=scan_options.get("model") or get_llm_model(),
                                         api_key=api_key,
                                         base_url=openai_config.get("base_url", "https://api.openai.com/v1"),
                                         max_tokens=llm_config.get("max_tokens", 4096),
@@ -1081,15 +1082,18 @@ async def run_full_security_scan(
     need_llm_for_detect = (not static_only) and (not llm_full_detect or llm_full_detect)
 
     # Initialize LLM client if needed (default behavior now includes LLM)
+    # Import get_llm_model early for use in both client and detector
+    from src.core.config import get_llm_config, get_openai_config, get_llm_model
+    from src.layers.l3_analysis.llm.openai_client import OpenAIClient
+
     if need_llm_for_detect or llm_full_detect:
         try:
-            from src.core.config import get_llm_config, get_openai_config
-            from src.layers.l3_analysis.llm.openai_client import OpenAIClient
-
             openai_config = get_openai_config()
             llm_config = get_llm_config()
+            # Use model from options, or fallback to config file
+            model_for_detect = model or get_llm_model()
             llm_client_for_detect = OpenAIClient(
-                model=model,
+                model=model_for_detect,
                 api_key=openai_config.get("api_key"),
                 base_url=openai_config.get("base_url"),
                 max_tokens=llm_config.get("max_tokens", 4096),
@@ -1099,10 +1103,13 @@ async def run_full_security_scan(
             console.print(f"  [yellow]Warning: Failed to initialize LLM client for detection: {e}[/]")
             console.print("  [dim]Falling back to static-only detection[/]")
 
+    # Get model for detector (use same logic as client)
+    from src.core.config import get_llm_model
+    model_for_detector = model or get_llm_model() if (need_llm_for_detect or llm_full_detect) else "gpt-4"
     surface_detector = AttackSurfaceDetector(
         llm_client=llm_client_for_detect,
         enable_llm=True,  # P5-04: Always enable LLM capability if client available
-        llm_model=model,
+        llm_model=model_for_detector,
     )
 
     # Get batch settings from options
@@ -1175,21 +1182,23 @@ async def run_full_security_scan(
     # LLM Client (for agent and verification)
     llm_client = None
     if "agent" in engines or llm_verify:
-        from src.core.config import get_llm_config, get_openai_config
+        from src.core.config import get_llm_config, get_openai_config, get_llm_model
         llm_config = get_llm_config()
         openai_config = get_openai_config()
         api_key = openai_config.get("api_key")
         base_url = openai_config.get("base_url", "https://api.openai.com/v1")
         if api_key:
+            # Use model from options, or fallback to config file
+            model_for_client = model or get_llm_model()
             llm_client = OpenAIClient(
-                model=model,
+                model=model_for_client,
                 api_key=api_key,
                 base_url=base_url,
                 max_tokens=llm_config.get("max_tokens", 4096),
                 temperature=llm_config.get("temperature", 0.1),
                 timeout=llm_config.get("timeout", 120),
             )
-            console.print(f"  LLM Client: ✓ ({model})")
+            console.print(f"  LLM Client: ✓ ({model_for_client})")
         else:
             console.print("  LLM Client: ✗ (API key not configured)")
             result["errors"].append("LLM client not available: API key not configured in config or environment")

@@ -1,0 +1,97 @@
+# DeepVuln Docker Compose 配置 - TUN 透明代理版
+#
+# 使用方法:
+#   # 1. 确保 Clash TUN 模式已启用
+#   # 2. 构建镜像（直接使用官方源，TUN 自动代理）
+#   docker-compose -f docker-compose-tun.yml build
+#
+#   # 3. 运行扫描
+#   export OPENAI_API_KEY=your-key
+#   export TARGET_PATH=/opt/projects/benchmark/Qbenchmark/env_validation/java-simple-vuln
+#   docker-compose -f docker-compose-tun.yml run --rm deepvuln scan -p /target --full
+
+version: "3.8"
+
+services:
+  deepvuln:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+      args:
+        # 使用官方源（TUN 透明代理会自动处理）
+        APT_MIRROR: ""
+        # 不设置构建时代理（TUN 在网络层透明代理）
+        HTTP_PROXY: ""
+        HTTPS_PROXY: ""
+        NO_PROXY: ""
+        # Go 官方源
+        GO_DOWNLOAD_URL: https://go.dev/dl/go1.22.0.linux-amd64.tar.gz
+        GO_DOWNLOAD_FALLBACK_URL: ""
+        # CodeQL 官方源
+        CODEQL_DOWNLOAD_URL: ""
+        CODEQL_DOWNLOAD_FALLBACK_URL: ""
+        # 跳过 CodeQL Pack 预加载（运行时再下载）
+        PRELOAD_CODEQL_PACKS: false
+    image: deepvuln:latest
+    container_name: deepvuln
+
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 6G
+        reservations:
+          cpus: "0.5"
+          memory: 2G
+
+    # 环境变量
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - PYTHONUNBUFFERED=1
+      - HOME=/home/deepvuln
+      # 不设置代理（使用 host 网络模式让 TUN 生效）
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - NO_PROXY=
+
+    # 卷挂载
+    volumes:
+      # 待扫描代码
+      - ${TARGET_PATH:-./target}:/target:ro
+      # 配置文件（可选）
+      - ./config.local.toml:/app/config.local.toml:ro
+      # 缓存目录
+      - deepvuln-cache:/home/deepvuln/.cache
+      # CodeQL 缓存
+      - codeql-databases:/tmp/codeql_cache
+      - codeql-packs:/home/deepvuln/.codeql
+
+    # 工作目录
+    working_dir: /target
+
+    # 默认命令
+    command: ["--help"]
+
+    # 使用 host 网络模式（让 TUN 透明代理生效）
+    network_mode: host
+
+    # 安全配置
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    cap_drop:
+      - ALL
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  deepvuln-cache:
+    name: deepvuln-cache
+  codeql-databases:
+    name: codeql-databases
+  codeql-packs:
+    name: codeql-packs

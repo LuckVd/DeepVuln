@@ -41,7 +41,7 @@ class OpenAIClient(LLMClient):
 
     def __init__(
         self,
-        model: str = "gpt-4",
+        model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         organization: str | None = None,
@@ -57,7 +57,8 @@ class OpenAIClient(LLMClient):
         Initialize the OpenAI client.
 
         Args:
-            model: Model identifier (e.g., "gpt-4", "gpt-3.5-turbo").
+            model: Model identifier (e.g., "gpt-4", "gpt-3.5-turbo", "glm-4.7").
+                   If None, will try to load from config file.
             api_key: OpenAI API key. If not provided, uses OPENAI_API_KEY env var.
             base_url: API base URL. If not provided, uses default OpenAI URL.
             organization: OpenAI organization ID.
@@ -69,6 +70,14 @@ class OpenAIClient(LLMClient):
             azure_deployment: Azure deployment name (required for Azure).
             azure_api_version: Azure API version.
         """
+        # Try to get default model from config if not specified
+        if model is None:
+            try:
+                from src.core.config import get_llm_model
+                model = get_llm_model()
+            except Exception:
+                model = "gpt-4"  # Final fallback
+
         super().__init__(
             model=model,
             max_tokens=max_tokens,

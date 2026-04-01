@@ -64,3 +64,12 @@ config.local.toml
 # OS
 .DS_Store
 Thumbs.db
+
+# Docker build cache
+docker-cache/
+
+# Docker build local config
+.env.docker.build.local
+
+# Local data
+data/

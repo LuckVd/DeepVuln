@@ -18,7 +18,7 @@ services:
       extra_hosts:
         - "host.docker.internal:host-gateway"
       args:
-        APT_MIRROR: ${APT_MIRROR:-}
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
         HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
         NO_PROXY: ${BUILD_NO_PROXY:-}
@@ -26,7 +26,7 @@ services:
         GO_DOWNLOAD_FALLBACK_URL: ${GO_DOWNLOAD_FALLBACK_URL:-https://dl.google.com/go/go1.22.0.linux-amd64.tar.gz}
         CODEQL_DOWNLOAD_URL: ${CODEQL_DOWNLOAD_URL:-}
         CODEQL_DOWNLOAD_FALLBACK_URL: ${CODEQL_DOWNLOAD_FALLBACK_URL:-https://ghproxy.net/https://github.com/github/codeql-cli-binaries/releases/download/v2.24.2/codeql-linux64.zip}
-        PRELOAD_CODEQL_PACKS: ${PRELOAD_CODEQL_PACKS:-false}
+        PRELOAD_CODEQL_PACKS: ${PRELOAD_CODEQL_PACKS:-true}
     image: deepvuln:latest
     container_name: deepvuln
 
@@ -34,26 +34,25 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4"
+          cpus: "2"
           memory: 8G
         reservations:
-          cpus: "1"
+          cpus: "0.5"
           memory: 2G
 
     # 环境变量
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.lkeap.cloud.tencent.com/coding/v3}
       - PYTHONUNBUFFERED=1
       - HOME=/home/deepvuln
-      - HTTP_PROXY=${HTTP_PROXY:-}
-      - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-}
+      # 不设置 HTTP_PROXY/HTTPS_PROXY，让容器内工具不使用代理
+      - NO_PROXY=localhost,127.0.0.1,::1
 
     # 卷挂载
     volumes:
       # 待扫描代码
-      - ${TARGET_PATH:-./target}:/target:ro
+      - ${TARGET_PATH:-./target}:/target  # 读写挂载以支持 CodeQL 构建
       # 配置文件（可选）
       - ./config.local.toml:/app/config.local.toml:ro
       # 缓存目录（加速重复扫描）
@@ -86,7 +85,7 @@ services:
       extra_hosts:
         - "host.docker.internal:host-gateway"
       args:
-        APT_MIRROR: ${APT_MIRROR:-}
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
         HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
         NO_PROXY: ${BUILD_NO_PROXY:-}
@@ -94,7 +93,7 @@ services:
         GO_DOWNLOAD_FALLBACK_URL: ${GO_DOWNLOAD_FALLBACK_URL:-}
         CODEQL_DOWNLOAD_URL: ${CODEQL_DOWNLOAD_URL:-}
         CODEQL_DOWNLOAD_FALLBACK_URL: ${CODEQL_DOWNLOAD_FALLBACK_URL:-}
-        PRELOAD_CODEQL_PACKS: ${PRELOAD_CODEQL_PACKS:-false}
+        PRELOAD_CODEQL_PACKS: ${PRELOAD_CODEQL_PACKS:-true}
     image: deepvuln:latest
     container_name: deepvuln-worker
 

@@ -14,7 +14,7 @@ ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV MAVEN_HOME=/usr/share/maven
 ENV GRADLE_HOME=/usr/share/gradle
 ENV DOTNET_ROOT=/usr/share/dotnet
-ENV PATH=/app/.venv/bin:/usr/local/go/bin:/go/bin:/opt/codeql/codeql:/usr/share/maven/bin:/usr/share/gradle/bin:/usr/share/dotnet:${JAVA_HOME}/bin:${PATH}
+ENV PATH=/root/.local/bin:/app/.venv/bin:/usr/local/go/bin:/go/bin:/opt/codeql/codeql:/usr/share/maven/bin:/usr/share/gradle/bin:/usr/share/dotnet:${JAVA_HOME}/bin:${PATH}
 
 ARG APT_MIRROR=
 ARG HTTP_PROXY=
@@ -89,38 +89,46 @@ RUN mkdir -p /etc/apt/keyrings \
         apt-get install -y --no-install-recommends dotnet-sdk-8.0 \
     && rm -rf /var/lib/apt/lists/*
 
+# Optional: Use pre-downloaded cache files if available
+COPY docker-cache/ /tmp/docker-cache/
+
 RUN set -eu; \
-    fetch() { \
-        url="$1"; \
-        if [ -z "$url" ]; then \
-            return 1; \
-        fi; \
-        echo "Attempting download: $url"; \
-        wget -q \
-            --tries=1 \
-            --dns-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
-            --connect-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
-            --read-timeout="${DOWNLOAD_MAX_TIME}" \
-            "$url" -O /tmp/go.tar.gz; \
-    }; \
-    fetch_with_proxy() { \
-        url="$1"; \
-        if [ -z "$url" ] || [ -z "${HTTP_PROXY}" ] || [ -z "${HTTPS_PROXY}" ]; then \
-            return 1; \
-        fi; \
-        echo "Attempting download via proxy: $url"; \
-        env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+    if [ -f "/tmp/docker-cache/go1.22.0.linux-amd64.tar.gz" ]; then \
+        echo "Using cached Go archive"; \
+        cp /tmp/docker-cache/go1.22.0.linux-amd64.tar.gz /tmp/go.tar.gz; \
+    else \
+        fetch() { \
+            url="$1"; \
+            if [ -z "$url" ]; then \
+                return 1; \
+            fi; \
+            echo "Attempting download: $url"; \
             wget -q \
                 --tries=1 \
                 --dns-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
                 --connect-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
                 --read-timeout="${DOWNLOAD_MAX_TIME}" \
                 "$url" -O /tmp/go.tar.gz; \
-    }; \
-    fetch "${GO_DOWNLOAD_URL}" \
-    || fetch "${GO_DOWNLOAD_FALLBACK_URL}" \
-    || fetch_with_proxy "${GO_DOWNLOAD_URL}" \
-    || fetch_with_proxy "${GO_DOWNLOAD_FALLBACK_URL}"; \
+        }; \
+        fetch_with_proxy() { \
+            url="$1"; \
+            if [ -z "$url" ] || [ -z "${HTTP_PROXY}" ] || [ -z "${HTTPS_PROXY}" ]; then \
+                return 1; \
+            fi; \
+            echo "Attempting download via proxy: $url"; \
+            env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+                wget -q \
+                    --tries=1 \
+                    --dns-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
+                    --connect-timeout="${DOWNLOAD_CONNECT_TIMEOUT}" \
+                    --read-timeout="${DOWNLOAD_MAX_TIME}" \
+                    "$url" -O /tmp/go.tar.gz; \
+        }; \
+        fetch "${GO_DOWNLOAD_URL}" \
+        || fetch "${GO_DOWNLOAD_FALLBACK_URL}" \
+        || fetch_with_proxy "${GO_DOWNLOAD_URL}" \
+        || fetch_with_proxy "${GO_DOWNLOAD_FALLBACK_URL}"; \
+    fi; \
     tar -C /usr/local -xzf /tmp/go.tar.gz; \
     rm /tmp/go.tar.gz
 
@@ -132,35 +140,40 @@ RUN set -eu; \
     fi; \
     codeql_fallback_url="${CODEQL_DOWNLOAD_FALLBACK_URL}"; \
     mkdir -p /opt/codeql; \
-    fetch() { \
-        url="$1"; \
-        if [ -z "$url" ]; then \
-            return 1; \
-        fi; \
-        echo "Attempting download: $url"; \
-        curl -fsSL \
-            --connect-timeout "${DOWNLOAD_CONNECT_TIMEOUT}" \
-            --max-time "${CODEQL_DOWNLOAD_MAX_TIME}" \
-            --retry 0 \
-            "$url" -o /tmp/codeql.zip; \
-    }; \
-    fetch_with_proxy() { \
-        url="$1"; \
-        if [ -z "$url" ] || [ -z "${HTTP_PROXY}" ] || [ -z "${HTTPS_PROXY}" ]; then \
-            return 1; \
-        fi; \
-        echo "Attempting download via proxy: $url"; \
-        env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+    if [ -f "/tmp/docker-cache/codeql-linux64.zip" ]; then \
+        echo "Using cached CodeQL archive"; \
+        cp /tmp/docker-cache/codeql-linux64.zip /tmp/codeql.zip; \
+    else \
+        fetch() { \
+            url="$1"; \
+            if [ -z "$url" ]; then \
+                return 1; \
+            fi; \
+            echo "Attempting download: $url"; \
             curl -fsSL \
                 --connect-timeout "${DOWNLOAD_CONNECT_TIMEOUT}" \
                 --max-time "${CODEQL_DOWNLOAD_MAX_TIME}" \
                 --retry 0 \
                 "$url" -o /tmp/codeql.zip; \
-    }; \
-    fetch "${codeql_url}" \
-    || fetch "${codeql_fallback_url}" \
-    || fetch_with_proxy "${codeql_url}" \
-    || fetch_with_proxy "${codeql_fallback_url}"; \
+        }; \
+        fetch_with_proxy() { \
+            url="$1"; \
+            if [ -z "$url" ] || [ -z "${HTTP_PROXY}" ] || [ -z "${HTTPS_PROXY}" ]; then \
+                return 1; \
+            fi; \
+            echo "Attempting download via proxy: $url"; \
+            env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+                curl -fsSL \
+                    --connect-timeout "${DOWNLOAD_CONNECT_TIMEOUT}" \
+                    --max-time "${CODEQL_DOWNLOAD_MAX_TIME}" \
+                    --retry 0 \
+                    "$url" -o /tmp/codeql.zip; \
+        }; \
+        fetch "${codeql_url}" \
+        || fetch "${codeql_fallback_url}" \
+        || fetch_with_proxy "${codeql_url}" \
+        || fetch_with_proxy "${codeql_fallback_url}"; \
+    fi; \
     unzip -q /tmp/codeql.zip -d /opt/codeql; \
     rm /tmp/codeql.zip
 
@@ -169,9 +182,38 @@ COPY pyproject.toml requirements.txt uv.lock* ./
 
 COPY . /app
 
-RUN python -m pip install --no-cache-dir uv \
-    && uv venv /app/.venv \
-    && uv pip install --python /app/.venv/bin/python -e ".[analysis]" semgrep
+# Configure PyPI mirror for better connectivity in China
+RUN env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u no_proxy \
+    python -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u no_proxy \
+    python -m pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+
+# Install uv using official installer (may need proxy for GitHub releases)
+# Falls back to pip install if official installer fails
+RUN set -eu; \
+    install_uv() { \
+        curl -LsSf https://astral.sh/uv/install.sh | sh; \
+    }; \
+    install_uv_with_proxy() { \
+        if [ -n "${HTTP_PROXY}" ] && [ -n "${HTTPS_PROXY}" ]; then \
+            env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+                curl -LsSf https://astral.sh/uv/install.sh | sh; \
+        else \
+            return 1; \
+        fi; \
+    }; \
+    install_uv || install_uv_with_proxy || \
+    (env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u no_proxy \
+        python -m pip install --no-cache-dir --upgrade pip && \
+     env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u no_proxy \
+        python -m pip install --no-cache-dir uv)
+
+# Create venv and install Python dependencies using PyPI mirror
+# uv is installed to ~/.local/bin by official installer
+RUN env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u no_proxy \
+    uv venv /app/.venv \
+    && env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u no_proxy \
+        uv pip install --python /app/.venv/bin/python -e ".[analysis]" semgrep
 
 RUN useradd -m -s /bin/bash deepvuln \
     && mkdir -p /target /tmp/codeql_cache /home/deepvuln/.cache /home/deepvuln/.codeql /go /opt/runtimes \
@@ -182,20 +224,15 @@ ENV HOME=/home/deepvuln
 WORKDIR /app
 
 RUN if [ "${PRELOAD_CODEQL_PACKS}" = "true" ]; then \
-        env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
-            codeql pack download codeql/go-queries \
-        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
-            codeql pack download codeql/java-queries \
-        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
-            codeql pack download codeql/python-queries \
-        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
-            codeql pack download codeql/javascript-queries \
-        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
-            codeql pack download codeql/cpp-queries \
-        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
-            codeql pack download codeql/ruby-queries \
-        && env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
-            codeql pack download codeql/csharp-queries; \
+        PACKS="codeql/go-queries codeql/java-queries codeql/python-queries codeql/javascript-queries codeql/cpp-queries codeql/ruby-queries codeql/csharp-queries"; \
+        for pack in $$PACKS; do \
+            if [ -n "${HTTP_PROXY}" ] && [ -n "${HTTPS_PROXY}" ]; then \
+                env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
+                    codeql pack download $$pack; \
+            else \
+                codeql pack download $$pack; \
+            fi; \
+        done; \
     fi
 
 WORKDIR /target

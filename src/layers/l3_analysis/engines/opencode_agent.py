@@ -149,6 +149,14 @@ class OpenCodeAgent(BaseEngine):
         """Create an LLM client based on provider configuration."""
         provider_lower = provider.lower()
 
+        # Try to get default model from config file if not specified
+        if model is None:
+            try:
+                from src.core.config import get_llm_model
+                model = get_llm_model()
+            except Exception:
+                model = None  # Fall back to DEFAULT_MODELS
+
         if provider_lower == "openai":
             return OpenAIClient(
                 model=model or DEFAULT_MODELS[LLMProvider.OPENAI],

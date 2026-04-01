@@ -222,8 +222,7 @@ class CodeQLReadinessGate:
 
         # Step 2: Build profiling
         try:
-            monorepo_info = self.module_discovery.discover()
-            modules = monorepo_info.modules if monorepo_info else []
+            modules = self.module_discovery.discover()  # Returns list[ModuleSummary] directly
             build_targets = extract_build_targets(self.project_path, modules)
             version_req = self.version_detector.detect()
         except Exception as e:
@@ -244,19 +243,42 @@ class CodeQLReadinessGate:
                 build_skip_reasons[info.target_name] = info.skip_reason
 
         # Step 2c: Ensure runtime versions are installed and switched
+        # P6-16b: Auto-install missing runtime versions using RuntimeVersionManager
         runtime_ensure_result = None
         if version_req:
             try:
-                from .runtime import RuntimeVersionManager, RuntimeType as RuntimeRuntimeType
+                from src.layers.l3_analysis.build.runtime.manager import RuntimeVersionManager
+                from src.layers.l3_analysis.build.runtime.types import RuntimeType
                 runtime_manager = RuntimeVersionManager()
                 runtime_requirements = runtime_manager.from_version_requirement(version_req)
                 if runtime_requirements:
-                    logger.info(f"Ensuring runtime versions: {runtime_requirements}")
+                    logger.info(
+                        f"[P6-16b Auto-fix] Runtime versions required: "
+                        f"java={version_req.java_version}, "
+                        f"go={version_req.go_version}, "
+                        f"node={version_req.node_version}"
+                    )
+                    logger.info(f"[P6-16b Auto-fix] Ensuring runtime versions: {runtime_requirements}")
                     runtime_ensure_result = await runtime_manager.ensure(runtime_requirements)
-                    if not runtime_ensure_result.success:
-                        logger.warning(f"Runtime version ensure failed: {runtime_ensure_result.errors}")
+                    if runtime_ensure_result.success:
+                        installed_versions = []
+                        # Iterate over successfully installed runtimes
+                        for runtime_type, install_result in runtime_ensure_result.installed.items():
+                            if install_result.success:
+                                installed_versions.append(f"{runtime_type.value}={install_result.version}")
+                        # Also include switched runtimes
+                        for runtime_type, switch_result in runtime_ensure_result.switched.items():
+                            if switch_result.success:
+                                installed_versions.append(f"{runtime_type.value}={switch_result.version} (switched)")
+                        logger.info(f"[P6-16b Auto-fix] Successfully ensured runtime versions: {', '.join(installed_versions)}")
+                    else:
+                        logger.warning(
+                            f"[P6-16b Auto-fix] Runtime version ensure failed: {runtime_ensure_result.errors}"
+                        )
+                else:
+                    logger.debug("[P6-16b Auto-fix] No specific runtime requirements detected")
             except Exception as e:
-                logger.warning(f"Runtime version management failed: {e}")
+                logger.warning(f"[P6-16b Auto-fix] Runtime version management failed: {e}")
 
         # Step 3: Tool readiness
         tool_report = self._check_tools(build_targets, version_req)
@@ -317,12 +339,12 @@ class CodeQLReadinessGate:
         )
 
     def _analyze_build_readiness(
-        self, build_targets: list[BuildTarget]
+        self, build_targets: list[Any]
     ) -> list[BuildReadinessInfo]:
         """Analyze build readiness using language-specific builders.
 
         Args:
-            build_targets: List of build targets from BuildTargetExtractor.
+            build_targets: List of BuildRecommendation or BuildTarget from BuildTargetExtractor.
 
         Returns:
             List of BuildReadinessInfo for each target.
@@ -335,7 +357,17 @@ class CodeQLReadinessGate:
             logger.warning(f"Could not load builder registry: {e}")
             return results
 
-        for target in build_targets:
+        # Handle both BuildRecommendation (with targets attribute) and BuildTarget (direct)
+        targets_to_analyze = []
+        for item in build_targets:
+            if hasattr(item, 'targets'):
+                # BuildRecommendation object
+                targets_to_analyze.extend(item.targets)
+            else:
+                # BuildTarget object
+                targets_to_analyze.append(item)
+
+        for target in targets_to_analyze:
             try:
                 builder = registry.get(target.language)
                 if not builder:
@@ -385,6 +417,8 @@ class CodeQLReadinessGate:
     async def _basic_check(self) -> dict[str, Any]:
         """Run basic CodeQL availability check.
 
+        P6-16a: Auto-download query packs when missing.
+
         Returns:
             Dictionary with check results.
         """
@@ -403,6 +437,31 @@ class CodeQLReadinessGate:
                 startup_timeout=self.startup_timeout,
             )
             result.update(readiness)
+
+            # P6-16a: Auto-download query pack if missing
+            if readiness.get("reason") == "query_pack_missing" and readiness.get("query_pack"):
+                query_pack = readiness["query_pack"]
+                logger.info(f"[P6-16a Auto-fix] Query pack '{query_pack}' not installed, attempting auto-download...")
+                # Temporarily enable auto-download for this operation
+                engine.auto_download_packs = True
+                pack_download_success = await engine._ensure_query_pack(query_pack)
+                engine.auto_download_packs = False  # Restore original setting
+
+                if pack_download_success:
+                    logger.info(f"[P6-16a Auto-fix] Successfully downloaded query pack: {query_pack}")
+                    # Re-check readiness after successful download
+                    readiness = await engine.check_readiness(
+                        source_path=self.project_path,
+                        startup_timeout=self.startup_timeout,
+                    )
+                    result.update(readiness)
+                    if readiness.get("ready"):
+                        result["auto_fixed"] = True
+                        result["auto_fix_message"] = f"Auto-downloaded query pack: {query_pack}"
+                else:
+                    logger.warning(f"[P6-16a Auto-fix] Failed to auto-download query pack: {query_pack}")
+                    result["auto_fix_attempted"] = True
+                    result["auto_fix_failed"] = True
         except Exception as e:
             result["reason"] = "check_error"
             result["message"] = str(e)
@@ -413,8 +472,7 @@ class CodeQLReadinessGate:
         """Create result for forced mode."""
         # Get all detected languages
         try:
-            monorepo_info = self.module_discovery.discover()
-            modules = monorepo_info.modules if monorepo_info else []
+            modules = self.module_discovery.discover()  # Returns list[ModuleSummary] directly
             all_languages = list(set(m.language for m in modules if m.language))
         except Exception:
             all_languages = []

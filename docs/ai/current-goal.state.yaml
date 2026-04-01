@@ -1,18 +1,47 @@
-goal_id: null
-title: null
-stage: null
-status: null
-selected_option: null
-design_confirmed: false
+goal_id: "P6-16"
+title: "Readiness Gate 自动修复机制"
+stage: "confirmed"
+status: "completed"
+selected_option: "A"
+design_confirmed: true
 blocked_by: []
-open_questions: []
-resolved_questions: []
-implementation_steps: []
-test_scope: []
+open_questions:
+  - question: "是否需要同时更新 docker-compose-china.yml?"
+    answer: "是，一并更新"
+  - question: "构建工具安装是否需要设置超时?"
+    answer: "是，设置 300 秘超时"
+resolved_questions:
+  - question: "是否需要同时更新 docker-compose-china.yml?"
+    answer: "是，一并更新"
+  - question: "构建工具安装是否需要设置超时?"
+    answer: "是，设置 300 秒超时"
+implementation_steps:
+  - step: "P6-16a: 修改 readiness_gate.py _basic_check 方法，调用 _ensure_query_pack"
+    file: "src/layers/l3_analysis/readiness_gate.py"
+    status: "completed"
+  - step: "P6-16b: 集成 RuntimeVersionManager 到 Readiness Gate"
+    file: "src/layers/l3_analysis/readiness_gate.py"
+    status: "completed"
+  - step: "P6-16c: 移除 docker-compose-tun.yml 空代理环境变量"
+    file: "docker-compose-tun.yml"
+    status: "completed"
+  - step: "P6-16c-扩展: 移除 docker-compose-china.yml 空代理环境变量"
+    file: "docker-compose-china.yml"
+    status: "completed"
+  - step: "P6-16d: 增强日志输出"
+    files: ["readiness_gate.py"]
+    status: "completed"
+test_scope:
+  - test: "验证 CodeQL pack 自动下载"
+    type: "unit"
+  - test: "验证构建工具自动安装"
+    type: "integration"
+  - test: "验证 Semgrep 在无代理环境变量下正常工作"
+    type: "integration"
 test_result: null
 new_files: []
 security_blockers: []
 dead_code_actions: []
-sync_status: synced
-last_check_at: "2026-03-30"
-last_synced_at: "2026-03-30"
+sync_status: "pending"
+last_check_at: "2026-03-31"
+last_synced_at: "2026-03-31"
