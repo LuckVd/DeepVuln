@@ -2,6 +2,22 @@
 
 ## 2026-04-01
 
+### Bug 修复: Readiness Gate 属性访问安全
+
+- **Goal ID**: bugfix-readiness-gate-attr
+- **Summary**: 修复 readiness_gate.py 中直接访问可能不存在的属性导致的崩溃
+- **Impact**:
+  - `src/layers/l3_analysis/readiness_gate.py`: 异常处理中使用安全属性访问 (getattr + fallback)
+- **Root Cause**:
+  - `_analyze_build_readiness` 接收 `list[BuildRecommendation]`，但异常处理假设 target 有 `name` 和 `language` 属性
+  - `BuildRecommendation` 没有 `name`/`language` 属性，导致 `AttributeError`
+- **Fix**:
+  - 使用 `getattr(target, 'name', default_value)` 安全访问属性
+  - 当 `name` 不存在时，使用 `path` 或对象的字符串表示
+  - 当 `language` 不存在时，默认为 `'unknown'`
+- **Tests**: 本地验证通过
+- **Security**: No secrets exposed
+
 ### P6-17: 两阶段混合去重策略完成
 
 - **Goal ID**: P6-17

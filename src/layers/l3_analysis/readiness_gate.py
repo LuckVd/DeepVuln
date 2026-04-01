@@ -402,11 +402,14 @@ class CodeQLReadinessGate:
                     )
 
             except Exception as e:
-                logger.warning(f"Builder analysis failed for {target.name}: {e}")
+                # Safely get attributes with fallbacks
+                target_name = getattr(target, 'name', str(target.path)) if hasattr(target, 'path') else str(target)
+                target_language = getattr(target, 'language', 'unknown')
+                logger.warning(f"Builder analysis failed for {target_name}: {e}")
                 results.append(
                     BuildReadinessInfo(
-                        target_name=target.name,
-                        language=target.language,
+                        target_name=target_name,
+                        language=target_language,
                         buildable=True,
                         warnings=[f"Builder analysis failed: {e}"],
                     )
