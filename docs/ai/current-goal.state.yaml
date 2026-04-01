@@ -1,7 +1,7 @@
 goal_id: "P6-16"
 title: "Readiness Gate 自动修复机制"
-stage: "confirmed"
-status: "completed"
+stage: "done"
+status: "synced"
 selected_option: "A"
 design_confirmed: true
 blocked_by: []
@@ -38,10 +38,11 @@ test_scope:
     type: "integration"
   - test: "验证 Semgrep 在无代理环境变量下正常工作"
     type: "integration"
-test_result: null
-new_files: []
+test_result: "31 passed"
+new_files: ["docker-compose-tun.yml", "docker-compose-china.yml", ".env.docker.build", "docs/docker-china-setup.md"]
 security_blockers: []
 dead_code_actions: []
-sync_status: "pending"
-last_check_at: "2026-03-31"
-last_synced_at: "2026-03-31"
+sync_status: "synced"
+last_check_at: "2026-04-01"
+last_synced_at: "2026-04-01"
+commit_id: "51f58a6"

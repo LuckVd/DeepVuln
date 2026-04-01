@@ -129,13 +129,15 @@
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P6-16|Readiness Gate 自动修复：尽量构建环境而非跳过|-|todo|
-|P6-16a|Query Pack 未安装时自动调用 `_ensure_query_pack` 下载|P6-16|todo|
-|P6-16b|构建工具缺失时集成 RuntimeVersionManager 自动安装|P6-16, P8-01|todo|
-|P6-16c|移除 docker-compose-tun.yml 空代理环境变量（修复 Semgrep）|P6-16|todo|
-|P6-16d|增强 Readiness Gate 日志，显示自动修复操作|P6-16a,b,c|todo|
+|P6-16|Readiness Gate 自动修复：尽量构建环境而非跳过|-|done|
+|P6-16a|Query Pack 未安装时自动调用 `_ensure_query_pack` 下载|P6-16|done|
+|P6-16b|构建工具缺失时集成 RuntimeVersionManager 自动安装|P6-16, P8-01|done|
+|P6-16c|移除 docker-compose-tun.yml 空代理环境变量（修复 Semgrep）|P6-16|done|
+|P6-16d|增强 Readiness Gate 日志，显示自动修复操作|P6-16a,b,c|done|
 
 **实现文件**: `src/layers/l3_analysis/engines/codeql.py`, `src/layers/l3_analysis/readiness_gate.py`, `docker-compose-tun.yml`
+**完成日期**: 2026-04-01
+**提交**: 51f58a6
 
 ### P6-08~P6-12: 覆盖率矩阵与测试
 
@@ -366,10 +368,10 @@
 |字段|值|
 |---|---|
 |**阶段**|Phase 6.6 - Readiness Gate 自动修复机制|
-|**当前进度**|P6-16 新增，待实现|
-|**当前目标**|P6-16: Readiness Gate 自动修复机制|
-|**下一步**|实现 P6-16a-d|
-|**最近完成**|P7-11b (Docker 集成测试), P8-01 (运行时管理)|
+|**当前进度**|P6-16 已完成|
+|**当前目标**|无活跃目标|
+|**下一步**|等待下一个目标|
+|**最近完成**|P6-16 (Readiness Gate 自动修复)|
 |**重点模块**|src/layers/l3_analysis/engines/codeql.py, src/layers/l3_analysis/readiness_gate.py, docker-compose-tun.yml|
 
 ---

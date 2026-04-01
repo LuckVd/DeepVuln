@@ -73,3 +73,7 @@ docker-cache/
 
 # Local data
 data/
+# AI Notes - Local environment notes (DO NOT COMMIT)
+
+# AI Notes - 环境注意事项
+docs/ai-notes.md

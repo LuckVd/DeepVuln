@@ -1,5 +1,29 @@
 # Change Log
 
+## 2026-04-01
+
+### P6-16: Readiness Gate 自动修复机制完成
+
+- **Goal ID**: P6-16
+- **Summary**: 实现 Readiness Gate 自动修复机制，尽量构建环境而非跳过检测
+- **Impact**:
+  - `src/layers/l3_analysis/readiness_gate.py`: Query Pack 自动下载 + RuntimeVersionManager 集成
+  - `docker-compose-tun.yml`: TUN 透明代理配置（空代理变量保留用于明确禁用代理）
+  - `docker-compose-china.yml`: 国内网络优化配置
+  - `.env.docker.build`: Docker 构建环境变量模板
+  - `Dockerfile`: 更新构建参数支持
+  - `docs/docker-china-setup.md`: 国内网络环境设置指南
+  - `README.md`: 新增 Docker 扫描使用指南
+- **Acceptance Criteria**:
+  - ✅ Readiness Gate 检测到 Query Pack 未安装时，自动尝试下载
+  - ✅ Readiness Gate 检测到构建工具缺失时，尝试使用 RuntimeVersionManager 安装
+  - ✅ Semgrep 在 TUN 模式下正常工作
+  - ✅ 增强日志输出（`[P6-16a Auto-fix]`, `[P6-16b Auto-fix]` 标记）
+- **Tests**: 31 passed (test_readiness_gate)
+- **Dead Code**: not run
+- **Security**: No secrets exposed (`.env` in `.gitignore`)
+- **Commit**: 51f58a6
+
 ## 2026-03-30
 
 ### Bug 修复: Semgrep CLI 兼容性与类型安全
