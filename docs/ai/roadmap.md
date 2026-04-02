@@ -387,8 +387,8 @@
 |**当前进度**|P6-17 已完成|
 |**当前目标**|无活跃目标|
 |**下一步**|等待下一个目标|
-|**最近完成**|P6-17 (两阶段混合去重策略)|
-|**重点模块**|src/layers/l3_analysis/engines/codeql.py, src/layers/l3_analysis/readiness_gate.py, docker-compose-tun.yml|
+|**最近完成**|P5-01e (扫描顺序优化), 扫描日志问题修复|
+|**重点模块**|src/cli/main.py, src/layers/l3_analysis/verification/|
 
 ---
 
