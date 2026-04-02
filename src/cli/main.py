@@ -2242,6 +2242,59 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
 
     lines.append("")
 
+    # P7-01: Include LLM analysis details when requested
+    if options.get("include_llm_details"):
+        lines.append("-" * 70)
+        lines.append("LLM Analysis Details")
+        lines.append("-" * 70)
+
+        # Deduplication Analysis
+        adjudication = result.get("adjudication", {})
+        dedup_info = adjudication.get("deduplication", {})
+        merge_details = dedup_info.get("merge_details", [])
+
+        if merge_details:
+            lines.append("\nDeduplication Analysis:")
+            for i, detail in enumerate(merge_details, 1):
+                lines.append(f"\n{i}. {detail.get('cluster', 'N/A')}")
+                lines.append(f"   Removed: {detail.get('removed', 0)} findings")
+                lines.append(f"   Reasoning: {detail.get('reasoning', 'N/A')}")
+            lines.append("")
+
+        # Adversarial Verification Details
+        adv_details = []
+        for verified in result.get("verified_findings", []):
+            finding = verified.get("finding")
+            if not finding:
+                continue
+            metadata = finding.metadata or {}
+            adv_verdict = metadata.get("adversarial_verdict")
+            adv_reasoning = metadata.get("adversarial_reasoning")
+            adv_confidence = metadata.get("adversarial_confidence")
+
+            if adv_verdict or adv_reasoning:
+                adv_details.append({
+                    "finding_id": getattr(finding, "id", "N/A"),
+                    "location": str(finding.location.to_display()),
+                    "verdict": adv_verdict,
+                    "confidence": adv_confidence,
+                    "reasoning": adv_reasoning,
+                })
+
+        if adv_details:
+            lines.append("Adversarial Verification Details:")
+            for i, adv in enumerate(adv_details, 1):
+                lines.append(f"\n{i}. Finding: {adv['finding_id']}")
+                lines.append(f"   Location: {adv['location']}")
+                lines.append(f"   Verdict: {adv['verdict'].upper() if adv['verdict'] else 'N/A'}")
+                lines.append(f"   Confidence: {adv['confidence']}")
+                if adv.get("reasoning"):
+                    reasoning = adv["reasoning"]
+                    if len(reasoning) > 500:
+                        reasoning = reasoning[:500] + "..."
+                    lines.append(f"   Reasoning: {reasoning}")
+            lines.append("")
+
     if result.get("errors"):
         lines.append("-" * 70)
         lines.append("Errors")
@@ -2870,7 +2923,7 @@ def _display_detailed_findings(result: dict[str, Any]) -> None:
 def main(ctx: click.Context, interactive: bool, version: bool) -> None:
     """DeepVuln - Seven-Layer Intelligent Vulnerability Analysis System.
 
-    Run without arguments to start interactive mode.
+    Use -i or --interactive to start interactive mode.
     """
     if version:
         from src import __version__
@@ -2878,8 +2931,10 @@ def main(ctx: click.Context, interactive: bool, version: bool) -> None:
         click.echo(f"DeepVuln version {__version__}")
         return
 
-    if interactive or ctx.invoked_subcommand is None:
+    if interactive:
         run_interactive_mode()
+    elif ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 @main.command()
@@ -2973,6 +3028,7 @@ def clean() -> None:
 @click.option("--include-low", is_flag=True, help="Include low severity vulnerabilities")
 @click.option("--detailed", "-d", is_flag=True, help="Show detailed report")
 @click.option("--export", "-e", "export_path", help="Export report to file")
+@click.option("--include-llm-details", is_flag=True, help="Include LLM analysis details in export (deduplication reasoning, adversarial verdict)")
 @click.option("--full", "-f", "full_scan", is_flag=True, help="Full scan: all engines + LLM verification + adversarial debate (most complete)")
 @click.option("--base", "-b", "base_scan", is_flag=True, help="Base scan: 3 engines only (semgrep + codeql + agent), no LLM verification")
 @click.option("--engines", multiple=True, type=click.Choice(["semgrep", "codeql", "agent"]), help="Specify engines for code analysis")
@@ -2995,6 +3051,7 @@ def scan(
     include_low: bool,
     detailed: bool,
     export_path: str | None,
+    include_llm_details: bool,
     full_scan: bool,
     base_scan: bool,
     engines: tuple[str, ...],
@@ -3135,6 +3192,7 @@ def scan(
         "detailed": detailed,
         "full_scan": full_scan,
         "base_scan": base_scan,
+        "include_llm_details": include_llm_details,
         "engines": list(engines) if engines else None,
         "llm_verify": llm_verify,
         "llm_detect": llm_detect,

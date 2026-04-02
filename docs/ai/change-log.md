@@ -2,6 +2,28 @@
 
 ## 2026-04-02
 
+### P7-01: 报告导出增强 - LLM 分析详情选项
+
+- **Goal ID**: P7-01
+- **Summary**: 添加 `--include-llm-details` 选项，允许在导出报告中包含 LLM 评估详情
+- **Impact**:
+  - `src/cli/main.py`: 新增 `--include-llm-details` 参数，增强 `_export_full_scan_result` 函数
+- **Features**:
+  - 去重分析详情：显示合并的漏洞组及 LLM 推理原因
+  - 对抗验证详情：每个漏洞的 verdict (CONFIRMED/REJECTED)、confidence、reasoning
+- **Usage**:
+  ```bash
+  # 基本导出（不含 LLM 详情）
+  deepvuln scan -p /target --full --export report.txt
+
+  # 带 LLM 详情的导出
+  deepvuln scan -p /target --full --export report.txt --include-llm-details
+  ```
+- **Tests**: Docker 集成测试通过 (java-simple-vuln: 4 CONFIRMED, 完整 reasoning 导出)
+- **Security**: No secrets exposed
+
+### P5-01e: 扫描顺序优化完成
+
 ### P5-01e: 扫描顺序优化完成
 
 - **Goal ID**: P5-01e
