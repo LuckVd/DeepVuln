@@ -30,10 +30,10 @@ test_result: "4 CONFIRMED 漏洞，完整 reasoning 导出成功"
 new_files: []
 security_blockers: []
 dead_code_actions: []
-sync_status: "pending"
-last_check_at: "2026-04-02"
-last_synced_at: null
-commit_id: null
+sync_status: "completed"
+last_check_at: "2026-04-03"
+last_synced_at: "2026-04-03"
+commit_id: "323ba95"
 previous_goal:
   goal_id: "P5-01e-scan-order-optimization"
   title: "扫描顺序优化 - 先去重再对抗验证"
