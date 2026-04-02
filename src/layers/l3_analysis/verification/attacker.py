@@ -175,7 +175,9 @@ class AttackerVerifier:
             )
 
     def _parse_response(self, content: str) -> dict[str, Any]:
-        """Parse LLM response content to JSON."""
+        """Parse LLM response content to JSON with fault tolerance."""
+        from src.core.utils.json_parser import robust_json_loads, JSONParseError
+
         content = content.strip()
 
         # Try to extract JSON from markdown code blocks
@@ -184,7 +186,12 @@ class AttackerVerifier:
         elif "```" in content:
             content = content.split("```")[1].split("```")[0].strip()
 
-        return json.loads(content)
+        try:
+            return robust_json_loads(content)
+        except JSONParseError as e:
+            self.logger.warning(f"Failed to parse LLM response: {e}")
+            self.logger.debug(f"Response content: {content[:200]}...")
+            raise
 
     def _build_argument(
         self,

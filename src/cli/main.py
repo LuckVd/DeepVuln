@@ -2312,7 +2312,18 @@ def _export_full_scan_result(result: dict[str, Any], export_path: str, options: 
     lines.append("End of Report")
     lines.append("=" * 70)
 
-    Path(export_path).write_text("\n".join(lines), encoding="utf-8")
+    # Ensure parent directory exists before writing
+    export_path_obj = Path(export_path)
+    export_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        export_path_obj.write_text("\n".join(lines), encoding="utf-8")
+    except PermissionError as e:
+        console.print()
+        console.print(f"[red]Permission denied: Cannot write to {export_path}[/]")
+        console.print(f"[dim]Error: {e}[/]")
+        console.print(f"[yellow]Hint: Check that the output directory exists and is writable[/]")
+        raise
 
     console.print()
     console.print(f"[green]Report exported to: {export_path}[/]")
@@ -2427,8 +2438,17 @@ def run_security_scan_interactive(source_path: Path, options: dict[str, Any] | N
                     export_path = prompt_export_path()
                     if export_path:
                         report_text = export_report_text(scan_result.report)
-                        Path(export_path).write_text(report_text, encoding="utf-8")
-                        show_success("Export Complete", f"Report saved to {export_path}")
+                        # Ensure parent directory exists
+                        export_path_obj = Path(export_path)
+                        export_path_obj.parent.mkdir(parents=True, exist_ok=True)
+                        try:
+                            export_path_obj.write_text(report_text, encoding="utf-8")
+                            show_success("Export Complete", f"Report saved to {export_path}")
+                        except PermissionError as e:
+                            show_error(
+                                "Export Failed",
+                                f"Cannot write to {export_path}: {e}"
+                            )
                 elif action == "new":
                     return  # Return to main flow
 
@@ -3203,13 +3223,21 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
         if scan_result.success and scan_result.report:
             # Export report
             report_text = export_report_text(scan_result.report)
-            Path(export_path).write_text(report_text, encoding="utf-8")
-
-            console.print()
-            console.print(f"[green]Report exported to: {export_path}[/]")
-            console.print(f"  Dependencies scanned: {scan_result.report.dependencies_scanned}")
-            console.print(f"  Vulnerabilities found: {scan_result.report.total_vulnerabilities}")
-            console.print(f"  KEV (known exploited): {scan_result.report.kev_count}")
+            # Ensure parent directory exists
+            export_path_obj = Path(export_path)
+            export_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                export_path_obj.write_text(report_text, encoding="utf-8")
+                console.print()
+                console.print(f"[green]Report exported to: {export_path}[/]")
+                console.print(f"  Dependencies scanned: {scan_result.report.dependencies_scanned}")
+                console.print(f"  Vulnerabilities found: {scan_result.report.total_vulnerabilities}")
+                console.print(f"  KEV (known exploited): {scan_result.report.kev_count}")
+            except PermissionError as e:
+                console.print()
+                console.print(f"[red]Permission denied: Cannot write to {export_path}[/]")
+                console.print(f"[dim]Error: {e}[/]")
+                show_error("Export Failed", str(e))
         else:
             show_error("Scan Failed", "\n".join(scan_result.errors or ["Unknown error"]))
 

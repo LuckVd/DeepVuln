@@ -973,7 +973,8 @@ class CodeQLEngine(BaseEngine):
                             database_path=database_path,
                             language=codeql_lang,
                             overwrite=overwrite_database or self.enable_cache,
-                            skip_build=skip_build,
+                            skip_build=False,  # Always let CodeQL handle the build
+                            build_command=build_command,  # Pass build_command for CodeQL to use
                         ),
                         timeout=self.build_timeout,
                     )
@@ -1658,10 +1659,11 @@ class CodeQLEngine(BaseEngine):
             detector = BuildSystemDetector()
             config = detector.detect(source_path, language)
 
-            if build_command:
-                config.build_command = build_command
-            elif config.build_command:
+            # Use detected build_command if available
+            if config and config.build_command:
                 build_command = config.build_command
+            elif build_command and config:
+                config.build_command = build_command
 
         # Determine if build is required
         requires_build = language.lower() in ("java", "go", "cpp", "c", "csharp", "kotlin", "scala")
@@ -1684,12 +1686,15 @@ class CodeQLEngine(BaseEngine):
                 f"Command: {build_command}"
             )
 
-            # Create config for BuildExecutor
+            # Create config for BuildExecutor if not already set
             if config is None:
-                config = detector.detect(source_path, language) if 'detector' in dir() else None
+                detector = BuildSystemDetector()
+                config = detector.detect(source_path, language)
 
             if config:
-                config.build_command = build_command
+                # Ensure build_command is set on config
+                if not config.build_command:
+                    config.build_command = build_command
                 executor = BuildExecutor(timeout=self.build_timeout)
                 result = await executor.execute(config, source_path)
 
@@ -1739,6 +1744,7 @@ class CodeQLEngine(BaseEngine):
         language: str,
         overwrite: bool = True,
         skip_build: bool = False,
+        build_command: str | None = None,
     ) -> bool:
         """
         Create a CodeQL database from source code.
@@ -1749,6 +1755,7 @@ class CodeQLEngine(BaseEngine):
             language: CodeQL language name.
             overwrite: Whether to overwrite existing database.
             skip_build: Whether to skip the build step (--no-build).
+            build_command: Custom build command to pass via --command.
 
         Returns:
             True if database creation succeeded.
@@ -1775,6 +1782,11 @@ class CodeQLEngine(BaseEngine):
                 # Use a no-op command for Go, Java, etc.
                 cmd.extend(["--command", "echo 'Skipping build'"])
                 logger.info("Using no-op build command (build step will be skipped)")
+        elif build_command:
+            # Use custom build command - CodeQL will execute and trace the build
+            cmd.extend(["--command", build_command])
+            logger.info(f"Using custom build command: {build_command}")
+        # else: Use CodeQL's autobuild (default behavior)
 
         # Add search path if specified
         if self.search_path:

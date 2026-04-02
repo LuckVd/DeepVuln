@@ -248,7 +248,7 @@ class CodeQLReadinessGate:
         if version_req:
             try:
                 from src.layers.l3_analysis.build.runtime.manager import RuntimeVersionManager
-                from src.layers.l3_analysis.build.runtime.types import RuntimeType
+                from src.layers.l3_analysis.build.runtime.models import RuntimeType
                 runtime_manager = RuntimeVersionManager()
                 runtime_requirements = runtime_manager.from_version_requirement(version_req)
                 if runtime_requirements:

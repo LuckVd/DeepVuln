@@ -1176,7 +1176,7 @@ print(result)
         Returns:
             LLMClusterResult with keep/remove lists.
         """
-        import json
+        from src.core.utils.json_parser import robust_json_loads, JSONParseError
 
         try:
             # Log raw response for debugging
@@ -1189,12 +1189,12 @@ print(result)
             elif "```" in response:
                 response = response.split("```")[1].split("```")[0].strip()
 
-            # Try to parse JSON
+            # Try to parse JSON with fault tolerance
             try:
-                data = json.loads(response)
-            except json.JSONDecodeError as e:
+                data = robust_json_loads(response)
+            except JSONParseError as e:
                 # Log the failed JSON for debugging
-                self.logger.error(f"Failed to parse JSON: {e}")
+                self.logger.error(f"Failed to parse LLM response: {e}")
                 self.logger.error(f"Response content: {response[:1000]}")
                 raise
 
