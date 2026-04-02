@@ -858,7 +858,7 @@ class TestClusterDeduplicatorConfig:
         config = ClusterDeduplicatorConfig()
         assert config.line_tolerance == 10
         assert config.enable_llm_dedup is True
-        assert config.llm_timeout == 30
+        assert config.llm_timeout == 180
         assert config.max_cluster_size == 10
 
     def test_custom_config(self):

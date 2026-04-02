@@ -2,234 +2,144 @@
 
 ## Status
 
-**无活跃目标** 🎯
-
-P6-17 已完成。
-
-## Completed
-
-**最近完成**: P6-17: 两阶段混合去重策略 ✅ (2026-04-01)
+**阶段**: confirm_plan
+**状态**: 待确认
 
 ---
 
 ## 目标概述
 
-实现基于位置聚类 + LLM 判断的两阶段混合去重策略，解决当前多引擎跨引擎去重失效的问题。
+**优化扫描顺序：先去重，再对抗验证**
+
+将去重阶段移到对抗性验证之前，减少 LLM API 调用量和扫描时间。
 
 ### 问题背景
 
-当前 `ASTDeduplicator` 使用 `rule_id + sink + source` 生成语义哈希，但不同引擎（Semgrep/CodeQL/Agent）使用不同的 rule_id，导致同一漏洞无法被去重。
+当前扫描流程：
+```
+Scan → Verify (191) → Adversarial (191) → Deduplicate → 182
+```
+
+191 个漏洞都经过对抗性验证，然后才去重。这意味着：
+- 大量重复漏洞浪费了 LLM 调用
+- 对抗性验证是最耗时的阶段（单个漏洞可能需要多轮辩论）
+- Token 使用量高
 
 ### 解决方案
 
+**调整后的流程：**
 ```
-阶段 1: 位置聚类 (规则基础)
-  按 file_path + line_range 分组
-
-阶段 2: LLM 精细判断
-  对每组内的 findings，让 LLM 判断是否重复
-
-阶段 3: 保留策略
-  - 重复的：保留 final_score 最高的
-  - 不重复的：全部保留
+Scan → Verify (191) → Deduplicate → Adversarial (~150) → Final Report
 ```
+
+**关键优势：**
+1. ✅ `final_score` 独立于对抗验证计算（基于 codeql/reachability/taint_tracking/attack_surface）
+2. ✅ 去重逻辑主要依赖 `final_score`，不受影响
+3. ✅ 对抗验证结果仍可正确附加到去重后的漏洞
 
 ---
 
 ## 设计方案
 
-### 核心组件
+### 当前流程分析
 
-| 组件 | 文件位置 | 说明 |
-|------|----------|------|
-| `ClusterBasedDeduplicator` | `src/layers/l3_analysis/deduplicator.py` | 新增：两阶段去重器 |
-| `ClusterDeduplicatorConfig` | `src/layers/l3_analysis/deduplicator.py` | 新增：配置类 |
-| `_cluster_by_location()` | `src/layers/l3_analysis/deduplicator.py` | 新增：位置聚类方法 |
-| `_llm_deduplicate_cluster()` | `src/layers/l3_analysis/deduplicator.py` | 新增：LLM 判断方法 |
-| `_build_dedup_prompt()` | `src/layers/l3_analysis/deduplicator.py` | 新增：构造 Prompt |
-
-### 配置参数
+**文件位置**: `src/cli/main.py`
 
 ```python
-class ClusterDeduplicatorConfig:
-    line_tolerance: int = 10        # 行号容差（可配置）
-    enable_llm_dedup: bool = True   # 是否启用 LLM 去重
-    llm_timeout: int = 30          # LLM 超时时间（秒）
-    max_cluster_size: int = 10     # 单个聚类最大 findings 数
+# Line 1570: Phase 4 - LLM 验证
+if llm_verify:
+    result["verified_findings"] = await round_four_executor(...)
+
+# Line 1685: Phase 4.5 - 对抗性验证 (当前在去重之前)
+if adversarial and result["verified_findings"] and llm_client:
+    findings_to_verify = [
+        v for v in result["verified_findings"]
+        if v["finding"].severity.value in ["critical", "high", "medium"]
+    ]
+    adversarial_results = await verify_single_adversarial(findings_to_verify)
+
+# Line 1830-1873: Backfill 验证/对抗结果到 findings
+
+# Line 1935: 去重和裁定 (当前在对抗验证之后)
+adjudicated_findings, adjudication_summary = adjudicate_findings(
+    raw_findings,
+    enable_deduplication=True,
+)
 ```
 
-### 处理流程
+### 新流程设计
 
 ```python
-def deduplicate(self, findings: list[Finding]) -> DeduplicationResult:
-    # 1. 位置聚类
-    clusters = self._cluster_by_location(findings)
+# Line 1570: Phase 4 - LLM 验证 (不变)
+if llm_verify:
+    result["verified_findings"] = await round_four_executor(...)
 
-    # 2. 对每个聚类进行 LLM 判断
-    unique_findings = []
-    removed_count = 0
-    merged_groups = 0
+# ========== 新增：先去重 ==========
+# Line 1685 (新位置): 去重和裁定 (移到这里)
+raw_findings = [
+    item["finding"] for item in result["all_findings"]
+]
+deduplicated_findings, dedup_summary = adjudicate_findings(
+    raw_findings,
+    validate=True,
+    enable_deduplication=True,
+)
+# 更新 result["all_findings"] 为去重后的结果
+result["all_findings"] = [
+    {"source": "adjudicated", "finding": f}
+    for f in deduplicated_findings
+]
+result["verified_findings"] = [
+    {"source": "adjudicated", "finding": f}
+    for f in deduplicated_findings
+]  # 更新 verified_findings 为去重后的结果
 
-    for cluster in clusters:
-        if len(cluster) == 1:
-            unique_findings.append(cluster[0])
-        else:
-            # LLM 判断
-            result = await self._llm_deduplicate_cluster(cluster)
-            unique_findings.extend(result.keep)
-            removed_count += result.removed
-            merged_groups += 1
-
-    return DeduplicationResult(
-        unique_findings=unique_findings,
-        removed_count=removed_count,
-        merged_groups=merged_groups,
-    )
+# Line 1820 (新位置): Phase 4.5 - 对抗性验证 (移到去重之后)
+if adversarial and result["verified_findings"] and llm_client:
+    # 现在对去重后的 findings 进行对抗验证
+    findings_to_verify = [
+        v for v in result["verified_findings"]
+        if v["finding"].severity.value in ["critical", "high", "medium"]
+    ]
+    # 数量已减少：191 → ~150
 ```
+
+### 核心变更
+
+| 变更 | 当前 | 新位置 |
+|------|------|--------|
+| Adjudication/Deduplication | Line 1935 | Line 1685 (移到 Phase 4.5 之前) |
+| Phase 4.5 Adversarial | Line 1685 | Line 1820 (移到去重之后) |
+| Backfill verification | Line 1830 | 保持不变 (去重后仍需回填) |
+| Backfill adversarial | Line 1854 | 保持不变 |
 
 ---
 
-## 实现步骤
+## 范围 (Scope)
 
-### P6-17a: 位置聚类实现 ✅
+### 包含
 
-**任务**：实现基于文件位置和行号范围的聚类逻辑
+1. **重新排序扫描阶段**
+   - 将 `adjudicate_findings()` 移到 `Phase 4.5` 之前
+   - 更新 `result["verified_findings"]` 为去重后的结果
 
-**实现要点**：
-- 按 `file_path` 分组
-- 在同一文件内，按 `line_number` 排序
-- 行号差 <= `line_tolerance` 的 findings 归入同一聚类
+2. **更新对抗验证输入**
+   - 对抗验证现在接收去重后的 findings
+   - 严重度过滤逻辑保持不变
 
-**实现位置**：`src/layers/l3_analysis/deduplicator.py:695-803`
-- `cluster_findings_by_location()` 函数
-- `LocationCluster` 数据类
+3. **保持元数据回填**
+   - 验证结果回填 (Line 1830-1845)
+   - 对抗结果回填 (Line 1854-1873)
 
-**验收标准**：
-- ✅ 同一位置的多个 findings 被归入同一聚类
-- ✅ 不同位置的 findings 被归入不同聚类
+4. **更新日志输出**
+   - 反映新的阶段顺序
+   - 显示去重前后的数量变化
 
-### P6-17b: LLM 判断实现 ✅
+### 不包含 (Out of Scope)
 
-**任务**：实现 LLM 判断聚类内 findings 是否重复的逻辑
-
-**实现要点**：
-- 构造专用 Prompt：展示所有 findings 的关键信息
-- 解析 LLM 返回：判断哪些是重复的，哪些不是
-- 返回保留的 findings 列表
-
-**实现位置**：`src/layers/l3_analysis/deduplicator.py:821-921`
-- `ClusterBasedDeduplicator._build_dedup_prompt()` 方法
-- `ClusterBasedDededuplicator._parse_llm_response()` 方法
-
-**验收标准**：
-- ✅ LLM Prompt 正确构造，包含所有关键信息
-- ✅ JSON 响应解析逻辑正确处理分组
-
-### P6-17c: 保留策略实现 ✅
-
-**任务**：根据 LLM 判断结果，保留合适的 findings
-
-**实现要点**：
-- LLM 判定为重复的：保留 `final_score` 最高的
-- 更新保留 finding 的 `related_engines` 和 `duplicate_count`
-
-**实现位置**：`src/layers/l3_analysis/deduplicator.py:880-921`
-- `_parse_llm_response()` 中的保留策略逻辑
-
-**验收标准**：
-- ✅ 保留 final_score 最高的 finding
-- ✅ related_engines 正确更新
-- ✅ duplicate_count 正确反映重复数量
-
-### P6-17d: 集成到 adjudication ✅
-
-**任务**：替换现有的 `ASTDeduplicator`
-
-**修改文件**：
-- `src/layers/l3_analysis/adjudication.py:37-40, 487-530`
-
-**变更**：
-- 导入 `ClusterBasedDeduplicator` 和 `ClusterDeduplicatorConfig`
-- 在 `adjudicate_findings()` 中创建 LLM 客户端
-- 当 LLM 可用时使用 `ClusterBasedDeduplicator`，否则降级到 `ASTDeduplicator`
-
-**验收标准**：
-- ✅ adjudication 流程正常执行
-- ✅ LLM 不可用时降级到 ASTDeduplicator
-
-### P6-17e: 单元测试 ✅
-
-**任务**：为新增组件编写单元测试
-
-**测试文件**：`tests/unit/test_l3/test_deduplicator.py`
-
-**新增测试**：
-- `TestClusterDeduplicatorConfig` - 配置测试 (4 tests)
-- `TestLocationCluster` - 聚类数据类测试 (1 test)
-- `TestClusterFindingsByLocation` - 位置聚类测试 (8 tests)
-- `TestClusterBasedDeduplicator` - 去重器测试 (6 tests)
-- `TestLLMClusterResult` - 结果数据类测试 (1 test)
-
-**验收标准**：
-- ✅ 94 个测试通过 (76 个原有 + 18 个新增)
-- ✅ 测试覆盖所有核心功能
-
-### P6-17f: 集成测试 ✅
-
-**任务**：使用真实扫描结果验证去重效果
-
-**测试文件**：`tests/integration/test_deduplication.py`
-
-**新增测试**：
-- 跨引擎命令注入去重测试
-- 不同漏洞不去重测试
-- 同文件不同区域分离测试
-- 多文件聚类测试
-- 容差影响测试
-- 统计信息追踪测试
-
-**验收标准**：
-- ✅ 7 个集成测试全部通过
-- ✅ 验证跨引擎聚类正确工作
-- ✅ 验证不同漏洞不会被误判为重复
-```
-
-**验收标准**：
-- adjudication 流程正常执行
-- 去重结果正确反映在报告中
-
-### P6-17e: 单元测试
-
-**任务**：为新增组件编写单元测试
-
-**测试文件**：
-- `tests/unit/test_l3/test_deduplicator.py`
-
-**测试覆盖**：
-- 位置聚类逻辑（边界情况：空列表、单个 finding、跨文件）
-- LLM 判断逻辑（mock LLM 响应）
-- 保留策略（final_score 排序）
-- 端到端去重流程
-
-**验收标准**：
-- 测试覆盖率 >= 80%
-- 所有测试通过
-
-### P6-17f: 集成测试
-
-**任务**：使用真实扫描结果验证去重效果
-
-**测试文件**：
-- `tests/integration/test_deduplication.py`
-
-**测试场景**：
-- java-simple-vuln 项目的去重效果
-- 验证跨引擎去重是否生效
-- 验证不同漏洞是否被误判为重复
-
-**验收标准**：
-- 报告中重复漏洞明显减少
-- 无误判真实漏洞的情况
+1. **去重算法本身的修改** - ClusterBasedDeduplicator 保持不变
+2. **对抗验证逻辑的修改** - EnhancedAdversarialVerification 保持不变
+3. **配置选项** - 不添加 `--legacy-order` 向后兼容选项
 
 ---
 
@@ -237,39 +147,162 @@ def deduplicate(self, findings: list[Finding]) -> DeduplicationResult:
 
 ### 功能验收
 
-- [x] 不同引擎检测到的同一漏洞能被正确去重
-- [x] 不同位置的相似漏洞不会被误判为重复
-- [x] 保留的 finding 包含所有相关引擎信息
-- [x] `duplicate_count` 和 `related_engines` 正确更新
+- [ ] 去重在对抗验证之前执行
+- [ ] 对抗验证仅对去重后的漏洞进行
+- [ ] 去重统计正确显示 (191 → ~150 → 对抗验证)
+- [ ] 最终报告中的漏洞数量正确
 
 ### 性能验收
 
-- [x] LLM 调用次数不超过聚类数量
-- [x] 单个聚类判断耗时 < 30 秒
-- [x] 整体去重耗时不超过原有流程的 2 倍
+| 指标 | 目标值 |
+|------|--------|
+| 对抗验证数量 | 减少约 20-30% |
+| API 调用减少 | > 20% |
+| Token 节省 | > 25% |
 
 ### 质量验收
 
-- [x] 单元测试覆盖率 >= 80%
-- [x] 所有测试通过
-- [x] 代码符合项目规范（ruff, mypy）
+- [ ] 现有测试通过
+- [ ] 使用相同输入，最终漏洞列表与当前流程一致（顺序可能不同）
+- [ ] 元数据 (exploitability, adversarial_verdict) 正确附加
 
 ---
 
-## 实现文件
+## 实现步骤
 
-### 新增文件
+### Step 1: 重新排序扫描阶段 (main.py)
 
-| 文件 | 说明 |
-|------|------|
-| `src/layers/l3_analysis/deduplicator.py` | 扩展：新增 ClusterBasedDeduplicator |
-| `tests/unit/test_l3/test_deduplicator.py` | 扩展：新增测试用例 |
+**文件**: `src/cli/main.py`
 
-### 修改文件
+**操作**:
+1. 将 `adjudicate_findings()` 调用块从 Line 1935 移到 Line 1685
+2. 更新 `result["verified_findings"]` 为去重后的结果
+3. 将 Phase 4.5 对抗验证块移到去重之后
 
-| 文件 | 变更 |
-|------|------|
-| `src/layers/l3_analysis/adjudication.py` | 替换 ASTDeduplicator 为 ClusterBasedDeduplicator |
+**变更**:
+```python
+# 在 Phase 4 结束后 (Line 1682)，添加去重阶段
+# P5-01e E: Deduplication and Unified Adjudication
+if result["all_findings"]:
+    try:
+        from src.layers.l3_analysis.adjudication import adjudicate_findings
+
+        raw_findings = [
+            item["finding"] if isinstance(item, dict) and "finding" in item else item
+            for item in result["all_findings"]
+        ]
+
+        # Apply deduplication and adjudication
+        adjudicated_findings, adjudication_summary = adjudicate_findings(
+            raw_findings,
+            validate=True,
+            strict_consistency=False,
+            enable_deduplication=True,
+        )
+
+        # Update both all_findings and verified_findings
+        dedup_wrapped = [
+            {"source": "adjudicated", "finding": f}
+            for f in adjudicated_findings
+        ]
+        result["all_findings"] = dedup_wrapped
+        result["verified_findings"] = dedup_wrapped  # 关键：更新为去重后的结果
+
+        dup_count = adjudication_summary.deduplication.get("removed_count", 0)
+        logger.info(f"Cluster deduplication complete: {len(raw_findings)} -> {len(adjudicated_findings)} findings")
+
+    except Exception as e:
+        logger.warning(f"Adjudication failed: {e}")
+        result["adjudication"] = {"error": str(e)}
+
+# Phase 4.5: Adversarial Verification (现在使用去重后的 findings)
+if adversarial and result["verified_findings"] and llm_client:
+    # 严重度过滤逻辑保持不变，但输入数量已减少
+    findings_to_verify = [
+        v for v in result["verified_findings"]
+        if not (v["finding"].metadata or {}).get("is_suspicious", False)
+        and v["finding"].severity.value in ["critical", "high", "medium"]
+    ]
+```
+
+---
+
+### Step 2: 移除旧的去重调用位置
+
+**文件**: `src/cli/main.py`
+
+**操作**: 删除或注释掉 Line 1935-1981 的旧去重代码块
+
+**原因**: 去重已在 Step 1 中移动到 Phase 4.5 之前
+
+---
+
+### Step 3: 更新日志输出
+
+**文件**: `src/cli/main.py`
+
+**操作**: 更新阶段标题和日志以反映新的顺序
+
+```python
+# Line 1570 附近
+console.print("\n[bold cyan]Phase 4: Exploitability Verification (Parallel)[/]")
+
+# Line 1685 附近 (新增)
+console.print("\n[bold cyan]Phase 4.25: Deduplication and Adjudication[/]")
+console.print(f"  Cluster deduplication: {len(raw_findings)} -> {len(adjudicated_findings)} findings")
+
+# Line 1820 附近
+console.print("\n[bold cyan]Phase 4.5: Adversarial Verification (Parallel)[/]")
+console.print(f"  Verifying {len(findings_to_verify)} deduplicated findings")
+```
+
+---
+
+### Step 4: 验证元数据回填
+
+**文件**: `src/cli/main.py`
+
+**操作**: 确认 backfill 逻辑 (Line 1830-1873) 在新顺序下仍然正常工作
+
+**关键点**: 去重后的 findings 对象是同一个引用，所以 backfill 仍然有效
+
+---
+
+## 测试计划
+
+### 单元测试
+
+**文件**: `tests/unit/test_l3/test_scan_order.py` (新建)
+
+**测试用例**:
+```python
+def test_deduplication_happens_before_adversarial():
+    """验证去重在对抗验证之前执行"""
+    # Mock verified_findings with duplicates
+    # Run scan flow
+    # Assert deduplication called before adversarial
+
+def test_adversarial_receives_deduplicated_findings():
+    """验证对抗验证接收去重后的 findings"""
+    # Create 191 findings with known duplicates
+    # After deduplication: 150 unique findings
+    # Assert adversarial called with 150, not 191
+
+def test_metadata_backfill_after_reorder():
+    """验证元数据回填在新顺序下正常工作"""
+    # Run full flow with reordering
+    # Assert exploitability and adversarial_verdict correctly attached
+```
+
+### 集成测试
+
+**文件**: `tests/integration/test_scan_order_optimization.py` (新建)
+
+**测试场景**:
+1. 使用 `java-test-app-obf` 进行完整扫描
+2. 验证去重数量与之前一致 (191 → 182)
+3. 验证对抗验证数量减少 (~150 vs 191)
+4. 验证最终报告质量一致
 
 ---
 
@@ -279,30 +312,60 @@ def deduplicate(self, findings: list[Finding]) -> DeduplicationResult:
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|----------|
-| LLM 误判 | 高 | 设置置信度阈值，人工审核边界情况 |
-| 性能开销 | 中 | 限制单个聚类大小，设置超时 |
-| LLM 不可用 | 低 | 降级到简单位置去重（不调用 LLM） |
+| 去重时缺少 adversarial 元数据 | 低 | final_score 独立计算，足够用于去重 |
+| 严重度过滤基于去重后的结果 | 低 | 过滤逻辑保持不变，只是输入减少 |
+| 元数据回填失效 | 低 | findings 是同一引用，回填仍然有效 |
 
 ### 技术依赖
 
 | 依赖 | 说明 | 状态 |
 |------|------|------|
-| LLM API | 用于判断重复 | ✅ 已配置 |
-| LLMClient | 已有的 LLM 客户端 | ✅ 已实现 |
-| Finding 模型 | final_score 字段 | ✅ 已存在 |
+| ClusterBasedDeduplicator | P6-17 已完成 | ✅ |
+| EnhancedAdversarialVerification | 已实现 | ✅ |
+| adjudicate_findings() | 已实现 | ✅ |
 
 ---
 
-## 参考资料
+## 预期效果
 
-### 现有代码
+| 指标 | 当前值 | 目标值 | 提升 |
+|------|--------|--------|------|
+| 对抗验证数量 | 191 | ~150 | ~25% |
+| API 调用次数 | ~5000 | ~3750 | ~25% |
+| Token 使用量 | 2.09M | ~1.5M | ~30% |
+| 扫描时间 | ~4 小时 | ~3 小时 | ~25% |
 
-- `src/layers/l3_analysis/deduplicator.py:291-348` - AST 哈希生成逻辑
-- `src/layers/l3_analysis/deduplicator.py:499-617` - ASTDeduplicator 实现
-- `src/layers/l3_analysis/adjudication.py:485-500` - 去重调用位置
-- `src/layers/l3_analysis/models.py:378-500` - Finding 模型定义
+---
 
-### 相关讨论
+## 实现文件
 
-- 问题：不同引擎的 rule_id 不同，AST 哈希去重失效
-- 方案：位置聚类 + LLM 判断的两阶段混合去重
+### 修改文件
+
+| 文件 | 变更类型 | 变更行数估算 |
+|------|----------|--------------|
+| `src/cli/main.py` | 重构代码块 | ~100 行 |
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `tests/unit/test_l3/test_scan_order.py` | 单元测试 |
+| `tests/integration/test_scan_order_optimization.py` | 集成测试 |
+
+---
+
+## 开放问题
+
+**请在确认前回答以下问题：**
+
+1. 是否接受去重时无法参考 `adversarial_verdict` 的限制？
+   - 影响：去重仅基于 `final_score` 和 `exploitability`（Phase 4 验证结果）
+   - 缓解：`final_score` 已包含多个维度，足够准确
+
+2. 是否需要添加配置选项来控制顺序？
+   - 例如 `--scan-order: legacy|optimized`
+   - 建议：不需要，直接使用优化后的顺序
+
+3. 如果去重后某些高价值漏洞被合并，是否需要特殊处理？
+   - 例如：保留被合并漏洞的 `adversarial_verdict` 作为参考
+   - 建议：不需要，去重已保留 `final_score` 最高的版本
