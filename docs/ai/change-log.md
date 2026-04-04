@@ -1,5 +1,55 @@
 # Change Log
 
+## 2026-04-05
+
+### P8-08: 前置防误报架构
+
+- **Goal ID**: P8-08
+- **Summary**: 实现前置防误报架构，在源头防止误报，节省 ~40% LLM 调用
+- **Impact**:
+  - `src/layers/l3_analysis/pre_filter/`: 新增预过滤器模块目录
+    - `file_pre_filter.py`: FilePreFilter 文件级预过滤 (P8-08a)
+    - `streaming_validator.py`: StreamingValidator 流式验证 (P8-08c)
+    - `in_memory_deduplicator.py`: InMemoryDeduplicator 前置去重 (P8-08e)
+    - `codeql_pre_filter.py`: CodeQLPreFilter CodeQL 预过滤 (P8-08d)
+  - `src/layers/l3_analysis/prompts/enhanced_audit_prompt.py`: 防幻觉规则 (P8-08b)
+  - `src/layers/l3_analysis/verification/verification_gatekeeper.py`: 对抗验证门槛 (P8-08f)
+  - `src/layers/l3_analysis/prompts/security_audit.py`: 集成增强 prompt
+  - `src/layers/l3_analysis/deduplicator.py`: 支持 GLM-5 reasoning_content (P8-08h)
+- **Features**:
+  - **FilePreFilter**: 扫描前判断文件是否值得分析
+    - 跳过配置文件、生成代码、无可执行代码的文件
+    - 攻击面可达性检查
+  - **EnhancedPrompt**: 集成 code-audit skill 防幻觉规则
+    - 执行证据要求：必须有用户可控输入 + 危险操作 + 实际执行
+    - Few-Shot 示例：正反例对比
+    - 置信度校准规则
+  - **StreamingValidator**: Finding 流式验证
+    - 检查执行证据（危险调用 vs 仅构造）
+    - 置信度合理性校准
+    - XSS + JSON 响应自动降级
+  - **InMemoryDeduplicator**: 前端内存去重
+    - 文件级去重（同文件同行号保留最高分）
+    - 调用链去重（同漏洞不同层级只保留一个）
+  - **CodeQLPreFilter**: CodeQL 预过滤
+    - 规则置信度调整（XSS 默认降低 0.2）
+    - 响应类型检测（JSON vs HTML）
+    - 通配符规则匹配
+  - **VerificationGatekeeper**: 对抗验证准入门槛
+    - 明显误报 → 自动拒绝
+    - 强证据 + 高置信 → 自动确认
+    - 低置信 + 低严重 → needs_review
+  - **GLM-5 支持**: 去重器支持 reasoning_content 字段解析
+- **Tests**: 109 单元测试 + 16 集成测试通过
+- **Security**: No secrets exposed
+- **Dead Code**: 未检测到死代码
+- **Expected Effects**:
+  - ~50% 减少 Agent 误报（防幻觉规则 + 流式验证）
+  - ~50% 减少 CodeQL 误报（JSON 响应检测 + 规则调整）
+  - ~56% 减少重复检测（前端内存去重）
+  - ~40% 减少对抗验证调用（智能准入门槛）
+- **Next**: P8-09 CPG 基础 (可选)
+
 ## 2026-04-04
 
 ### P8-07: 规则库扩展

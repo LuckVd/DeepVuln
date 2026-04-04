@@ -1177,6 +1177,8 @@ print(result)
             LLMClusterResult with keep/remove lists.
         """
         from src.core.utils.json_parser import robust_json_loads, JSONParseError
+        import json
+        import re
 
         try:
             # Log raw response for debugging
@@ -1189,14 +1191,53 @@ print(result)
             elif "```" in response:
                 response = response.split("```")[1].split("```")[0].strip()
 
-            # Try to parse JSON with fault tolerance
-            try:
-                data = robust_json_loads(response)
-            except JSONParseError as e:
-                # Log the failed JSON for debugging
-                self.logger.error(f"Failed to parse LLM response: {e}")
-                self.logger.error(f"Response content: {response[:1000]}")
-                raise
+            # P8-08h: Handle GLM-5 reasoning_content format
+            # GLM-5 may return: {"reasoning_content": "...", "content": "{...}"}
+            if "reasoning_content" in response and "content" in response:
+                try:
+                    # First parse the outer JSON
+                    outer_data = json.loads(response)
+                    if isinstance(outer_data, dict):
+                        # Extract content field
+                        if "content" in outer_data and isinstance(outer_data["content"], str):
+                            content_str = outer_data["content"]
+                            # Try to parse the inner JSON
+                            try:
+                                data = json.loads(content_str)
+                            except json.JSONDecodeError:
+                                # Content might be a JSON string with extra formatting
+                                # Try to extract JSON from it
+                                data = robust_json_loads(content_str)
+                        else:
+                            data = outer_data
+                    else:
+                        data = outer_data
+                except json.JSONDecodeError:
+                    # If outer parse fails, fall through to robust parsing
+                    data = robust_json_loads(response)
+            else:
+                # Try to parse JSON with fault tolerance
+                try:
+                    data = robust_json_loads(response)
+                except JSONParseError as e:
+                    # P8-08h: Enhanced error handling for GLM-5
+                    # Try one more extraction method for GLM-5 specific formats
+                    # Sometimes GLM-5 adds reasoning before the JSON
+                    if "groups" in response or "findings" in response:
+                        # Extract the JSON object using regex
+                        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
+                        if json_match:
+                            try:
+                                data = json.loads(json_match.group(0))
+                            except json.JSONDecodeError:
+                                data = robust_json_loads(json_match.group(0))
+                        else:
+                            raise
+                    else:
+                        # Log the failed JSON for debugging
+                        self.logger.error(f"Failed to parse LLM response: {e}")
+                        self.logger.error(f"Response content: {response[:1000]}")
+                        raise
 
             groups = data.get("groups", [])
 

@@ -598,6 +598,7 @@ def build_audit_prompt(
     vulnerability_focus: list[str] | None = None,
     context: dict[str, Any] | None = None,
     ast_context: str | None = None,
+    use_enhanced_prompt: bool = True,
 ) -> tuple[str, str]:
     """
     Build system and user prompts for security audit.
@@ -610,6 +611,7 @@ def build_audit_prompt(
         vulnerability_focus: List of vulnerability types to focus on.
         context: Additional context (findings, attack surface, etc.).
         ast_context: Optional AST structure context from ASTContextExtractor.
+        use_enhanced_prompt: Whether to use enhanced anti-hallucination prompts (P8-08b).
 
     Returns:
         Tuple of (system_prompt, user_prompt).
@@ -628,7 +630,23 @@ def build_audit_prompt(
     if ast_context:
         user_prompt = user_prompt + "\n\n" + ast_context
 
-    return config.get_system_prompt(), user_prompt
+    system_prompt = config.get_system_prompt()
+
+    # P8-08b: Apply enhanced anti-hallucination prompts
+    if use_enhanced_prompt:
+        try:
+            from src.layers.l3_analysis.prompts.enhanced_audit_prompt import (
+                build_enhanced_system_prompt,
+            )
+            system_prompt = build_enhanced_system_prompt(
+                base_prompt=system_prompt,
+                language=language,
+            )
+        except ImportError:
+            # Enhanced prompt module not available, use base prompt
+            pass
+
+    return system_prompt, user_prompt
 
 
 def build_file_analysis_prompt(

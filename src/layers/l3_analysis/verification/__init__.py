@@ -12,6 +12,9 @@ Enhanced with multi-round evolution:
 - Learning from failures and successes
 - Convergence detection
 - Rule extraction for future use
+
+Pre-filter components (P8-08):
+- VerificationGatekeeper: Smart gating for adversarial verification
 """
 
 from .adversarial import AdversarialVerifier, AdversarialVerifierConfig
@@ -40,6 +43,12 @@ from .models import (
     VerificationArgument,
     VerificationResult,
     VerificationSession,
+)
+from .verification_gatekeeper import (
+    VerificationGatekeeper,
+    BatchGatekeeper,
+    AutoDecision,
+    should_verify_finding,
 )
 
 # Enhanced verification components
@@ -100,4 +109,9 @@ __all__ = [
     "EnhancedAdversarialVerification",
     "EnhancedVerificationConfig",
     "create_enhanced_verifier",
+    # Pre-filter (P8-08)
+    "VerificationGatekeeper",
+    "BatchGatekeeper",
+    "AutoDecision",
+    "should_verify_finding",
 ]
