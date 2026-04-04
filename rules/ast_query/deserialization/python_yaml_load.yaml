@@ -1,0 +1,16 @@
+id: unsafe_yaml_load
+severity: high
+title: Unsafe yaml.load()
+description: yaml.load() without Loader parameter is unsafe and can execute arbitrary code. Use yaml.safe_load() instead.
+cwe: CWE-502
+category: deserialization
+languages:
+  - python
+queries:
+  python: |
+    ((call
+      (attribute
+        object: (identifier) @obj
+        attribute: (identifier) @attr))
+     (#eq? @obj "yaml")
+     (#eq? @attr "load"))

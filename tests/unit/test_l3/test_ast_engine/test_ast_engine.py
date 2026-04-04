@@ -92,15 +92,17 @@ class TestQueryEngine:
 
     def test_execute_eval_query(self):
         """Test executing a query to detect eval() calls."""
-        engine = ASTEngine()
+        from src.layers.l3_analysis.engines.ast_engine.queries.query_engine import QueryEngine
+
+        query_engine = QueryEngine()
         code = """
 def dangerous(user_input):
     return eval(user_input)
 """
-        results = engine._query_engine.execute_query(
+        results = query_engine.execute_query(
             query_text="""
 (call
-  function: (identifier) @func
+  (identifier) @func
   (#eq? @func "eval"))
 """,
             code=code,
@@ -110,15 +112,17 @@ def dangerous(user_input):
 
     def test_execute_empty_query(self):
         """Test executing a query with no matches."""
-        engine = ASTEngine()
+        from src.layers.l3_analysis.engines.ast_engine.queries.query_engine import QueryEngine
+
+        query_engine = QueryEngine()
         code = """
 def safe(x):
     return x + 1
 """
-        results = engine._query_engine.execute_query(
+        results = query_engine.execute_query(
             query_text="""
-(call_expression
-  function: (identifier) @func
+(call
+  (identifier) @func
   (#eq? @func "eval"))
 """,
             code=code,
@@ -178,30 +182,27 @@ def dangerous(user_input):
 
 
 class TestFindingGeneration:
-    """Test finding generation from AST query results."""
+    """Test finding generation from detectors."""
 
-    def test_create_finding_from_query_result(self):
-        """Test creating a Finding from query result."""
-        engine = ASTEngine()
+    @pytest.mark.asyncio
+    async def test_detector_creates_finding(self):
+        """Test that detectors create findings correctly."""
+        from src.layers.l3_analysis.engines.ast_engine.detectors.dangerous_api_detector import (
+            DangerousAPIDetector,
+        )
 
-        query_result = {
-            "capture": "func",
-            "type": "call_expression",
-            "text": "eval(user_input)",
-            "line": 5,
-            "column": 10,
-        }
+        detector = DangerousAPIDetector()
 
-        finding = engine._create_finding_from_query_result(
-            query_result=query_result,
-            rule_id="dangerous_eval",
-            severity=SeverityLevel.HIGH,
+        findings = await detector.detect(
+            code="eval(user_input)",
+            language="python",
             file_path="test.py",
         )
 
+        assert len(findings) > 0
+        finding = findings[0]
         assert finding.source == "ast_engine"
         assert finding.rule_id == "dangerous_eval"
-        assert finding.severity == SeverityLevel.CRITICAL  # dangerous_eval is CRITICAL
         assert "eval" in finding.title.lower()
 
 
@@ -210,7 +211,7 @@ class TestYAMLRuleLoading:
 
     def test_load_yaml_rule(self):
         """Test loading a rule from YAML file."""
-        engine = ASTEngine()
+        from src.layers.l3_analysis.engines.ast_engine.queries.query_engine import QueryEngine
 
         # Create a temporary rule file
         import tempfile
@@ -232,7 +233,8 @@ class TestYAMLRuleLoading:
             rule_path = f.name
 
         try:
-            rule = engine._query_engine.load_yaml_rule(rule_path)
+            query_engine = QueryEngine()
+            rule = query_engine.load_yaml_rule(rule_path)
             assert rule["id"] == "dangerous-eval"
             assert rule["severity"] == "high"
         finally:

@@ -1,0 +1,21 @@
+id: dangerous_subprocess_shell
+severity: high
+title: subprocess with shell=True
+description: subprocess.call/shell=True executes commands through the shell. If the command contains user input, this may lead to Command Injection.
+cwe: CWE-78
+category: command_injection
+languages:
+  - python
+queries:
+  python: |
+    ((call
+      (attribute
+        object: (identifier) @obj
+        attribute: (identifier) @attr))
+      (argument_list
+        (keyword_argument
+          name: (identifier) @kw
+          value: (true) @val)))
+     (#match? @obj "subprocess")
+     (#match? @attr "^(call|run|Popen)$")
+     (#eq? @kw "shell"))

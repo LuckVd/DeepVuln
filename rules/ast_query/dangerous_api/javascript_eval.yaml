@@ -1,0 +1,18 @@
+id: dangerous_eval
+severity: critical
+title: Dangerous eval() Usage
+description: eval() executes arbitrary code from a string. If the input contains malicious code, this leads to Remote Code Execution.
+cwe: CWE-94
+category: code_injection
+languages:
+  - javascript
+  - typescript
+queries:
+  javascript: |
+    (call_expression
+      function: (identifier) @func
+      (#eq? @func "eval"))
+  typescript: |
+    (call_expression
+      function: (identifier) @func
+      (#eq? @func "eval"))

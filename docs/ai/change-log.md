@@ -2,6 +2,28 @@
 
 ## 2026-04-04
 
+### P8-03: 结构型漏洞检测器实现
+
+- **Goal ID**: P8-03
+- **Summary**: 实现检测器框架和 YAML 规则系统，支持可扩展的结构化漏洞检测
+- **Impact**:
+  - `src/layers/l3_analysis/engines/ast_engine/detectors/`: 新增检测器框架目录
+  - `src/layers/l3_analysis/engines/ast_engine/ast_engine.py`: 重构为检测器架构，移除硬编码规则
+  - `rules/ast_query/`: 新增 YAML 规则目录，10 条规则文件
+  - `tests/unit/test_l3/test_detectors/`: 新增 16 个检测器单元测试
+- **Features**:
+  - **BaseDetector**: 抽象基类，提供 YAML 规则加载和 `_post_validate` hook
+  - **DangerousAPIDetector**: 检测 eval/exec/os.system/subprocess，支持常量字面量过滤
+  - **CryptoMisuseDetector**: 检测 md5/sha1，支持测试代码过滤
+  - **DeserializationDetector**: 检测 pickle/yaml unsafe load
+  - **YAML 规则系统**: 规则外部化，支持多语言，易于扩展
+- **Rules Added**:
+  - Python: eval, exec, os.system, subprocess shell=True, md5, sha1, pickle.load, yaml.load
+  - JavaScript: eval, md5
+- **Tests**: 16/16 单元测试通过 + 14/14 AST Engine 测试通过
+- **Security**: No secrets exposed
+- **Next**: P8-04 AST Graph Builder
+
 ### P8-02a: AST Engine 基础设施
 
 - **Goal ID**: P8-02a

@@ -1,0 +1,24 @@
+id: weak_crypto_md5
+severity: medium
+title: Weak Cryptography (MD5)
+description: MD5 is a weak hash function vulnerable to collision attacks. Use SHA-256 or stronger instead.
+cwe: CWE-327
+category: weak_crypto
+languages:
+  - javascript
+  - typescript
+queries:
+  javascript: |
+    (call_expression
+      function: (member_expression
+        object: (identifier) @obj
+        property: (property_identifier) @prop)
+      (#eq? @obj "crypto")
+      (#match? @prop "md5"))
+  typescript: |
+    (call_expression
+      function: (member_expression
+        object: (identifier) @obj
+        property: (property_identifier) @prop)
+      (#eq? @obj "crypto")
+      (#match? @prop "md5"))

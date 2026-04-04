@@ -1,57 +1,24 @@
-goal_id: "P8-02-ast-engine-infrastructure"
-title: "AST Engine 核心架构与基础设施"
-stage: "complete"
-status: "completed"
-selected_option: "A"
-design_confirmed: true
+goal_id: null
+title: null
+stage: "idle"
+status: "idle"
+selected_option: null
+design_confirmed: false
 blocked_by: []
 open_questions: []
-resolved_questions:
-  - question: "AST Engine 与现有引擎的关系？"
-    answer: "不替代 Semgrep/CodeQL，提供语句级代码理解，构建 Code Graph"
-  - question: "是否需要新的数据结构？"
-    answer: "复用 CallGraph 的 CallNode/CallEdge 模式，新增 ASTNode/ASTEdge"
-implementation_steps:
-  - step: "P8-02a: 创建引擎目录结构与 ast_engine.py 基类"
-    file: "src/layers/l3_analysis/engines/ast_engine/"
-    status: "completed"
-  - step: "P8-02b: 实现 TreeSitterManager（复用 L1 language_loader）"
-    file: "src/layers/l3_analysis/engines/ast_engine/parser/"
-    status: "completed"
-  - step: "P8-02c: 实现 QueryEngine（封装 tree-sitter query）"
-    file: "src/layers/l3_analysis/engines/ast_engine/queries/"
-    status: "completed"
-  - step: "P8-02d: 集成到 engine_registry，实现 scan() 接口"
-    file: "src/layers/l3_analysis/engines/ast_engine/ast_engine.py"
-    status: "completed"
-  - step: "P8-02e: 单元测试：parser + query engine"
-    file: "tests/unit/test_l3/test_ast_engine/"
-    status: "completed"
-test_scope:
-  - test: "单元测试：parser 初始化"
-    file: "tests/unit/test_l3/test_ast_engine/test_ast_engine.py"
-    type: "unit"
-    status: "completed"
-  - test: "单元测试：query 执行"
-    file: "tests/unit/test_l3/test_ast_engine/test_ast_engine.py"
-    type: "unit"
-    status: "completed"
-  - test: "单元测试：finding 生成"
-    file: "tests/unit/test_l3/test_ast_engine/test_ast_engine.py"
-    type: "unit"
-    status: "completed"
-test_result: "14/14 tests passed"
-new_files:
-  - "src/layers/l3_analysis/engines/ast_engine/"
-  - "tests/unit/test_l3/test_ast_engine/"
+resolved_questions: []
+implementation_steps: []
+test_scope: []
+test_result: null
+new_files: []
 security_blockers: []
 dead_code_actions: []
 sync_status: "completed"
 last_check_at: "2026-04-04"
 last_synced_at: "2026-04-04"
-commit_id: "pending"
+commit_id: null
 previous_goal:
-  goal_id: "P7-01-llm-details-export"
-  title: "报告导出增强 - LLM 分析详情选项"
+  goal_id: "P8-03-structural-vulnerability-detectors"
+  title: "P8-03: 结构型漏洞检测器实现"
   status: "completed"
-  commit_id: "323ba95"
+  commit_id: null

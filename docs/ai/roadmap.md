@@ -402,7 +402,7 @@ Multi Engine Scan
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P8-02|AST Engine 核心架构与基础设施|-|in_progress|
+|P8-02|AST Engine 核心架构与基础设施|-|done|
 |P8-02a|创建引擎目录结构与 ast_engine.py 基类（继承 BaseEngine）|P8-02|done|
 |P8-02b|实现 TreeSitterManager（复用 L1 language_loader）|P8-02a|done|
 |P8-02c|实现 QueryEngine（封装 tree-sitter query）|P8-02b|done|
@@ -436,12 +436,23 @@ class ASTEngine(BaseEngine):
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P8-03|结构型漏洞检测器实现|P8-02|todo|
-|P8-03a|BaseDetector 抽象类与检测框架|P8-03|todo|
-|P8-03b|DangerousAPIDetector（eval/exec/system/os.system）|P8-03a|todo|
-|P8-03c|CryptoMisuseDetector（md5/sha1/DES/ECB）|P8-03a|todo|
-|P8-03d|DeserializationDetector（pickle/yaml/marshal）|P8-03a|todo|
-|P8-03e|单元测试：各检测器覆盖核心场景|P8-03d|todo|
+|P8-03|结构型漏洞检测器实现|P8-02|done|
+|P8-03a|BaseDetector 抽象类与检测框架|P8-03|done|
+|P8-03b|DangerousAPIDetector（eval/exec/system/os.system）|P8-03a|done|
+|P8-03c|CryptoMisuseDetector（md5/sha1/DES/ECB）|P8-03a|done|
+|P8-03d|DeserializationDetector（pickle/yaml/marshal）|P8-03a|done|
+|P8-03e|单元测试：各检测器覆盖核心场景|P8-03d|done|
+
+**实现文件**:
+- `src/layers/l3_analysis/engines/ast_engine/detectors/base_detector.py`
+- `src/layers/l3_analysis/engines/ast_engine/detectors/dangerous_api_detector.py`
+- `src/layers/l3_analysis/engines/ast_engine/detectors/crypto_detector.py`
+- `src/layers/l3_analysis/engines/ast_engine/detectors/deserialization_detector.py`
+- `rules/ast_query/` (10 YAML 规则文件)
+- `tests/unit/test_l3/test_detectors/`
+
+**测试结果**: 16/16 通过
+**完成日期**: 2026-04-04
 
 **规则目录**:
 ```
@@ -604,11 +615,11 @@ HTTP Endpoint (Call Graph)
 |字段|值|
 |---|---|
 |**阶段**|Phase 8 - AST Engine 与代码图构建|
-|**当前进度**|P8-02 进行中|
-|**当前目标**|P8-02: AST Engine 核心架构与基础设施|
-|**下一步**|P8-02a: 创建引擎目录结构与基类|
-|**最近完成**|P7-01 (LLM 详情导出), P5-01e (扫描顺序优化)|
-|**重点模块**|src/layers/l3_analysis/engines/ast_engine/|
+|**当前进度**|P8-03 已完成，P8-04 待开始|
+|**当前目标**|无 (等待选择下一个目标)|
+|**下一步**|P8-04: AST Graph Builder 或其他|
+|**最近完成**|P8-03 (结构型漏洞检测器), P8-02 (AST Engine 基础设施)|
+|**重点模块**|src/layers/l3_analysis/engines/ast_engine/graph/|
 
 ---
 

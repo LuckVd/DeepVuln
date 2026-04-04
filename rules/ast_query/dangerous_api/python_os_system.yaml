@@ -1,0 +1,16 @@
+id: dangerous_os_system
+severity: high
+title: Dangerous os.system() Call
+description: os.system() executes a shell command. If the command contains user input, this may lead to Command Injection.
+cwe: CWE-78
+category: command_injection
+languages:
+  - python
+queries:
+  python: |
+    ((call
+      (attribute
+        object: (identifier) @obj
+        attribute: (identifier) @attr))
+     (#eq? @obj "os")
+     (#eq? @attr "system"))

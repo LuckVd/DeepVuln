@@ -1,0 +1,16 @@
+id: unsafe_pickle_load
+severity: high
+title: Unsafe pickle deserialization
+description: pickle.load() can execute arbitrary code during deserialization. Only unpickle trusted data or use JSON instead.
+cwe: CWE-502
+category: deserialization
+languages:
+  - python
+queries:
+  python: |
+    ((call
+      (attribute
+        object: (identifier) @obj
+        attribute: (identifier) @attr))
+     (#eq? @obj "pickle")
+     (#match? @attr "^load"))
