@@ -2,6 +2,28 @@
 
 ## 2026-04-04
 
+### P8-04: AST Graph Builder (选项 A)
+
+- **Goal ID**: P8-04
+- **Summary**: 实现简单的 AST 代码图构建器，支持基础遍历和查询
+- **Impact**:
+  - `src/layers/l3_analysis/engines/ast_engine/graph/`: 新增图模块目录
+  - `src/layers/l3_analysis/engines/ast_engine/graph/models.py`: ASTNode, ASTGraph 数据结构
+  - `src/layers/l3_analysis/engines/ast_engine/graph/builder.py`: ASTGraphBuilder 实现
+  - `tests/unit/test_l3/test_ast_graph/`: 新增 23 个单元测试
+- **Features**:
+  - **ASTNode**: 节点数据结构 (id, type, name, file, line, parent_id, children)
+  - **ASTGraph**: 图容器，支持文件索引、类型索引
+  - **ASTGraphBuilder**: 遍历 tree-sitter AST，构建代码图
+  - **查询 API**: get_node, get_children, get_nodes_by_type, get_nodes_by_file, find_by_name
+  - **序列化**: to_dict() 支持导出为 JSON
+- **Design Decision**:
+  - 选项 A (简单图构建): 基础节点/边 + 父子关系
+  - P8-05 时评估是否需要升级到选项 B (完整图系统)
+- **Tests**: 23/23 单元测试通过
+- **Security**: No secrets exposed
+- **Next**: P8-05 与 Call Graph 桥接（需先评估升级需求）
+
 ### P8-03: 结构型漏洞检测器实现
 
 - **Goal ID**: P8-03

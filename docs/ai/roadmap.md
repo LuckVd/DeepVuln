@@ -484,18 +484,18 @@ rules/ast_query/
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P8-04|AST Graph 构建与图分析|P8-02|todo|
-|P8-04a|定义 ASTNode/ASTEdge 数据结构（复用 CallGraph 模式）|P8-04|todo|
-|P8-04b|实现 ASTGraphBuilder（遍历 AST 生成图）|P8-04a|todo|
-|P8-04c|实现图索引（正向/反向/文件索引）|P8-04b|todo|
-|P8-04d|图查询接口（get_nodes_by_type/get_path）|P8-04c|todo|
-|P8-04e|单元测试：图构建与查询|P8-04d|todo|
+|P8-04|AST Graph 构建与图分析 (选项A: 简单图构建)|P8-02|done|
+|P8-04a|定义 ASTNode/ASTEdge 数据结构（简化版）|P8-04|done|
+|P8-04b|实现 ASTGraphBuilder（遍历 AST 生成图）|P8-04a|done|
+|P8-04c|实现基础图索引（文件/类型）|P8-04b|done|
+|P8-04d|基础查询接口（get_node/get_children/get_nodes_by_type）|P8-04c|done|
+|P8-04e|单元测试：图构建与查询|P8-04d|done|
 
 **实现文件**:
-- `src/layers/l3_analysis/engines/ast_engine/graph/ast_graph_builder.py`
 - `src/layers/l3_analysis/engines/ast_engine/graph/models.py`
+- `src/layers/l3_analysis/engines/ast_engine/graph/builder.py`
 
-**数据结构**:
+**数据结构 (选项A - 简化版)**:
 ```python
 @dataclass
 class ASTNode:
@@ -505,13 +505,22 @@ class ASTNode:
     file: str            # 文件路径
     line: int            # 行号
     parent_id: str | None = None
+    children: list[str]  # 子节点 ID
 
 @dataclass
-class ASTEdge:
-    source: str
-    target: str
-    edge_type: str       # CALL, ARGUMENT, CHILD
+class ASTGraph:
+    nodes: dict[str, ASTNode]
+    file_index: dict[str, list[str]]  # file -> [node_ids]
+    type_index: dict[str, list[str]]  # type -> [node_ids]
 ```
+
+**技术决策**:
+- 选项 A (简单图构建): 基础节点/边 + 简单遍历
+- 实际代码量: ~360 行
+- **升级评估**: P8-05 时评估是否需要升级到选项 B (完整图系统)
+
+**测试结果**: 23/23 通过
+**完成日期**: 2026-04-04
 
 ---
 
@@ -520,9 +529,16 @@ class ASTEdge:
 |任务|描述|依赖|状态|
 |---|---|---|---|
 |P8-05|AST Graph 与 Call Graph 融合|P8-04|todo|
-|P8-05a|实现 GraphBridge（连接两种图）|P8-05|todo|
-|P8-05b|统一查询接口（跨图遍历）|P8-05a|todo|
-|P8-05c|集成测试：端到端图查询|P8-05b|todo|
+|P8-05a|评估 P8-04 升级需求（选项A→B）|P8-04|pending|
+|P8-05b|实现 GraphBridge（连接两种图）|P8-05a|todo|
+|P8-05c|统一查询接口（跨图遍历）|P8-05b|todo|
+|P8-05d|集成测试：端到端图查询|P8-05c|todo|
+
+**P8-05a 升级评估检查点**:
+- [ ] 当前 AST Graph 是否满足桥接需求？
+- [ ] 是否需要更多边类型 (CALL/ARGUMENT/REFERENCE)？
+- [ ] 是否需要路径查询和可达性分析？
+- [ ] 如果是，先升级到选项 B 再实现桥接
 
 **桥接策略**:
 ```
@@ -615,10 +631,10 @@ HTTP Endpoint (Call Graph)
 |字段|值|
 |---|---|
 |**阶段**|Phase 8 - AST Engine 与代码图构建|
-|**当前进度**|P8-03 已完成，P8-04 待开始|
+|**当前进度**|P8-04 已完成，P8-05 待开始|
 |**当前目标**|无 (等待选择下一个目标)|
-|**下一步**|P8-04: AST Graph Builder 或其他|
-|**最近完成**|P8-03 (结构型漏洞检测器), P8-02 (AST Engine 基础设施)|
+|**下一步**|P8-05: 与 Call Graph 桥接（需评估升级需求）|
+|**最近完成**|P8-04 (AST Graph Builder), P8-03 (结构型漏洞检测器)|
 |**重点模块**|src/layers/l3_analysis/engines/ast_engine/graph/|
 
 ---

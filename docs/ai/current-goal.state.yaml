@@ -18,7 +18,7 @@ last_check_at: "2026-04-04"
 last_synced_at: "2026-04-04"
 commit_id: null
 previous_goal:
-  goal_id: "P8-03-structural-vulnerability-detectors"
-  title: "P8-03: 结构型漏洞检测器实现"
+  goal_id: "P8-04-ast-graph-builder"
+  title: "P8-04: AST Graph Builder (选项 A)"
   status: "completed"
   commit_id: null
