@@ -2,6 +2,39 @@
 
 ## 2026-04-04
 
+### P8-05: 与 Call Graph 桥接
+
+- **Goal ID**: P8-05
+- **Summary**: 实现 AST Graph 与 Call Graph 的桥接，提供统一查询接口
+- **Impact**:
+  - `src/layers/l3_analysis/engines/ast_engine/graph/bridge.py`: GraphBridge 实现 (~370 行)
+  - `src/layers/l3_analysis/engines/ast_engine/graph/unified.py`: UnifiedGraphQuery 实现 (~500 行)
+  - `src/layers/l3_analysis/engines/ast_engine/graph/__init__.py`: 导出新类
+  - `tests/unit/test_l3/test_ast_graph/test_bridge.py`: 14 个单元测试
+  - `tests/unit/test_l3/test_ast_graph/test_unified.py`: 18 个单元测试
+  - `tests/integration/test_graph_bridge_e2e.py`: 3 个端到端集成测试
+- **Features**:
+  - **GraphBridge**: 跨图导航核心
+    - `find_containing_function()`: AST 节点 → 包含它的 CallNode（向上遍历 parent_id）
+    - `find_ast_nodes_in_function()`: CallNode → 函数体内的所有 ASTNode（向下遍历子树）
+    - `trace_to_sink()`: 从入口点到 sink 的完整路径追踪
+  - **UnifiedGraphQuery**: 高层统一查询接口
+    - `find_all_sinks()`: 查找所有危险 sink（eval、system、open、pickle.load 等）
+    - `find_reachable_sinks()`: 从入口点找到所有可达的危险 sink
+    - `get_function_context()`: 获取某个位置的完整上下文（函数、调用者、被调用者、sinks）
+    - `get_attack_paths()`: 获取到目标位置的完整攻击路径
+  - **TracedPath**: 完整攻击路径数据结构（entry_point → call_chain → sink）
+  - **SinkMatch**: 危险 sink 匹配结果（含 sink_type、confidence）
+  - **FunctionContext**: 函数上下文（call_node、ast_nodes、callers、callees、sinks）
+- **Design Decision**:
+  - 选项 A (保持简单): 基于坐标匹配 + 父子关系，无需修改已有代码
+  - 完全准确：利用 tree-sitter 的真实 AST 结构，向上遍历 parent_id
+  - 升级触发条件记录在 roadmap 中
+- **Tests**: 58/58 测试通过（14 bridge + 18 unified + 23 models + 3 builder）
+- **Security**: No secrets exposed
+- **Dead Code**: 未检测到死代码
+- **Next**: P8-06 AI Agent 结构化上下文（可选）
+
 ### P8-04: AST Graph Builder (选项 A)
 
 - **Goal ID**: P8-04

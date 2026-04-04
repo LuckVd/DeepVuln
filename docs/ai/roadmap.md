@@ -528,17 +528,55 @@ class ASTGraph:
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P8-05|AST Graph 与 Call Graph 融合|P8-04|todo|
-|P8-05a|评估 P8-04 升级需求（选项A→B）|P8-04|pending|
-|P8-05b|实现 GraphBridge（连接两种图）|P8-05a|todo|
-|P8-05c|统一查询接口（跨图遍历）|P8-05b|todo|
-|P8-05d|集成测试：端到端图查询|P8-05c|todo|
+|P8-05|AST Graph 与 Call Graph 融合|P8-04|done|
+|P8-05a|评估 P8-04 升级需求（选项A→B）|P8-04|done|
+|P8-05b|实现 GraphBridge（连接两种图）|P8-05a|done|
+|P8-05c|统一查询接口（跨图遍历）|P8-05b|done|
+|P8-05d|集成测试：端到端图查询|P8-05c|done|
 
-**P8-05a 升级评估检查点**:
-- [ ] 当前 AST Graph 是否满足桥接需求？
-- [ ] 是否需要更多边类型 (CALL/ARGUMENT/REFERENCE)？
-- [ ] 是否需要路径查询和可达性分析？
-- [ ] 如果是，先升级到选项 B 再实现桥接
+**P8-05 完成总结** (2026-04-04):
+- ✅ **实现文件**: `bridge.py` (~370 行), `unified.py` (~500 行)
+- ✅ **测试结果**: 58/58 测试通过（14 + 18 + 23 + 3）
+- ✅ **核心功能**:
+  - `GraphBridge`: 跨图导航（AST ↔ Call Graph）
+  - `UnifiedGraphQuery`: 统一查询接口（sink 检测、可达性、上下文）
+  - `DANGEROUS_SINKS`: 6 类漏洞模式（code_injection, command_injection, sql_injection, path_traversal, deserialization, weak_crypto）
+- ✅ **设计决策**: 保持选项 A，基于 tree-sitter 父子关系，完全准确
+
+**P8-05c 实现总结** (2026-04-04):
+- ✅ **实现文件**: `src/layers/l3_analysis/engines/ast_engine/graph/unified.py`
+- ✅ **测试结果**: 18/18 单元测试通过
+- ✅ **核心方法**:
+  - `find_all_sinks()` - 查找所有危险 sink
+  - `find_reachable_sinks()` - 从入口点到可达 sink 的路径
+  - `get_function_context()` - 获取位置的完整上下文
+  - `get_attack_paths()` - 获取完整攻击路径
+- ✅ **支持模式**: code_injection, command_injection, sql_injection, path_traversal, deserialization, weak_crypto
+
+**P8-05b 实现总结** (2026-04-04):
+- ✅ **实现文件**: `src/layers/l3_analysis/engines/ast_engine/graph/bridge.py`
+- ✅ **测试结果**: 14/14 单元测试通过
+- ✅ **核心方法**:
+  - `find_containing_function()` - AST → Call Graph（向上遍历 parent_id）
+  - `find_ast_nodes_in_function()` - Call Graph → AST（向下遍历子树）
+  - `trace_to_sink()` - 端到端路径追踪
+- ✅ **准确性**: 基于 tree-sitter 父子关系，完全准确
+
+**P8-05a 评估结果** (2026-04-04):
+- ✅ **结论**: 保持选项 A，直接实现桥接
+- ✅ **理由**: 坐标匹配 + 文件索引已满足基础桥接需求
+- ✅ **代码量**: ~360 行，测试覆盖完整（23/23 通过）
+
+**升级评估检查点**:
+- [x] 当前 AST Graph 是否满足桥接需求？→ **是**
+- [x] 是否需要更多边类型 (CALL/ARGUMENT/REFERENCE)？→ **否，基础桥接不需要**
+- [x] 是否需要路径查询和可达性分析？→ **否，Call Graph 已提供**
+
+**选项 B 升级触发条件** (满足任一即考虑升级):
+1. 需要在 AST Graph 内进行可达性分析（跨语句数据流）
+2. 需要跨函数的数据流追踪（如参数污点分析）
+3. 需要复杂的图模式查询（如"找到所有调用了 eval 的 lambda"）
+4. 发现选项 A 导致性能瓶颈或功能限制
 
 **桥接策略**:
 ```
