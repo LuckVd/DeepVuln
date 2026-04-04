@@ -34,6 +34,9 @@ from src.layers.l3_analysis.prompts.security_audit import (
     build_audit_prompt,
 )
 
+# Global LLM concurrency manager - shared across all engines
+from src.core.llm import get_global_concurrency_manager
+
 # Default models for each provider
 DEFAULT_MODELS = {
     LLMProvider.OPENAI: "gpt-4",
@@ -118,9 +121,9 @@ class OpenCodeAgent(BaseEngine):
             try:
                 from src.core.config import get_llm_config
                 llm_config = get_llm_config()
-                self.max_concurrent = llm_config.get("max_concurrent", 7)
+                self.max_concurrent = llm_config.get("max_concurrent_requests", 5)
             except Exception:
-                self.max_concurrent = 7  # Fallback default
+                self.max_concurrent = 5  # Fallback default (tested limit)
         else:
             self.max_concurrent = max_concurrent
 
@@ -131,9 +134,6 @@ class OpenCodeAgent(BaseEngine):
             self.llm = llm_client
         else:
             self.llm = self._create_llm_client(provider, model, **llm_options)
-
-        # Semaphore for concurrent request limiting
-        self._semaphore: asyncio.Semaphore | None = None
 
         # Token usage tracking
         self._total_tokens = 0
@@ -277,8 +277,8 @@ class OpenCodeAgent(BaseEngine):
                 "Please specify --language option.",
             )
 
-        # Initialize semaphore for concurrent requests
-        self._semaphore = asyncio.Semaphore(self.max_concurrent)
+        # Get global LLM concurrency manager (shared across all engines)
+        self._llm_manager = get_global_concurrency_manager()
 
         # Create scan result
         result = self.create_scan_result(
@@ -478,7 +478,8 @@ class OpenCodeAgent(BaseEngine):
         context: dict[str, Any],
     ) -> list[Finding]:
         """Analyze a single file using the LLM."""
-        async with self._semaphore:  # Limit concurrency
+        # Use global LLM concurrency manager (shared across all engines)
+        async with self._llm_manager:  # Global concurrency limit
             try:
                 self._files_processed += 1
                 # Read file content
@@ -502,6 +503,39 @@ class OpenCodeAgent(BaseEngine):
                     include_data_flow=True,
                 )
 
+                # P8-06: Extract AST context for enhanced AI understanding
+                ast_context_str = None
+                try:
+                    from src.layers.l3_analysis.engines.ast_engine.context import (
+                        ASTContextExtractor,
+                    )
+                    from src.layers.l3_analysis.engines.ast_engine.graph import (
+                        ASTGraphBuilder,
+                    )
+
+                    # Build AST graph for the file
+                    ast_builder = ASTGraphBuilder()
+                    ast_graph = ast_builder.build_from_file(file_path)
+
+                    # Extract AST context
+                    ast_extractor = ASTContextExtractor(ast_graph=ast_graph)
+
+                    # Get first few lines for context extraction
+                    lines = code.split("\n")[:10]
+                    for line_num, line in enumerate(lines, 1):
+                        if line.strip():
+                            ast_ctx = ast_extractor.extract_for_location(
+                                file_path=relative_path,
+                                line=line_num,
+                                code_snippet=line.strip()[:100],
+                            )
+                            if ast_ctx.ast_structure.get("type") != "unknown":
+                                ast_context_str = ast_ctx.to_prompt_section()
+                                break
+                except Exception as e:
+                    # AST context is optional - log and continue
+                    self.logger.debug(f"AST context extraction failed: {e}")
+
                 system_prompt, user_prompt = build_audit_prompt(
                     language=language,
                     code=enhanced_code,
@@ -509,6 +543,7 @@ class OpenCodeAgent(BaseEngine):
                     framework=context.get("framework"),
                     vulnerability_focus=vulnerability_focus,
                     context=context,
+                    ast_context=ast_context_str,  # P8-06: Add AST context
                 )
 
                 # Call LLM

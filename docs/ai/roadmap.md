@@ -595,10 +595,22 @@ HTTP Endpoint (Call Graph)
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P8-06|为 AI Agent 提供 AST 结构化上下文|P8-04|todo|
-|P8-06a|实现 ContextExtractor（提取 AST 结构）|P8-06|todo|
-|P8-06b|增强 Agent Prompt（包含结构化信息）|P8-06a|todo|
-|P8-06c|集成测试：AI 推理精度验证|P8-06b|todo|
+|P8-06|为 AI Agent 提供 AST 结构化上下文|P8-04|done|
+|P8-06a|实现 ContextExtractor（提取 AST 结构）|P8-06|done|
+|P8-06b|增强 Agent Prompt（包含结构化信息）|P8-06a|done|
+|P8-06c|集成测试：AI 推理精度验证|P8-06b|done|
+
+**P8-06 实现总结** (2026-04-04):
+- ✅ **实现文件**: `src/layers/l3_analysis/engines/ast_engine/context/extractor.py`
+- ✅ **测试结果**: 11/11 单元测试通过
+- ✅ **核心功能**:
+  - `ASTContextExtractor`: 提取 AST 结构化上下文
+  - `ASTContext`: 上下文数据结构（code_snippet, ast_structure, parent_context, risk_analysis）
+  - 风险分析：支持 6 类危险函数检测（code_injection, command_injection, sql_injection, path_traversal, deserialization, weak_crypto）
+- ✅ **集成点**:
+  - `build_audit_prompt()` 添加 `ast_context` 参数
+  - `OpenCodeAgent._analyze_single_file()` 集成 AST 提取
+- ✅ **Prompt 增强**: AST Structure Analysis 部分自动添加到 AI prompt
 
 **上下文格式**:
 ```json

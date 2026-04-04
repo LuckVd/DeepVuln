@@ -6,13 +6,10 @@ selected_option: null
 design_confirmed: false
 blocked_by: []
 open_questions: []
-resolved_questions:
-  - "是否需要升级到选项 B？-> 否，选项 A 已满足桥接需求"
-  - "如何实现完全准确的桥接？-> 利用 tree-sitter 的父子关系向上遍历"
+resolved_questions: []
 implementation_steps: []
 test_scope: []
-test_result:
-  - "P8-05: 58/58 tests passed (14 bridge + 18 unified + 23 models + 3 e2e)"
+test_result: null
 new_files: []
 security_blockers: []
 dead_code_actions: []
@@ -21,7 +18,7 @@ last_check_at: "2026-04-04"
 last_synced_at: "2026-04-04"
 commit_id: null
 previous_goal:
-  goal_id: "P8-05-call-graph-bridge"
-  title: "P8-05: 与 Call Graph 桥接"
+  goal_id: "P8-06-ast-context-for-agent"
+  title: "P8-06: AI Agent 结构化上下文"
   status: "completed"
   commit_id: null

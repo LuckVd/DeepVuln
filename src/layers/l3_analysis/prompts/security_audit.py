@@ -597,6 +597,7 @@ def build_audit_prompt(
     framework: str | None = None,
     vulnerability_focus: list[str] | None = None,
     context: dict[str, Any] | None = None,
+    ast_context: str | None = None,
 ) -> tuple[str, str]:
     """
     Build system and user prompts for security audit.
@@ -608,6 +609,7 @@ def build_audit_prompt(
         framework: Optional framework name.
         vulnerability_focus: List of vulnerability types to focus on.
         context: Additional context (findings, attack surface, etc.).
+        ast_context: Optional AST structure context from ASTContextExtractor.
 
     Returns:
         Tuple of (system_prompt, user_prompt).
@@ -620,7 +622,13 @@ def build_audit_prompt(
         attack_surface=context.get("attack_surface") if context else None,
     )
 
-    return config.get_system_prompt(), config.get_user_prompt_for_file(file_path, code)
+    user_prompt = config.get_user_prompt_for_file(file_path, code)
+
+    # Append AST context if provided
+    if ast_context:
+        user_prompt = user_prompt + "\n\n" + ast_context
+
+    return config.get_system_prompt(), user_prompt
 
 
 def build_file_analysis_prompt(

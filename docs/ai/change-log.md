@@ -2,6 +2,31 @@
 
 ## 2026-04-04
 
+### P8-06: AI Agent 结构化上下文
+
+- **Goal ID**: P8-06
+- **Summary**: 为 AI Agent 提供 AST 结构化上下文，提升推理精度
+- **Impact**:
+  - `src/layers/l3_analysis/engines/ast_engine/context/extractor.py`: ASTContextExtractor 实现 (~260 行)
+  - `src/layers/l3_analysis/prompts/security_audit.py`: 添加 `ast_context` 参数
+  - `src/layers/l3_analysis/engines/opencode_agent.py`: 集成 ASTContextExtractor
+  - `tests/unit/test_l3/test_ast_context/test_extractor.py`: 11 个单元测试
+- **Features**:
+  - **ASTContextExtractor**: 提取 AST 结构化上下文
+    - `extract_for_location()`: 提取特定位置的 AST 上下文
+    - `extract_for_sinks()`: 批量提取 sink 上下文
+    - `extract_for_code()`: 从代码直接提取 AST 上下文
+  - **ASTContext**: 上下文数据结构（code_snippet, ast_structure, parent_context, risk_analysis）
+  - **风险分析**: 支持 6 类危险函数检测（code_injection, command_injection, sql_injection, path_traversal, deserialization, weak_crypto）
+  - **Prompt 增强**: AST Structure Analysis 自动添加到 AI prompt
+- **Design**:
+  - 降级策略：AST Graph 不可用时降级到不使用 AST 上下文
+  - 风险映射：危险函数 → 漏洞类型（eval → code_injection）
+- **Tests**: 11/11 单元测试通过
+- **Security**: No secrets exposed
+- **Dead Code**: 未检测到死代码
+- **Next**: P8-07 规则库扩展（可选）
+
 ### P8-05: 与 Call Graph 桥接
 
 - **Goal ID**: P8-05
