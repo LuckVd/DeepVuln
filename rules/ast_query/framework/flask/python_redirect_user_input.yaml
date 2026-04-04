@@ -1,0 +1,13 @@
+id: flask_redirect_user_input
+severity: medium
+title: Flask redirect with user input
+description: Using redirect() with user-controlled input can lead to open redirect attacks.
+cwe: CWE-601
+category: open_redirect
+languages:
+  - python
+queries:
+  python: |
+    ((call
+      (identifier) @func)
+     (#match? @func "^redirect"))

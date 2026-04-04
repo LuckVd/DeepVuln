@@ -1,0 +1,15 @@
+id: flask_render_string_template
+severity: high
+title: Flask render_template_string with user input
+description: Using render_template_string with user-controlled template string can lead to Server-Side Template Injection (SSTI).
+cwe: CWE-94
+category: ssti
+languages:
+  - python
+queries:
+  python: |
+    ((call
+      (attribute
+        (identifier) @obj)
+        (attribute) @method)
+     (#match? @method "render_template_string"))

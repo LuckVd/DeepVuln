@@ -1,0 +1,13 @@
+id: go_context_without_deadline
+severity: low
+title: Go context without deadline
+description: Long-running operation using context without timeout/deadline can hang indefinitely.
+cwe: CWE-1208
+category: dos
+languages:
+  - go
+queries:
+  go: |
+    ((call_expression
+      function: (identifier) @func)
+     (#match? @func "^Background$|^TODO$")))

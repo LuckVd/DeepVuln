@@ -637,11 +637,37 @@ HTTP Endpoint (Call Graph)
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P8-07|扩展 AST Query 规则库|P8-03|todo|
-|P8-07a|Python 规则：框架误用（Flask/Django/FastAPI）|P8-07|todo|
-|P8-07b|JavaScript 规则：原型污染/模板注入|P8-07|todo|
-|P8-07c|Java 规则：反射/JNI 误用|P8-07|todo|
-|P8-07d|Go 规则：context/defer 误用|P8-07|todo|
+|P8-07|扩展 AST Query 规则库|P8-03|done|
+|P8-07a|Python 规则：框架误用（Flask/Django/FastAPI）|P8-07|done|
+|P8-07b|JavaScript 规则：原型污染/模板注入|P8-07|done|
+|P8-07c|Java 规则：反射/JNI 误用|P8-07|done|
+|P8-07d|Go 规则：context/defer 误用|P8-07|done|
+
+**P8-07 实现总结** (2026-04-04):
+- ✅ **实现文件**:
+  - `src/layers/l3_analysis/engines/ast_engine/detectors/framework_detector.py`
+  - `rules/ast_query/framework/` (13 YAML 规则文件)
+  - `tests/unit/test_l3/test_ast_engine/test_framework_detector.py`
+- ✅ **测试结果**: 19/19 单元测试通过
+- ✅ **框架规则覆盖**:
+  - **Flask** (4): render_template_string, secret_key_hardcoded, allow_all_hosts, redirect_user_input
+  - **Django** (2): render_xss, extra_raw_sql
+  - **FastAPI** (1): corp_auto_origin (CORS)
+  - **Express** (2): prototype_pollution_merge, template_injection_ejs
+  - **Java** (2): reflection_class_forname, jni_register_natives
+  - **Go** (2): context_without_deadline, defer_close_file
+- ✅ **检测能力**:
+  - SSTI (模板注入) - Flask render_template_string, EJS
+  - 硬编码密钥 - Flask SECRET_KEY
+  - 开放重定向 - Flask redirect
+  - XSS - Django render
+  - SQL 注入 - Django extra/raw SQL
+  - CORS 配置错误 - FastAPI
+  - 原型污染 - Object.assign
+  - 反射误用 - Java Class.forName
+  - JNI 风险 - Java registerNatives
+  - 资源泄漏 - Go defer in loop
+  - DoS 风险 - Go context without deadline
 
 ---
 
@@ -681,11 +707,11 @@ HTTP Endpoint (Call Graph)
 |字段|值|
 |---|---|
 |**阶段**|Phase 8 - AST Engine 与代码图构建|
-|**当前进度**|P8-04 已完成，P8-05 待开始|
+|**当前进度**|P8-07 已完成，AST Engine 基础能力完整|
 |**当前目标**|无 (等待选择下一个目标)|
-|**下一步**|P8-05: 与 Call Graph 桥接（需评估升级需求）|
-|**最近完成**|P8-04 (AST Graph Builder), P8-03 (结构型漏洞检测器)|
-|**重点模块**|src/layers/l3_analysis/engines/ast_engine/graph/|
+|**下一步**|P8-08: CPG 基础 (Phase 2) 或其他 Phase 8 任务|
+|**最近完成**|P8-07 (规则库扩展), P8-06 (AI Agent 结构化上下文), P8-05 (Call Graph 桥接)|
+|**重点模块**|src/layers/l3_analysis/engines/ast_engine/|
 
 ---
 

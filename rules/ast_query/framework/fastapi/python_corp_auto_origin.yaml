@@ -1,0 +1,12 @@
+id: fastapi_corp_auto_origin
+severity: medium
+title: FastAPI CORS allowing all origins
+description: CORSMiddleware allow_origins='*' allows any origin, which can lead to security issues.
+cwe: CWE-942
+category: misconfiguration
+languages:
+  - python
+queries:
+  python: |
+    ((call) @call
+     (#match? @call "CORSMiddleware"))

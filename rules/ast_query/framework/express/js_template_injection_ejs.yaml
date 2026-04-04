@@ -1,0 +1,22 @@
+id: js_template_injection_ejs
+severity: high
+title: EJS template injection with user input
+description: Using res.render(user_input) or res.send(user_input) with EJS can lead to Server-Side Template Injection.
+cwe: CWE-94
+category: ssti
+languages:
+  - javascript
+  - typescript
+queries:
+  javascript: |
+    ((call_expression
+      function: (member_expression
+        object: (identifier) @obj
+        property: (property_identifier) @prop)
+      (#eq? @prop "render")))
+  typescript: |
+    ((call_expression
+      function: (member_expression
+        object: (identifier) @obj
+        property: (property_identifier) @prop)
+      (#eq? @prop "render")))

@@ -2,6 +2,36 @@
 
 ## 2026-04-04
 
+### P8-07: 规则库扩展
+
+- **Goal ID**: P8-07
+- **Summary**: 扩展 AST Query 规则库，增加框架特定漏洞检测规则
+- **Impact**:
+  - `src/layers/l3_analysis/engines/ast_engine/detectors/framework_detector.py`: FrameworkDetector 实现
+  - `rules/ast_query/framework/`: 13 个框架规则 YAML 文件
+    - `flask/`: 4 个 Flask 规则
+    - `django/`: 2 个 Django 规则
+    - `fastapi/`: 1 个 FastAPI 规则
+    - `express/`: 2 个 Express 规则
+    - `java/`: 2 个 Java 规则
+    - `go/`: 2 个 Go 规则
+  - `tests/unit/test_l3/test_ast_engine/test_framework_detector.py`: 19 个单元测试
+- **Features**:
+  - **FrameworkDetector**: 框架专用检测器
+    - 从 `rules/ast_query/framework/` 目录加载规则
+    - 支持框架特定上下文验证
+  - **框架规则覆盖**:
+    - **Flask**: render_template_string (SSTI), secret_key_hardcoded, allow_all_hosts, redirect_user_input (开放重定向)
+    - **Django**: render_xss, extra_raw_sql (SQL 注入)
+    - **FastAPI**: corp_auto_origin (CORS 配置错误)
+    - **Express**: prototype_pollution_merge, template_injection_ejs (SSTI)
+    - **Java**: reflection_class_forname (代码注入), jni_register_natives
+    - **Go**: context_without_deadline (DoS), defer_close_file (资源泄漏)
+- **Tests**: 19/19 单元测试通过，覆盖所有框架检测场景
+- **Security**: No secrets exposed
+- **Dead Code**: 未检测到死代码
+- **Next**: P8-08 CPG 基础 (Phase 2) 或其他 Phase 8 任务
+
 ### P8-06: AI Agent 结构化上下文
 
 - **Goal ID**: P8-06

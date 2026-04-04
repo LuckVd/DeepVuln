@@ -1,0 +1,13 @@
+id: java_jni_register_natives
+severity: medium
+title: Java JNI registerNatives with dynamic loading
+description: Using JNI with dynamically loaded native libraries can lead to code execution if the library path is user-controlled.
+cwe: CWE-78
+category: command_injection
+languages:
+  - java
+queries:
+  java: |
+    ((method_invocation
+      (identifier) @func)
+     (#match? @func "registerNatives")))

@@ -1,0 +1,13 @@
+id: django_render_xss
+severity: medium
+title: Django render without autoescape
+description: Using render() with autoescape=False can lead to Cross-Site Scripting when user input is reflected in templates.
+cwe: CWE-79
+category: xss
+languages:
+  - python
+queries:
+  python: |
+    ((call
+      (identifier) @func)
+     (#match? @func "^render"))

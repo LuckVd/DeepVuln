@@ -1,0 +1,22 @@
+id: js_prototype_pollution_merge
+severity: critical
+title: JavaScript prototype pollution via Object.assign
+description: Object.assign(target, user_input) allows attacker to pollute object prototype, leading to property injection and privilege escalation.
+cwe: CWE-1321
+category: prototype_pollution
+languages:
+  - javascript
+  - typescript
+queries:
+  javascript: |
+    ((call_expression
+      function: (member_expression
+        object: (identifier) @obj
+        property: (property_identifier) @prop)
+      (#eq? @prop "assign")))
+  typescript: |
+    ((call_expression
+      function: (member_expression
+        object: (identifier) @obj
+        property: (property_identifier) @prop)
+      (#eq? @prop "assign")))

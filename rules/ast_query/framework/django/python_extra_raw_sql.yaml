@@ -1,0 +1,15 @@
+id: django_extra_raw_sql
+severity: high
+title: Django extra with raw SQL
+description: Using extra(raw=...) passes user input directly to SQL queries, leading to SQL Injection risk.
+cwe: CWE-89
+category: sql_injection
+languages:
+  - python
+queries:
+  python: |
+    ((call
+      (attribute
+        (identifier) @obj)
+        (attribute) @method)
+     (#match? @method "^extra")))

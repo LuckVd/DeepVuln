@@ -1,0 +1,13 @@
+id: java_reflection_class_forname
+severity: critical
+title: Java reflection Class.forName with user input
+description: Using Class.forName(user_input) allows loading arbitrary classes, leading to code execution or deserialization attacks.
+cwe: CWE-502
+category: code_injection
+languages:
+  - java
+queries:
+  java: |
+    ((method_invocation
+      (identifier) @func)
+     (#match? @func "forName"))

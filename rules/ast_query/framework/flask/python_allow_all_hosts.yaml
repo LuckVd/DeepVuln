@@ -1,0 +1,12 @@
+id: flask_allow_all_hosts
+severity: low
+title: Flask ALLOWED_HOSTS with wildcard
+description: Using wildcard (*) in ALLOWED_HOSTS allows any host, potentially enabling host header attacks.
+cwe: CWE-938
+category: misconfiguration
+languages:
+  - python
+queries:
+  python: |
+    ((assignment) @assign
+     (#match? @assign "ALLOWED_HOSTS"))

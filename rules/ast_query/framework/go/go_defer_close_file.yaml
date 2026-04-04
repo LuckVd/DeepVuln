@@ -1,0 +1,16 @@
+id: go_defer_close_file
+severity: medium
+title: Go defer in loop closing file handle
+description: Using defer to close file handle inside a loop can exhaust file descriptors or close the wrong file.
+cwe: CWE-775
+category: resource_leak
+languages:
+  - go
+queries:
+  go: |
+    ((for_statement
+      body: (block
+        (expression_statement
+          (call_expression
+            function: (identifier) @func)
+            (#match? @func "^Close")))))
