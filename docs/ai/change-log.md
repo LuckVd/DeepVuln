@@ -1,5 +1,25 @@
 # Change Log
 
+## 2026-04-04
+
+### P8-02a: AST Engine 基础设施
+
+- **Goal ID**: P8-02a
+- **Summary**: 实现 AST Engine 核心架构，提供语句级别的代码结构分析能力
+- **Impact**:
+  - `src/layers/l3_analysis/engines/ast_engine/`: 新增 AST Engine 完整模块
+  - `src/layers/l3_analysis/models.py`: 添加 `ast_engine` 到 Finding.source 允许值
+  - `tests/unit/test_l3/test_ast_engine/`: 新增 14 个单元测试
+- **Features**:
+  - **TreeSitterManager**: 动态加载多语言 tree-sitter 解析器
+  - **QueryEngine**: 封装 tree-sitter 查询 API，支持结构化查询
+  - **ASTEngine**: 主引擎类，继承 BaseEngine，集成到引擎注册表
+  - **内置规则**: eval/exec/os.system/md5/pickle 检测
+- **Supported Languages**: Python, JavaScript, TypeScript, Java, Go, C/C++, Ruby, PHP, Rust
+- **Tests**: 14/14 单元测试通过
+- **Security**: No secrets exposed
+- **Next**: P8-03 结构型漏洞检测器扩展
+
 ## 2026-04-02
 
 ### P7-01: 报告导出增强 - LLM 分析详情选项

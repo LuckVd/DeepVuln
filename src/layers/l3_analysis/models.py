@@ -409,7 +409,7 @@ class Finding(BaseModel):
     location: CodeLocation = Field(..., description="Code location")
 
     # Source tracking
-    source: Literal["semgrep", "codeql", "agent"] = Field(
+    source: Literal["semgrep", "codeql", "agent", "ast_engine"] = Field(
         ...,
         description="Analysis engine that produced this finding",
     )

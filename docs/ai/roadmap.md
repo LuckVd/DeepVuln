@@ -361,6 +361,224 @@
 
 ---
 
+### Phase 8: AST Engine 与代码图构建
+
+> **目标**：构建语句级别的代码理解能力，与 Call Graph 形成互补，为 AI Agent 提供结构化上下文
+
+#### 核心价值
+
+| 维度 | 说明 |
+|------|------|
+| **能力补充** | AST（语句级） + Call Graph（函数级） + Dataflow（数据流级） |
+| **AI 协同** | 结构化代码上下文 → 更稳定的 AI 推理 |
+| **最终目标** | Code Property Graph (CPG) → 攻击路径自动发现 |
+
+#### 架构定位
+
+```
+Multi Engine Scan
+├─ Semgrep      → Pattern 匹配
+├─ CodeQL       → 数据流分析
+├─ AST Engine   → 结构级代码理解 ← 新增
+└─ Agent        → 业务逻辑分析
+
+                    ↓
+            Code Graph Builder
+                    ↓
+            Finding Graph + Vuln Chaining
+```
+
+#### 与现有组件的关系
+
+| 现有组件 | 位置 | 与 AST Engine 的关系 |
+|----------|------|---------------------|
+| Call Graph | `src/layers/l3_analysis/call_graph/models.py` | 复用 `CallNode`, `CallEdge`, `CallGraph` 数据结构 |
+| tree-sitter | `src/layers/l1_intelligence/attack_surface/ast/` | 复用 `ASTDetector` 基类和语言加载器 |
+| BaseEngine | `src/layers/l3_analysis/engines/base.py` | AST Engine 继承此基类 |
+
+---
+
+### P8-02: AST Engine 基础设施（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P8-02|AST Engine 核心架构与基础设施|-|in_progress|
+|P8-02a|创建引擎目录结构与 ast_engine.py 基类（继承 BaseEngine）|P8-02|done|
+|P8-02b|实现 TreeSitterManager（复用 L1 language_loader）|P8-02a|done|
+|P8-02c|实现 QueryEngine（封装 tree-sitter query）|P8-02b|done|
+|P8-02d|集成到 engine_registry，实现 scan() 接口|P8-02c|done|
+|P8-02e|单元测试：parser + query engine|P8-02d|done|
+
+**实现文件**:
+- `src/layers/l3_analysis/engines/ast_engine/__init__.py`
+- `src/layers/l3_analysis/engines/ast_engine/ast_engine.py`
+- `src/layers/l3_analysis/engines/ast_engine/parser/tree_sitter_manager.py`
+- `src/layers/l3_analysis/engines/ast_engine/queries/query_engine.py`
+- `tests/unit/test_l3/test_ast_engine/`
+
+**关键设计**:
+```python
+class ASTEngine(BaseEngine):
+    """AST-based structural vulnerability detection engine"""
+    name = "ast_engine"
+    supported_languages = ["python", "javascript", "java", "go"]
+
+    async def scan(self, source_path: Path, **options) -> ScanResult:
+        # 1. Parse source code with tree-sitter
+        # 2. Run AST queries
+        # 3. Generate findings
+        pass
+```
+
+---
+
+### P8-03: 结构型漏洞检测器（P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P8-03|结构型漏洞检测器实现|P8-02|todo|
+|P8-03a|BaseDetector 抽象类与检测框架|P8-03|todo|
+|P8-03b|DangerousAPIDetector（eval/exec/system/os.system）|P8-03a|todo|
+|P8-03c|CryptoMisuseDetector（md5/sha1/DES/ECB）|P8-03a|todo|
+|P8-03d|DeserializationDetector（pickle/yaml/marshal）|P8-03a|todo|
+|P8-03e|单元测试：各检测器覆盖核心场景|P8-03d|todo|
+
+**规则目录**:
+```
+rules/ast_query/
+├── python/
+│   ├── dangerous_eval.yaml
+│   ├── crypto_weak_hash.yaml
+│   ├── deserialization.yaml
+│   └── subprocess_shell_true.yaml
+├── javascript/
+│   ├── dangerous_eval.yaml
+│   └── crypto_weak_hash.yaml
+└── java/
+    ├── runtime_exec.yaml
+    └── deserialization.yaml
+```
+
+**检测能力**:
+| 类别 | 检测模式 | 示例 |
+|------|----------|------|
+| 危险 API | `eval($X)`, `exec($X)`, `os.system($X)` | 代码注入 |
+| 加密误用 | `hashlib.md5()`, `Crypto.Cipher.ARC4` | 弱加密 |
+| 反序列化 | `pickle.load()`, `yaml.load()` | RCE |
+| 参数检测 | `subprocess.Popen(..., shell=True)` | 命令注入 |
+
+---
+
+### P8-04: AST Graph Builder（P1）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P8-04|AST Graph 构建与图分析|P8-02|todo|
+|P8-04a|定义 ASTNode/ASTEdge 数据结构（复用 CallGraph 模式）|P8-04|todo|
+|P8-04b|实现 ASTGraphBuilder（遍历 AST 生成图）|P8-04a|todo|
+|P8-04c|实现图索引（正向/反向/文件索引）|P8-04b|todo|
+|P8-04d|图查询接口（get_nodes_by_type/get_path）|P8-04c|todo|
+|P8-04e|单元测试：图构建与查询|P8-04d|todo|
+
+**实现文件**:
+- `src/layers/l3_analysis/engines/ast_engine/graph/ast_graph_builder.py`
+- `src/layers/l3_analysis/engines/ast_engine/graph/models.py`
+
+**数据结构**:
+```python
+@dataclass
+class ASTNode:
+    id: str              # 唯一标识
+    type: str            # call_expression, identifier, etc.
+    name: str            # 节点名称
+    file: str            # 文件路径
+    line: int            # 行号
+    parent_id: str | None = None
+
+@dataclass
+class ASTEdge:
+    source: str
+    target: str
+    edge_type: str       # CALL, ARGUMENT, CHILD
+```
+
+---
+
+### P8-05: 与 Call Graph 桥接（P1）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P8-05|AST Graph 与 Call Graph 融合|P8-04|todo|
+|P8-05a|实现 GraphBridge（连接两种图）|P8-05|todo|
+|P8-05b|统一查询接口（跨图遍历）|P8-05a|todo|
+|P8-05c|集成测试：端到端图查询|P8-05b|todo|
+
+**桥接策略**:
+```
+HTTP Endpoint (Call Graph)
+    ↓
+    handler_function (Call Graph)
+    ↓
+    function_calls (Call Graph)
+    ↓
+    dangerous_api (AST Graph) ← 语句级精确匹配
+```
+
+---
+
+### P8-06: AI Agent 结构化上下文（P1）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P8-06|为 AI Agent 提供 AST 结构化上下文|P8-04|todo|
+|P8-06a|实现 ContextExtractor（提取 AST 结构）|P8-06|todo|
+|P8-06b|增强 Agent Prompt（包含结构化信息）|P8-06a|todo|
+|P8-06c|集成测试：AI 推理精度验证|P8-06b|todo|
+
+**上下文格式**:
+```json
+{
+  "code_snippet": "eval(user_input)",
+  "ast_structure": {
+    "type": "call_expression",
+    "function": "eval",
+    "arguments": [{
+      "type": "identifier",
+      "name": "user_input"
+    }]
+  },
+  "risk_analysis": {
+    "sink_type": "code_execution",
+    "confidence": 0.95
+  }
+}
+```
+
+---
+
+### P8-07: 规则库扩展（P2）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P8-07|扩展 AST Query 规则库|P8-03|todo|
+|P8-07a|Python 规则：框架误用（Flask/Django/FastAPI）|P8-07|todo|
+|P8-07b|JavaScript 规则：原型污染/模板注入|P8-07|todo|
+|P8-07c|Java 规则：反射/JNI 误用|P8-07|todo|
+|P8-07d|Go 规则：context/defer 误用|P8-07|todo|
+
+---
+
+### P8-08: CPG 基础（Phase 2，P3）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P8-08|Code Property Graph 基础实现|P8-05|todo|
+|P8-08a|融合 AST Graph + Call Graph|P8-08|todo|
+|P8-08b|添加 CFG（控制流图）支持|P8-08a|todo|
+|P8-08c|攻击路径搜索算法|P8-08b|todo|
+
+---
+
 ## 里程碑
 
 |里程碑|交付物|能力描述|状态|日期|
@@ -374,8 +592,10 @@
 |v0.5|裁决统一|Exploitability 主导裁决|done|2026-03-06|
 |v0.6|精度深化|可利用性评估增强 + 调用图分析|done|2026-03-09|
 |v0.7|报告可信度|结果边界清晰 + 噪声治理 + 覆盖率透明|in_progress|2026-03|
-|v0.75|CodeQL 智能构建|LLM 决策 + 分语言构建编排 + 构建成功率提升|todo|2026-Q2|
-|v0.8|企业稳定版|高精度、低误报、CI 可用|todo|2026-Q2|
+|v0.75|CodeQL 智能构建|LLM 决策 + 分语言构建编排 + 构建成功率提升|in_progress|2026-03|
+|v0.8|AST Engine|结构级代码理解 + Code Graph + AI 结构化上下文|in_progress|2026-04|
+|v0.9|CPG 基础|完整代码图 + 攻击路径搜索|todo|2026-Q2|
+|v1.0|企业稳定版|高精度、低误报、CI 可用|todo|2026-Q2|
 
 ---
 
@@ -383,12 +603,12 @@
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 6 - 报告可信度|
-|**当前进度**|P6-17 已完成|
-|**当前目标**|无活跃目标|
-|**下一步**|等待下一个目标|
-|**最近完成**|P5-01e (扫描顺序优化), 扫描日志问题修复|
-|**重点模块**|src/cli/main.py, src/layers/l3_analysis/verification/|
+|**阶段**|Phase 8 - AST Engine 与代码图构建|
+|**当前进度**|P8-02 进行中|
+|**当前目标**|P8-02: AST Engine 核心架构与基础设施|
+|**下一步**|P8-02a: 创建引擎目录结构与基类|
+|**最近完成**|P7-01 (LLM 详情导出), P5-01e (扫描顺序优化)|
+|**重点模块**|src/layers/l3_analysis/engines/ast_engine/|
 
 ---
 
@@ -402,6 +622,8 @@
 |依赖|Semgrep CLI|中|已安装|
 |依赖|CodeQL CLI|中|已安装|
 |依赖|Python 3.10+|高|已确认|
+|依赖|tree-sitter（已存在）|低|已集成在 L1|
+|依赖|多语言 tree-sitter 语言包|中|Phase 8: 需要维护更新|
 
 ### 技术风险
 
@@ -414,6 +636,9 @@
 |风险|C/C++ 构建复杂|高|存在|Phase 7: 仅支持标准构建系统 + 明确止损线|
 |风险|工具版本不匹配|中|存在|Phase 7: 版本检测 + 工具兼容性判定|
 |风险|LLM 决策收益不稳定|中|新增|Phase 7: deterministic baseline 对照评估|
+|风险|AST 解析性能|中|Phase 8: 并行解析 + 文件缓存|
+|风险|大仓库内存占用|中|Phase 8: 增量解析 + LRU 缓存|
+|风险|图构建复杂度|中|Phase 8: 分阶段实现，先简单后复杂|
 
 ---
 
