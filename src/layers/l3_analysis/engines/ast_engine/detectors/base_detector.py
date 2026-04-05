@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+import src.layers.l3_analysis.engines.ast_engine.detectors as detectors_module
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.ast_engine.queries.query_engine import QueryEngine
 from src.layers.l3_analysis.models import (
@@ -12,6 +13,21 @@ from src.layers.l3_analysis.models import (
     FindingType,
     SeverityLevel,
 )
+
+
+def _get_rules_base_dir() -> Path:
+    """Get the absolute path to the rules directory.
+
+    This resolves relative paths from the project root (where 'src' is located),
+    ensuring rules can be found regardless of the current working directory.
+    """
+    # Get the directory containing this module
+    detectors_dir = Path(detectors_module.__file__).parent
+    # Navigate from: .../src/layers/l3_analysis/engines/ast_engine/detectors
+    # to: .../rules/ast_query
+    # Go up: detectors -> ast_engine -> engines -> l3_analysis -> layers -> src -> project_root
+    src_dir = detectors_dir.parent.parent.parent.parent.parent.parent
+    return src_dir / "rules" / "ast_query"
 
 
 class BaseDetector(ABC):

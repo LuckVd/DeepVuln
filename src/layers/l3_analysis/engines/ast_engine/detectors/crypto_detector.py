@@ -3,7 +3,10 @@
 from pathlib import Path
 from typing import Any
 
-from src.layers.l3_analysis.engines.ast_engine.detectors.base_detector import BaseDetector
+from src.layers.l3_analysis.engines.ast_engine.detectors.base_detector import (
+    BaseDetector,
+    _get_rules_base_dir,
+)
 from src.layers.l3_analysis.models import Finding, SeverityLevel
 
 
@@ -20,7 +23,7 @@ class CryptoMisuseDetector(BaseDetector):
         return "crypto_misuse"
 
     def _get_default_rules_dir(self) -> Path:
-        return Path("rules/ast_query/crypto")
+        return _get_rules_base_dir() / "crypto"
 
     async def _post_validate(
         self,

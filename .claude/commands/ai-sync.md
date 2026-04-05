@@ -1,3 +1,7 @@
+---
+description: Synchronize workflow state after a goal has been implemented and verified.
+---
+
 Synchronize workflow state after a goal has been implemented and verified.
 
 Respond in Chinese for all user-facing natural language output. Keep commands, file paths, and code identifiers in their original form.

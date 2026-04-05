@@ -163,7 +163,7 @@ class RuntimeInstaller(ABC):
         cmd = [
             "curl",
             "-fsSL",
-            "--connect-timeout", "30",
+            "--connect-timeout", "120",
             "--max-time", str(self.timeout),
             "-o", str(output_path),
             url,

@@ -77,3 +77,15 @@ data/
 
 # AI Notes - 环境注意事项
 docs/ai-notes.md
+
+# Scan reports
+reports/
+
+# LLM stress/stability tests (temporary)
+tests/llm_stability_test.py
+tests/llm_stress_test.py
+tests/llm_test_concurrency_5.py
+tests/llm_test_concurrency_5_long.py
+
+# Claude Code plugin (local)
+.claude/.claude-plugin/

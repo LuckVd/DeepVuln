@@ -158,11 +158,11 @@ class LLMSettings(BaseSettings):
         extra="ignore",
     )
 
-    max_concurrent: int = Field(
+    max_concurrent_requests: int = Field(
         default=5,
         ge=1,
         le=50,
-        description="Maximum concurrent LLM API requests",
+        description="Maximum concurrent LLM API requests (global limit shared across all engines)",
     )
     provider: str = Field(
         default="unknown",

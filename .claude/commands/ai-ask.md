@@ -1,3 +1,7 @@
+---
+description: Answer repository or workflow questions in strict read-only mode.
+---
+
 Answer repository or workflow questions in strict read-only mode.
 
 Respond in Chinese for all user-facing natural language output. Keep commands, file paths, and code identifiers in their original form.

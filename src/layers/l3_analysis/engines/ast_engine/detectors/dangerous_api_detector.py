@@ -4,7 +4,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from src.layers.l3_analysis.engines.ast_engine.detectors.base_detector import BaseDetector
+from src.layers.l3_analysis.engines.ast_engine.detectors.base_detector import (
+    BaseDetector,
+    _get_rules_base_dir,
+)
 from src.layers.l3_analysis.models import Finding, SeverityLevel
 
 
@@ -21,7 +24,7 @@ class DangerousAPIDetector(BaseDetector):
         return "dangerous_api"
 
     def _get_default_rules_dir(self) -> Path:
-        return Path("rules/ast_query/dangerous_api")
+        return _get_rules_base_dir() / "dangerous_api"
 
     async def _post_validate(
         self,

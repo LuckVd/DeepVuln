@@ -3,7 +3,10 @@
 from pathlib import Path
 from typing import Any
 
-from src.layers.l3_analysis.engines.ast_engine.detectors.base_detector import BaseDetector
+from src.layers.l3_analysis.engines.ast_engine.detectors.base_detector import (
+    BaseDetector,
+    _get_rules_base_dir,
+)
 from src.layers.l3_analysis.models import Finding
 
 
@@ -21,7 +24,7 @@ class DeserializationDetector(BaseDetector):
         return "deserialization"
 
     def _get_default_rules_dir(self) -> Path:
-        return Path("rules/ast_query/deserialization")
+        return _get_rules_base_dir() / "deserialization"
 
     async def _post_validate(
         self,

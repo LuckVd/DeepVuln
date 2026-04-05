@@ -29,9 +29,9 @@ nvd_api_key = ""
 # 默认: 300
 timeout = 300
 
-# 最大并发扫描数
+# 最大并发扫描文件数
 # 默认: 10
-max_concurrent = 10
+max_concurrent_files = 10
 
 [database]
 # 数据库路径

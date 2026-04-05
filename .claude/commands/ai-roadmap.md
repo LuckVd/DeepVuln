@@ -1,3 +1,7 @@
+---
+description: Manage the long-term roadmap in docs/ai/roadmap.md.
+---
+
 Manage the long-term roadmap in `docs/ai/roadmap.md`.
 
 Respond in Chinese for all user-facing natural language output. Keep commands, file paths, and code identifiers in their original form.

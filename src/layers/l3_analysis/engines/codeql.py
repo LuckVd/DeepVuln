@@ -914,6 +914,18 @@ class CodeQLEngine(BaseEngine):
                             f"Build completed with issues. Build diagnostic: "
                             f"{build_diagnostic.to_dict() if build_diagnostic else 'None'}"
                         )
+                        # Smart degradation: inform user about degraded mode
+                        logger.warning("")
+                        logger.warning("⚠️  智能降级：构建失败，使用降级模式继续扫描")
+                        logger.warning("⚠️  预计准确率降低约：")
+                        logger.warning("   - Java/C#: 40-60%")
+                        logger.warning("   - Go: 30-50%")
+                        logger.warning("   - Python/JS: 5-10%")
+                        logger.warning("💡 建议：修复构建问题后重新扫描以获得完整结果")
+                        logger.warning("")
+                        # Mark degraded mode in result metadata
+                        result.metadata["degraded_mode"] = True
+                        result.metadata["accuracy_estimate"] = 0.5
                 except asyncio.TimeoutError:
                     build_duration = time.time() - scan_start_time
                     health_result = self.health_manager.create_timeout_result(

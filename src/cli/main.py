@@ -784,6 +784,7 @@ async def run_full_security_scan(
     incremental = options.get("incremental", False)
     base_ref = options.get("base_ref", "HEAD~1")
     head_ref = options.get("head_ref", "HEAD")
+    skip_build = options.get("skip_build", False)
 
     result = {
         "source_path": str(source_path),
@@ -1352,6 +1353,7 @@ async def run_full_security_scan(
                 languages=[lang.lower() for lang in supported_detected],
                 severity_filter=None,
                 readiness_result=codeql_gate,
+                skip_build=skip_build,
             )))
         else:
             # Single language or no supported languages - use regular scan
@@ -1360,6 +1362,7 @@ async def run_full_security_scan(
                 language=primary_lang.lower(),
                 severity_filter=None,
                 readiness_result=codeql_gate,
+                skip_build=skip_build,
             )))
         executed_engines.add("codeql")
     elif "codeql" in enabled_engines:
@@ -1447,6 +1450,15 @@ async def run_full_security_scan(
                 console.print(f"  [yellow]Tools missing:[/] {', '.join(missing)}")
             if incompatible_count > 0:
                 console.print(f"  [yellow]Tools incompatible:[/] {incompatible_count}")
+
+    # Show warning if user explicitly requested to skip build
+    if skip_build:
+        console.print("\n[yellow]⚠️  构建跳过模式:[/]")
+        console.print("[yellow]  检测准确率降低约：[/]")
+        console.print("[yellow]    - Java/C#: 40-60%[/]")
+        console.print("[yellow]    - Go: 30-50%[/]")
+        console.print("[yellow]    - Python/JS: 5-10%[/]")
+        console.print("[yellow]  建议：修复构建问题后使用完整扫描[/]")
 
     # Show warnings for unavailable engines
     if unavailable_engines:
@@ -2524,6 +2536,14 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
     console.rule("[bold cyan]Full Security Scan Results[/]")
     console.print()
 
+    # Check for degraded mode and display warning
+    metadata = result.get("metadata", {})
+    if metadata.get("degraded_mode"):
+        console.print("[yellow]⚠️  智能降级模式[/]")
+        console.print("[yellow]   检测准确率约 50%（由于构建失败）[/]")
+        console.print("[yellow]   建议修复构建问题后重新扫描[/]")
+        console.print("")
+
     # Summary
     console.print(f"[dim]Source:[/] {result['source_path']}")
     console.print(f"[dim]Primary Language:[/] {result.get('primary_language', 'Unknown')}")
@@ -2558,6 +2578,15 @@ def _display_full_scan_result_interactive(result: dict[str, Any], options: dict[
     console.print(f"[bold red]Exploitable:[/] {exploitable_count}")
     if review_count > 0:
         console.print(f"[bold yellow]Needs Review:[/] {review_count} [dim](requires manual verification)[/]")
+
+    # Show degraded mode reminder at statistics level
+    metadata = result.get("metadata", {})
+    if metadata.get("degraded_mode"):
+        console.print()
+        console.print("[yellow]⚠️  降级模式说明：[/]")
+        console.print("[yellow]  以上结果来自降级模式，实际漏洞数可能高出 50-100%[/]")
+        console.print("[yellow]  建议修复构建问题后重新扫描[/]")
+        console.print()
 
     # Exploitability breakdown
     if "by_exploitability" in stats:
@@ -3046,6 +3075,7 @@ def clean() -> None:
 @click.option("--base-ref", default="HEAD~1", help="Base git ref for incremental scan (default: HEAD~1)")
 @click.option("--head-ref", default="HEAD", help="Head git ref for incremental scan (default: HEAD)")
 @click.option("--force-codeql-all", is_flag=True, help="Force CodeQL to scan all detected languages, bypassing LLM decision and tool checks")
+@click.option("--skip-build", is_flag=True, help="Skip build step for CodeQL (reduces accuracy, useful when build fails)")
 def scan(
     path: str,
     include_low: bool,
@@ -3069,6 +3099,7 @@ def scan(
     base_ref: str,
     head_ref: str,
     force_codeql_all: bool,
+    skip_build: bool,
 ) -> None:
     """Run security scan on source code.
 
@@ -4133,15 +4164,15 @@ def agent_scan(
     show_banner()
     source_path = Path(path)
 
-    # P5-05: Get max_concurrent from config if not specified
+    # P5-05: Get max_concurrent_requests from config if not specified
     resolved_max_concurrent = max_concurrent
     if resolved_max_concurrent is None:
         try:
             from src.core.config import get_llm_config
             llm_config = get_llm_config()
-            resolved_max_concurrent = llm_config.get("max_concurrent", 7)
+            resolved_max_concurrent = llm_config.get("max_concurrent_requests", 5)
         except Exception:
-            resolved_max_concurrent = 7  # Fallback default
+            resolved_max_concurrent = 5  # Fallback default (tested limit)
 
     console.print(f"[cyan]Running AI security audit on {source_path}...[/]")
     console.print(f"[dim]Provider: {provider} | Model: {model or 'default'} | Max concurrent: {resolved_max_concurrent}[/]\n")

@@ -1,3 +1,7 @@
+---
+description: Explain the workflow in a concise, actionable format.
+---
+
 Explain the workflow in a concise, actionable format.
 
 Respond in Chinese for all user-facing natural language output. Keep commands, file paths, and code identifiers in their original form.

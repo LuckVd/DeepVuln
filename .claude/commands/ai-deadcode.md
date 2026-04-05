@@ -1,3 +1,7 @@
+---
+description: Detect high-confidence dead code in the current project.
+---
+
 Detect high-confidence dead code in the current project.
 
 Respond in Chinese for all user-facing natural language output. Keep commands, file paths, and code identifiers in their original form.

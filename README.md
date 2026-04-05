@@ -46,6 +46,20 @@ docker run --rm \
     --model your-model --force-codeql-all --detailed
 ```
 
+### Full Scan with LLM Analysis Details
+
+```bash
+docker run --rm \
+  -e OPENAI_API_KEY="your-api-key" \
+  -e OPENAI_BASE_URL="your-llm-endpoint" \
+  -v /path/to/source/code:/target:rw \
+  -v /path/to/reports:/reports \
+  deepvuln:latest scan -p /target --full \
+    --export "/reports/$(date +%Y%m%d_%H%M%S)_scan.txt" \
+    --include-llm-details \
+    --model your-model --force-codeql-all
+```
+
 ### Parameters
 
 | Parameter | Description |
@@ -53,6 +67,7 @@ docker run --rm \
 | `--base` | Base scan: 3 engines only (Semgrep + CodeQL + Agent) |
 | `--full` | Full scan: 3 engines + LLM verification + adversarial debate |
 | `--export` | Export report to file |
+| `--include-llm-details` | Include LLM analysis details (deduplication reasoning, adversarial verdict) |
 | `--model` | LLM model name |
 | `--force-codeql-all` | Force CodeQL for all detected languages |
 | `--detailed` | Output detailed vulnerability information (required for full findings) |

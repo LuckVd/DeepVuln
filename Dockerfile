@@ -224,15 +224,14 @@ ENV HOME=/home/deepvuln
 WORKDIR /app
 
 RUN if [ "${PRELOAD_CODEQL_PACKS}" = "true" ]; then \
-        PACKS="codeql/go-queries codeql/java-queries codeql/python-queries codeql/javascript-queries codeql/cpp-queries codeql/ruby-queries codeql/csharp-queries"; \
-        for pack in $$PACKS; do \
-            if [ -n "${HTTP_PROXY}" ] && [ -n "${HTTPS_PROXY}" ]; then \
-                env HTTP_PROXY="${HTTP_PROXY}" HTTPS_PROXY="${HTTPS_PROXY}" NO_PROXY="${NO_PROXY}" \
-                    codeql pack download $$pack; \
-            else \
-                codeql pack download $$pack; \
-            fi; \
-        done; \
+        echo '#!/bin/sh' > /tmp/download_packs.sh && \
+        echo 'for pack in codeql/go-queries codeql/java-queries codeql/python-queries codeql/javascript-queries codeql/cpp-queries codeql/ruby-queries codeql/csharp-queries' >> /tmp/download_packs.sh && \
+        echo 'do' >> /tmp/download_packs.sh && \
+        echo '  echo "Downloading $pack..."' >> /tmp/download_packs.sh && \
+        echo '  codeql pack download "$pack"' >> /tmp/download_packs.sh && \
+        echo 'done' >> /tmp/download_packs.sh && \
+        sh /tmp/download_packs.sh && \
+        rm /tmp/download_packs.sh; \
     fi
 
 WORKDIR /target

@@ -1,3 +1,7 @@
+---
+description: Safely adopt this AI workflow into an existing in-development repository without changing business code.
+---
+
 Safely adopt this AI workflow into an existing in-development repository without changing business code.
 
 Respond in Chinese for all user-facing natural language output. Keep commands, file paths, and code identifiers in their original form.

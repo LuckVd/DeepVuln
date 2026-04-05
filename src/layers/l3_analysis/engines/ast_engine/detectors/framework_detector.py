@@ -4,7 +4,10 @@ from pathlib import Path
 from typing import Any
 
 from src.core.logger.logger import get_logger
-from src.layers.l3_analysis.engines.ast_engine.detectors.base_detector import BaseDetector
+from src.layers.l3_analysis.engines.ast_engine.detectors.base_detector import (
+    BaseDetector,
+    _get_rules_base_dir,
+)
 from src.layers.l3_analysis.models import (
     CodeLocation,
     Finding,
@@ -27,8 +30,7 @@ class FrameworkDetector(BaseDetector):
 
     def _get_default_rules_dir(self) -> Path:
         """Return the default rules directory for framework rules."""
-        # Look for rules in project root
-        return Path("rules/ast_query/framework")
+        return _get_rules_base_dir() / "framework"
 
     async def detect(
         self,

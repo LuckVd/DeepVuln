@@ -54,14 +54,16 @@ services:
       - PYTHONUNBUFFERED=1
       - HOME=/home/deepvuln
       # 不设置代理（使用 host 网络模式让 TUN 生效）
-      - HTTP_PROXY=
-      - HTTPS_PROXY=
-      - NO_PROXY=
+      # - HTTP_PROXY=
+      # - HTTPS_PROXY=
+      # - NO_PROXY=
 
     # 卷挂载
     volumes:
       # 待扫描代码
       - ${TARGET_PATH:-./target}:/target:ro
+      # 报告输出目录（读写）
+      - ${REPORT_PATH:-./reports}:/output
       # 配置文件（可选）
       - ./config.local.toml:/app/config.local.toml:ro
       # 缓存目录

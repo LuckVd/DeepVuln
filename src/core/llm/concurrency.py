@@ -257,12 +257,12 @@ def get_global_concurrency_manager() -> LLMConcurrencyManager:
     """
     global _global_manager
     if _global_manager is None:
-        # P5-05: Try to get max_concurrent from config
-        max_concurrent = 7  # Default fallback
+        # P5-05: Try to get max_concurrent_requests from config
+        max_concurrent = 3  # Default fallback
         try:
             from src.core.config import get_llm_config
             llm_config = get_llm_config()
-            max_concurrent = llm_config.get("max_concurrent", 7)
+            max_concurrent = llm_config.get("max_concurrent_requests", 3)
         except Exception:
             pass
         _global_manager = LLMConcurrencyManager(max_concurrent=max_concurrent)
