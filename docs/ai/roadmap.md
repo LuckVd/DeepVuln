@@ -24,10 +24,10 @@
 |Phase 3|精度重构|Rule Gating + TechStack 重构|done|2026-03|
 |Phase 4|裁决统一|Exploitability 主裁决 + 误报压制|done|2026-03-06|
 |Phase 5|精度深化|可利用性评估增强 + 调用图分析|done|2026-03|
-|Phase 6|报告可信度|结果边界清晰化 + 噪声治理 + 覆盖率透明|in_progress|2026-03|
-|Phase 6.5|code-audit 集成|防幻觉规则 + 覆盖率矩阵 + 污点分析模板 + 漏洞验证方法论|in_progress|2026-03|
-|Phase 6.6|Readiness Gate 自动修复|尽量构建环境而非跳过|active|2026-03|
-|Phase 7|CodeQL 智能构建|LLM 语言决策 + 分语言构建编排 + 多语言构建成功率提升|todo|2026-Q2|
+|Phase 6|报告可信度|结果边界清晰化 + 噪声治理 + 覆盖率透明|done|2026-03|
+|Phase 6.5|code-audit 集成|防幻觉规则 + 覆盖率矩阵 + 污点分析模板 + 漏洞验证方法论|done|2026-03|
+|Phase 6.6|Readiness Gate 自动修复|尽量构建环境而非跳过|done|2026-04|
+|Phase 7|CodeQL 智能构建|LLM 语言决策 + 分语言构建编排 + 多语言构建成功率提升|done|2026-04|
 
 ---
 
@@ -877,9 +877,9 @@ tests/unit/test_l3/test_pre_filter/
 |v0.4|精度重构|Rule Gating + 语言重构|done|2026-03|
 |v0.5|裁决统一|Exploitability 主导裁决|done|2026-03-06|
 |v0.6|精度深化|可利用性评估增强 + 调用图分析|done|2026-03-09|
-|v0.7|报告可信度|结果边界清晰 + 噪声治理 + 覆盖率透明|in_progress|2026-03|
-|v0.75|CodeQL 智能构建|LLM 决策 + 分语言构建编排 + 构建成功率提升|in_progress|2026-03|
-|v0.8|AST Engine|结构级代码理解 + Code Graph + AI 结构化上下文|in_progress|2026-04|
+|v0.7|报告可信度|结果边界清晰 + 噪声治理 + 覆盖率透明|done|2026-04|
+|v0.75|CodeQL 智能构建|LLM 决策 + 分语言构建编排 + 构建成功率提升|done|2026-04|
+|v0.8|AST Engine|结构级代码理解 + Code Graph + AI 结构化上下文 + 前置防误报|done|2026-04|
 |v0.9|CPG 基础|完整代码图 + 攻击路径搜索|todo|2026-Q2|
 |v1.0|企业稳定版|高精度、低误报、CI 可用|todo|2026-Q2|
 
@@ -889,14 +889,11 @@ tests/unit/test_l3/test_pre_filter/
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 8 - AST Engine 与代码图构建 + 前置防误报架构|
-|**当前进度**|P8-07 已完成，准备启动 P8-08|
-|**当前目标**|P8-08: 前置防误报架构 ⚠️ 高优先级|
-|**开始日期**|2026-04-05|
-|**下一步**|P8-08a: 文件级预过滤器（扫描前判断）|
-|**最近完成**|P8-07 (规则库扩展), P8-06 (AI Agent 结构化上下文), P8-05 (Call Graph 桥接)|
-|**重点模块**|src/layers/l3_analysis/pre_filter/ (新增)|
-|**设计原则**|⚠️ **防误报靠前**，参考 code-audit skill，节省资源|
+|**阶段**|Phase 7 & 8 已完成，等待下一目标|
+|**当前进度**|Phase 7 (CodeQL 智能构建) ✅ done, Phase 8 (AST Engine + 前置防误报) ✅ done|
+|**最近完成**|P8-08 (前置防误报架构), P8-07 (规则库扩展), Phase 7 全部任务|
+|**下一步**|更新路线图或启动新目标 (P8-09 CPG 基础或其他)|
+|**里程碑**|v0.8 已完成 (AST Engine + 前置防误报)|
 
 ---
 
