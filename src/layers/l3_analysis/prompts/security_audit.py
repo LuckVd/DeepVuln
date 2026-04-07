@@ -599,6 +599,7 @@ def build_audit_prompt(
     context: dict[str, Any] | None = None,
     ast_context: str | None = None,
     use_enhanced_prompt: bool = True,
+    cpg_paths: list[Any] | None = None,  # P9-01: Optional CPG attack paths
 ) -> tuple[str, str]:
     """
     Build system and user prompts for security audit.
@@ -612,6 +613,7 @@ def build_audit_prompt(
         context: Additional context (findings, attack surface, etc.).
         ast_context: Optional AST structure context from ASTContextExtractor.
         use_enhanced_prompt: Whether to use enhanced anti-hallucination prompts (P8-08b).
+        cpg_paths: Optional CPG attack paths from AttackPathFinder (P9-01).
 
     Returns:
         Tuple of (system_prompt, user_prompt).
@@ -629,6 +631,11 @@ def build_audit_prompt(
     # Append AST context if provided
     if ast_context:
         user_prompt = user_prompt + "\n\n" + ast_context
+
+    # P9-01: Append CPG attack path information if provided
+    if cpg_paths:
+        cpg_section = _build_cpg_paths_section(cpg_paths)
+        user_prompt = user_prompt + "\n\n" + cpg_section
 
     system_prompt = config.get_system_prompt()
 
@@ -675,6 +682,48 @@ def build_file_analysis_prompt(
         vulnerability_focus=options.get("vulnerability_focus"),
         context=options.get("context"),
     )
+
+
+def _build_cpg_paths_section(cpg_paths: list[Any]) -> str:
+    """
+    Build a prompt section for CPG attack path information.
+
+    Args:
+        cpg_paths: List of AttackPath objects from AttackPathFinder
+
+    Returns:
+        Formatted string section for the prompt
+    """
+    if not cpg_paths:
+        return ""
+
+    lines = [
+        "## CPG Attack Path Analysis",
+        "",
+        f"Found {len(cpg_paths)} potential attack path(s):",
+        "",
+    ]
+
+    for i, path in enumerate(cpg_paths[:5], 1):  # Limit to 5 paths
+        lines.append(f"### Path {i}")
+        lines.append(f"- **Entry Point**: `{path.entry_point}`")
+        lines.append(f"- **Sink**: `{path.sink}`")
+        lines.append(f"- **Confidence**: {path.confidence:.2%}")
+
+        if path.path:
+            lines.append(f"- **Path Length**: {len(path.path)} nodes")
+
+        if path.sanitizers:
+            lines.append(f"- **Sanitizers**: {', '.join(path.sanitizers)}")
+
+        lines.append(f"- **Reachable**: {'Yes' if path.reaches_sink else 'Unknown'}")
+        lines.append("")
+
+    if len(cpg_paths) > 5:
+        lines.append(f"*... and {len(cpg_paths) - 5} more paths*")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def build_function_analysis_prompt(

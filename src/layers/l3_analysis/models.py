@@ -547,6 +547,12 @@ class Finding(BaseModel):
         description="P6-07: Score multiplier based on directory class (1.0 for production, lower for non-production)",
     )
 
+    # P9-01: CPG attack path information
+    cpg_path: dict[str, Any] | None = Field(
+        default=None,
+        description="P9-01: Attack path information from CPG analysis (entry_point, sink, path, confidence, sanitizers, reaches_sink)",
+    )
+
     # Timestamps
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

@@ -875,6 +875,45 @@ tests/unit/test_l3/test_pre_filter/
 
 ---
 
+### P9-01: CPG 与 Agent 标准集成（Phase 9，P0）
+
+|任务|描述|依赖|状态|
+|---|---|---|---|
+|P9-01|CPG 与 Agent 标准集成|P8-09|done|
+|P9-01a|CPGPathProvider 语言无关接口|P9-01|done|
+|P9-01b|LanguageCPGProvider 抽象类|P9-01a|done|
+|P9-01c|PythonCPGProvider 实现|P9-01b|done|
+|P9-01d|JSCPGProvider 实现|P9-01b|done|
+|P9-01e|Agent 集成 CPGPathProvider|P9-01c,d|done|
+|P9-01f|Finding 数据模型扩展 (cpg_path 字段)|P9-01e|done|
+|P9-01g|单元测试|P9-01f|done|
+|P9-01h|集成测试 (端到端流程)|P9-01g|done|
+
+**实现文件**:
+- `src/layers/l3_analysis/engines/ast_engine/cpg/path_provider.py` (语言无关接口)
+- `src/layers/l3_analysis/engines/ast_engine/cpg/base.py` (抽象基类)
+- `src/layers/l3_analysis/engines/ast_engine/cpg/providers/python_provider.py` (Python 实现)
+- `src/layers/l3_analysis/engines/ast_engine/cpg/providers/js_provider.py` (JavaScript 实现)
+- `src/layers/l3_analysis/engines/opencode_agent.py` (Agent 集成)
+- `src/layers/l3_analysis/models.py` (Finding.cpg_path 字段)
+- `src/layers/l3_analysis/prompts/security_audit.py` (Prompt 增强)
+- `tests/unit/test_l3/test_cpg/test_path_provider.py` (11 测试)
+- `tests/unit/test_l3/test_cpg/test_python_provider.py` (11 测试)
+- `tests/unit/test_l3/test_cpg/test_js_provider.py` (14 测试)
+- `tests/integration/test_cpg_agent/test_e2e.py` (8 测试)
+
+**测试结果**: 61/61 测试通过 (100%)
+**完成日期**: 2026-04-07
+**多语言支持**: Python + JavaScript/TypeScript
+
+**核心特性**:
+- **降级策略**: CPG 失败时 Agent 继续正常工作
+- **语言无关接口**: 支持扩展到其他语言
+- **Finding 扩展**: `cpg_path` 字段存储攻击路径元数据
+- **路径匹配**: 自动将 Finding 匹配到最相关的 CPG 路径
+
+---
+
 ## 里程碑
 
 |里程碑|交付物|能力描述|状态|日期|
@@ -890,7 +929,7 @@ tests/unit/test_l3/test_pre_filter/
 |v0.7|报告可信度|结果边界清晰 + 噪声治理 + 覆盖率透明|done|2026-04|
 |v0.75|CodeQL 智能构建|LLM 决策 + 分语言构建编排 + 构建成功率提升|done|2026-04|
 |v0.8|AST Engine|结构级代码理解 + Code Graph + AI 结构化上下文 + 前置防误报|done|2026-04|
-|v0.9|CPG 基础|完整代码图 + 攻击路径搜索|done|2026-04-07|
+|v0.9|CPG 基础|完整代码图 + 攻击路径搜索 + Agent 集成|done|2026-04-07|
 |v1.0|企业稳定版|高精度、低误报、CI 可用|todo|2026-Q2|
 
 ---
@@ -899,11 +938,11 @@ tests/unit/test_l3/test_pre_filter/
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 8 已完成，v0.9 里程碑达成|
-|**当前进度**|Phase 7 ✅ done, Phase 8 ✅ done, P8-09 ✅ done|
-|**最近完成**|P8-09 (CPG 基础实现), P8-08 (前置防误报架构)|
+|**阶段**|Phase 9 已完成，v0.9 里程碑达成 ✅|
+|**当前进度**|Phase 7 ✅ done, Phase 8 ✅ done, Phase 9 ✅ done, P9-01 ✅ done|
+|**最近完成**|P9-01 (CPG 与 Agent 集成), P8-09 (CPG 基础实现), P8-08 (前置防误报架构)|
 |**下一步**|v1.0 企业稳定版或自定义新目标|
-|**里程碑**|v0.9 已完成 (CPG 基础)|
+|**里程碑**|v0.9 已完成 (CPG 基础 + Agent 集成)|
 
 ---
 

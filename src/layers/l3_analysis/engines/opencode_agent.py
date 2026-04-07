@@ -96,6 +96,7 @@ class OpenCodeAgent(BaseEngine):
         max_files: int = 50,
         max_concurrent: int | None = None,  # P5-05: None = use global config
         timeout: int = 600,
+        cpg_path_provider: Any | None = None,  # P9-01: Optional CPG path provider
         **llm_options,
     ):
         """
@@ -115,6 +116,9 @@ class OpenCodeAgent(BaseEngine):
 
         self.max_file_size = max_file_size
         self.max_files = max_files
+
+        # P9-01: Optional CPG path provider for attack path analysis
+        self.cpg_provider = cpg_path_provider
 
         # P5-05: Use global concurrency config if not specified
         if max_concurrent is None:
@@ -536,6 +540,23 @@ class OpenCodeAgent(BaseEngine):
                     # AST context is optional - log and continue
                     self.logger.debug(f"AST context extraction failed: {e}")
 
+                # P9-01: Extract CPG attack paths (optional enhancement)
+                cpg_paths = None
+                if self.cpg_provider:
+                    try:
+                        # Get attack paths from CPG analysis
+                        cpg_paths = self.cpg_provider.get_attack_paths(
+                            source_path=file_path.parent,
+                            sink_pattern="eval|exec|system|subprocess|os\\.system|popen",
+                        )
+                        if cpg_paths:
+                            self.logger.info(
+                                f"Found {len(cpg_paths)} CPG attack paths for {file_path}"
+                            )
+                    except Exception as e:
+                        # CPG path analysis is optional - log and continue
+                        self.logger.debug(f"CPG path analysis failed: {e}")
+
                 system_prompt, user_prompt = build_audit_prompt(
                     language=language,
                     code=enhanced_code,
@@ -544,6 +565,7 @@ class OpenCodeAgent(BaseEngine):
                     vulnerability_focus=vulnerability_focus,
                     context=context,
                     ast_context=ast_context_str,  # P8-06: Add AST context
+                    cpg_paths=cpg_paths,  # P9-01: Add CPG paths
                 )
 
                 # Call LLM
@@ -561,6 +583,22 @@ class OpenCodeAgent(BaseEngine):
                     file_path=relative_path,
                     source_path=source_path,
                 )
+
+                # P9-01: Attach CPG path information to findings
+                if cpg_paths and findings:
+                    for finding in findings:
+                        # Match finding to most relevant CPG path
+                        matched_path = self._match_finding_to_cpg_path(finding, cpg_paths)
+                        if matched_path:
+                            # Convert AttackPath to dict format for Finding
+                            finding.cpg_path = {
+                                "entry_point": matched_path.entry_point,
+                                "sink": matched_path.sink,
+                                "path": matched_path.path,
+                                "confidence": matched_path.confidence,
+                                "sanitizers": matched_path.sanitizers,
+                                "reaches_sink": matched_path.reaches_sink,
+                            }
 
                 return findings
 
@@ -791,6 +829,57 @@ class OpenCodeAgent(BaseEngine):
         except Exception:
             return None
 
+    def _match_finding_to_cpg_path(
+        self,
+        finding: Finding,
+        cpg_paths: list[Any],
+    ) -> Any | None:
+        """
+        Match a finding to the most relevant CPG attack path.
+
+        Args:
+            finding: The Finding object
+            cpg_paths: List of AttackPath objects
+
+        Returns:
+            Best matching AttackPath or None
+        """
+        if not cpg_paths:
+            return None
+
+        # Find paths that match the finding's line number
+        finding_line = finding.location.line
+        best_path = None
+        best_score = -1
+
+        for path in cpg_paths:
+            # Check if any node in the path matches the finding line
+            line_match_score = 0
+            for node_id in path.path:
+                # Extract line number from node ID
+                # Format: "cpg:ast:file:line:type" or "cpg:call:file:line:type"
+                parts = node_id.split(":")
+                if len(parts) >= 3:
+                    try:
+                        node_line = int(parts[2])
+                        # Higher score for exact line match
+                        if node_line == finding_line:
+                            line_match_score += 10
+                        # Partial score for nearby lines
+                        elif abs(node_line - finding_line) <= 5:
+                            line_match_score += max(5 - abs(node_line - finding_line), 1)
+                    except (ValueError, IndexError):
+                        pass
+
+            # Combine with path confidence
+            combined_score = line_match_score + (path.confidence * 5)
+
+            if combined_score > best_score:
+                best_score = combined_score
+                best_path = path
+
+        return best_path
+
     async def analyze_code_snippet(
         self,
         code: str,
@@ -818,6 +907,7 @@ class OpenCodeAgent(BaseEngine):
             code=code,
             file_path=file_path,
             context=context,
+            cpg_paths=None,  # CPG paths not supported for snippet analysis
         )
 
         try:

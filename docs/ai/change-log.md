@@ -2,6 +2,35 @@
 
 ## 2026-04-07
 
+### P9-01: CPG 与 Agent 标准集成
+
+- **Goal ID**: P9-01
+- **Summary**: 实现 CPG 与 Agent 的标准集成，为 AI 分析提供攻击路径信息
+- **Impact**:
+  - `src/layers/l3_analysis/engines/ast_engine/cpg/path_provider.py`: CPGPathProvider 语言无关接口
+  - `src/layers/l3_analysis/engines/ast_engine/cpg/base.py`: LanguageCPGProvider 抽象基类
+  - `src/layers/l3_analysis/engines/ast_engine/cpg/providers/python_provider.py`: Python 实现
+  - `src/layers/l3_analysis/engines/ast_engine/cpg/providers/js_provider.py`: JavaScript 实现
+  - `src/layers/l3_analysis/engines/opencode_agent.py`: Agent 集成 CPGPathProvider
+  - `src/layers/l3_analysis/models.py`: Finding 添加 `cpg_path` 字段
+  - `src/layers/l3_analysis/prompts/security_audit.py`: Prompt 集成 CPG 路径信息
+- **Features**:
+  - **CPGPathProvider**: 语言无关接口，自动路由到语言特定 Provider
+  - **语言检测**: 基于文件扩展名的自动语言检测
+  - **降级策略**: CPG 失败时 Agent 继续正常工作
+  - **Finding 扩展**: `cpg_path` 字段存储攻击路径元数据 (entry_point, sink, path, confidence, sanitizers, reaches_sink)
+  - **路径匹配**: 自动将 Finding 匹配到最相关的 CPG 路径
+  - **多语言支持**: Python (完整) + JavaScript/TypeScript
+- **Tests**: 61/61 测试通过 (100%)
+  - test_path_provider.py: 11 单元测试
+  - test_python_provider.py: 11 单元测试
+  - test_js_provider.py: 14 单元测试
+  - test_e2e.py: 8 集成测试
+- **Security**: No secrets exposed
+- **Design**: 分层集成，可选降级，不影响现有 Agent 功能
+
+### P8-09: CPG 基础实现
+
 ### P8-09: CPG 基础实现
 
 - **Goal ID**: P8-09
