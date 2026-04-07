@@ -71,7 +71,8 @@ modified_files:
   - "src/layers/l3_analysis/engines/ast_engine/cpg/path_provider.py"
 security_blockers: []
 dead_code_actions: []
-sync_status: "ready"
+sync_status: "completed"
+commit_id: "8288e68"
 last_check_at: "2026-04-07"
 last_synced_at: null
 commit_id: null
