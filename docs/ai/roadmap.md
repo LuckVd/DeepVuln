@@ -1429,24 +1429,29 @@ frontend/
 - `src/web/frontend/src/hooks/useWebSocket.ts`
 - `src/web/frontend/src/hooks/useScanProgress.ts`
 
-### P12-06: 漏洞结果界面（P1）
+### P12-06: 漏洞结果界面（P1）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P12-06 | 漏洞结果展示 | - | todo |
-| P12-06a | 漏洞列表页 (分页/过滤/搜索) | P12-02 | todo |
-| P12-06b | 漏洞卡片组件 | P12-06a | todo |
-| P12-06c | 漏洞详情页 (完整信息) | P12-06a | todo |
-| P12-06d | 漏洞状态管理 (确认/误报/条件) | P12-06c | todo |
-| P12-06e | 严重程度标签筛选 | P12-06a | todo |
-| P12-06f | 文件路径导航 | P12-06c | todo |
-| P12-06g | 代码高亮显示 | P12-06f | todo |
+| P12-06 | 漏洞结果展示 | - | done |
+| P12-06a | 漏洞列表页 (分页/过滤/搜索) | P12-02 | done |
+| P12-06b | 漏洞卡片组件 | P12-06a | done |
+| P12-06c | 漏洞详情页 (完整信息) | P12-06a | done |
+| P12-06d | 漏洞状态管理 (确认/误报/条件) | P12-06c | done |
+| P12-06e | 严重程度标签筛选 | P12-06a | done |
+| P12-06f | 文件路径导航 | P12-06c | done |
+| P12-06g | 代码高亮显示 | P12-06f | done |
 
 **实现文件**:
-- `frontend/src/pages/Findings.tsx`
-- `frontend/src/components/finding/FindingList.tsx`
-- `frontend/src/components/finding/FindingCard.tsx`
-- `frontend/src/components/finding/FindingDetails.tsx`
+- `src/web/frontend/src/pages/Findings.tsx`
+- `src/web/frontend/src/components/finding/FindingList.tsx`
+- `src/web/frontend/src/components/finding/FindingDrawer.tsx`
+- `src/web/frontend/src/components/finding/CodeHighlight.tsx`
+- `src/web/frontend/src/hooks/useFindings.ts`
+- `src/web/api/v1/scans.py` (后端状态更新 API)
+
+**测试结果**: 待用户运行 npm install 后测试
+**完成日期**: 2026-04-07
 
 ### P12-07: 报告生成与导出（P2）
 
@@ -1536,6 +1541,7 @@ frontend/
 |v0.95|Web 服务与持久化|FastAPI 后端 + PostgreSQL + RESTful API + 项目管理|done|2026-04-07|
 |v0.96|暂停/续扫功能|检查点机制 + 阶段恢复 + 控制接口 + WebSocket + 增量扫描|done|2026-04-07|
 |v0.97|前端界面|MVP|React + TypeScript + Ant Design + 实时进度 + 扫描控制|done|2026-04-07|
+|v0.98|漏洞结果界面|列表/详情/代码高亮/状态管理|React + SyntaxHighlighter + 状态 API|done|2026-04-07|
 |v1.0|企业稳定版|高精度、低误报、CI 可用 + Web UI + 暂停续扫|todo|2026-Q2|
 
 ---
@@ -1544,11 +1550,11 @@ frontend/
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 12 MVP 已完成，v0.97 里程碑达成 ✅|
-|**当前进度**|Phase 12 ✅ done (前端界面 MVP)|
-|**最近完成**|P12-01~P12-05 (前端项目初始化 + 项目管理 + 扫描管理 + 实时进度)|
-|**下一步**|P12-06 漏洞结果界面、P13 企业级功能 或自定义新目标|
-|**里程碑**|v0.97 已完成 (React + TypeScript + Ant Design + WebSocket 实时进度)|
+|**阶段**|Phase 12 漏洞结果界面已完成，v0.98 里程碑达成 ✅|
+|**当前进度**|Phase 12 ✅ done (漏洞结果界面)|
+|**最近完成**|P12-06 (漏洞列表/详情/代码高亮/状态管理)|
+|**下一步**|P12-07 报告生成、P13 企业级功能 或自定义新目标|
+|**里程碑**|v0.98 已完成 (漏洞结果展示 + 状态管理)|
 
 ---
 

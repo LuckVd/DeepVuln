@@ -6,6 +6,7 @@ import type {
   ScanProgressResponse,
   Finding,
   FindingSummary,
+  FindingStatusUpdate,
 } from '@/types/models'
 
 /**
@@ -126,6 +127,14 @@ export const scansApi = {
    */
   async getStatus(id: number): Promise<any> {
     const response = await client.get(`/scans/${id}/status`)
+    return response.data
+  },
+
+  /**
+   * 更新漏洞状态
+   */
+  async updateFindingStatus(scanId: number, findingId: number, data: FindingStatusUpdate): Promise<Finding> {
+    const response = await client.patch(`/scans/${scanId}/findings/${findingId}/status`, data)
     return response.data
   },
 }

@@ -19,7 +19,7 @@ export type ScanType = 'full' | 'base' | 'incremental'
 export type SeverityLevel = 'critical' | 'high' | 'medium' | 'low' | 'info'
 
 // 漏洞状态
-export type FindingStatus = 'verified' | 'false_positive' | 'suspicious'
+export type FindingStatus = 'pending' | 'confirmed' | 'false_positive' | 'conditional'
 
 // 项目模型
 export interface Project {
@@ -162,4 +162,10 @@ export interface Finding {
   status: FindingStatus
   cpg_path: string | null
   created_at: string
+}
+
+// 漏洞状态更新请求
+export interface FindingStatusUpdate {
+  status: FindingStatus
+  extra_metadata?: Record<string, unknown>
 }

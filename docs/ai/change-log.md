@@ -1,5 +1,40 @@
 # Change Log
 
+## 2026-04-07 (续 2)
+
+### P12-06: 漏洞结果界面完成 ✅
+
+- **Goal ID**: P12-06
+- **Summary**: 实现漏洞结果展示界面，包括列表/详情/代码高亮/状态管理
+- **Impact**:
+  - `src/web/api/v1/scans.py`: 新增 PATCH 状态更新 API
+  - `src/web/frontend/src/pages/Findings.tsx`: 漏洞列表主页面
+  - `src/web/frontend/src/components/finding/`: 3 个组件（List/Drawer/Highlight）
+  - `src/web/frontend/src/hooks/useFindings.ts`: 数据获取 Hook
+  - `src/web/frontend/package.json`: 添加 react-syntax-highlighter
+- **Features**:
+  - **漏洞列表**: 分页、排序、严重程度筛选、状态筛选、关键字搜索
+  - **详情抽屉**: 3 个 Tab（概览/代码/元数据）
+  - **代码高亮**: 多语言语法高亮、目标行高亮显示
+  - **状态管理**: 已确认/误报/有条件状态切换
+  - **统计卡片**: 总数/已确认/误报/严重/高危统计
+  - **导航链接**: 从扫描详情页跳转到漏洞列表
+- **API**:
+  ```
+  PATCH /api/v1/scans/{scan_id}/findings/{finding_id}/status
+  Body: { "status": "confirmed" | "false_positive" | "conditional" }
+  ```
+- **Route**:
+  ```
+  /scans/:scanId/findings
+  ```
+- **Tests**: 待用户运行 npm install 后测试
+- **Security**: 无安全风险
+- **Milestone**: v0.98 完成
+- **Next**: P12-07 报告生成、P13 企业级功能 或自定义新目标
+
+---
+
 ## 2026-04-07 (续)
 
 ### P12-00: 前端界面 MVP 完成 ✅

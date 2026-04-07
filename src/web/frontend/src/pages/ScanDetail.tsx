@@ -256,7 +256,17 @@ export default function ScanDetailPage() {
       )}
 
       {/* 漏洞统计 */}
-      <Card title="漏洞分布" style={{ marginBottom: 16 }}>
+      <Card
+        title="漏洞分布"
+        style={{ marginBottom: 16 }}
+        extra={
+          scan.findings_count && scan.findings_count > 0 ? (
+            <Button type="primary" size="small" onClick={() => navigate(`/scans/${scan.id}/findings`)}>
+              查看漏洞列表
+            </Button>
+          ) : null
+        }
+      >
         <Row gutter={16}>
           <Col span={4}>
             <Statistic

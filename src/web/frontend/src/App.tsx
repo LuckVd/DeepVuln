@@ -4,6 +4,7 @@ import AppLayout from './components/layout/AppLayout'
 import ProjectsPage from './pages/Projects'
 import ScansPage from './pages/Scans'
 import ScanDetailPage from './pages/ScanDetail'
+import FindingsPage from './pages/Findings'
 
 // 临时占位页面
 const ProjectFormPage = () => <div>使用项目列表的创建按钮</div>
@@ -30,6 +31,7 @@ function App() {
             <Route path="projects/:id" element={<ProjectDetailPage />} />
             <Route path="scans" element={<ScansPage />} />
             <Route path="scans/:id" element={<ScanDetailPage />} />
+            <Route path="scans/:id/findings" element={<FindingsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

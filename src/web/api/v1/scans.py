@@ -26,6 +26,8 @@ from src.web.models.schemas import (
     ResumeScanResponse,
     CancelScanResponse,
     ScanStatusResponse,
+    FindingUpdate,
+    FindingResponse,
 )
 from src.web.repositories.scan import ScanRepository
 from src.web.repositories.project import ProjectRepository
@@ -639,6 +641,74 @@ async def get_scan_findings(
             for f in findings
         ],
     }
+
+
+@router.patch("/scans/{scan_id}/findings/{finding_id}/status", response_model=FindingResponse)
+async def update_finding_status(
+    scan_id: int,
+    finding_id: int,
+    status_update: FindingUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(require_api_key)] = None,
+) -> FindingResponse:
+    """
+    Update the status of a finding.
+
+    Args:
+        scan_id: Scan ID
+        finding_id: Finding ID
+        status_update: Status update data
+        db: Database session
+
+    Returns:
+        Updated finding
+
+    Raises:
+        HTTPException 404: If scan or finding not found
+        HTTPException 400: If status is invalid
+    """
+    from src.web.models.finding import Finding, FindingStatus
+
+    scan_repo = ScanRepository()
+    finding_repo = FindingRepository()
+
+    # Verify scan exists
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Verify finding exists and belongs to scan
+    finding = await finding_repo.get(db, id=finding_id)
+    if finding is None or finding.scan_id != scan_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Finding {finding_id} not found in scan {scan_id}"
+        )
+
+    # Validate status
+    valid_statuses = [
+        FindingStatus.PENDING,
+        FindingStatus.CONFIRMED,
+        FindingStatus.FALSE_POSITIVE,
+        FindingStatus.CONDITIONAL,
+    ]
+    if status_update.status not in valid_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid status. Must be one of: {[s.value for s in valid_statuses]}"
+        )
+
+    # Update finding
+    updated_finding = await finding_repo.update(
+        db,
+        db_obj=finding,
+        obj_in={"status": status_update.status, "extra_metadata": status_update.extra_metadata}
+    )
+
+    return FindingResponse.model_validate(updated_finding)
 
 
 @router.get("/scans/{scan_id}/report")
