@@ -1,6 +1,6 @@
 goal_id: "P8-08-pre-filter-architecture"
 title: "前置防误报架构"
-stage: "implement"
+stage: "done"
 status: "completed"
 selected_option: "in_order"
 design_confirmed: true
