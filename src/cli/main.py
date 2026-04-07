@@ -798,6 +798,9 @@ async def run_full_security_scan(
         "errors": [],
     }
 
+    # P10-07: Extract event emitter from options if available (for JSONL output)
+    event_emitter = options.get("event_emitter")
+
     # =========================================================================
     # Incremental Scan Mode - Early return for incremental scans
     # =========================================================================
@@ -1043,6 +1046,10 @@ async def run_full_security_scan(
     # =========================================================================
 
     console.print("\n[bold cyan]Phase 0: Preparation[/]")
+
+    # P10-07: Emit phase start event
+    if event_emitter:
+        event_emitter.emit_phase_start("L1_preparation", "Tech Stack & Attack Surface Detection")
 
     # Tech Stack Detection
     tech_detector = TechStackDetector()
@@ -1499,14 +1506,33 @@ async def run_full_security_scan(
         console.print("\n[bold cyan]Phase 1/2/3: Parallel Engine Scan[/]")
         console.print(f"  Running {len(scan_tasks)} engines in parallel: {[t[0] for t in scan_tasks]}")
 
+        # P10-07: Emit phase start event for engine scan
+        if event_emitter:
+            event_emitter.emit_phase_start("L2_L3_engines", "Parallel Engine Scan")
+
         with create_progress() as progress:
             task = progress.add_task(f"[cyan]Scanning with {len(scan_tasks)} engines...", total=None)
+
+            # P10-07: Emit engine start events
+            if event_emitter:
+                for engine_name, _ in scan_tasks:
+                    event_emitter.emit_engine_start(engine_name)
 
             # Run all scans concurrently
             scan_results = await asyncio.gather(
                 *[t[1] for t in scan_tasks],
                 return_exceptions=True,
             )
+
+            # P10-07: Emit engine complete events
+            if event_emitter:
+                for (engine_name, _), scan_result in zip(scan_tasks, scan_results, strict=False):
+                    if not isinstance(scan_result, Exception):
+                        findings_count = len(scan_result.findings) if hasattr(scan_result, 'findings') else 0
+                        event_emitter.emit_engine_complete(
+                            engine=engine_name,
+                            findings=findings_count,
+                        )
 
             progress.update(task, completed=True, description="[green]All engines completed!")
 
@@ -3076,6 +3102,8 @@ def clean() -> None:
 @click.option("--head-ref", default="HEAD", help="Head git ref for incremental scan (default: HEAD)")
 @click.option("--force-codeql-all", is_flag=True, help="Force CodeQL to scan all detected languages, bypassing LLM decision and tool checks")
 @click.option("--skip-build", is_flag=True, help="Skip build step for CodeQL (reduces accuracy, useful when build fails)")
+@click.option("--output-format", type=click.Choice(["text", "jsonl"]), default="text", help="Output format: text (default) or jsonl (machine-readable)")
+@click.option("--jsonl-output", type=click.Path(), help="Write JSONL output to file instead of stdout")
 def scan(
     path: str,
     include_low: bool,
@@ -3100,6 +3128,8 @@ def scan(
     head_ref: str,
     force_codeql_all: bool,
     skip_build: bool,
+    output_format: str,
+    jsonl_output: str | None,
 ) -> None:
     """Run security scan on source code.
 
@@ -3240,7 +3270,16 @@ def scan(
         "incremental": incremental,
         "base_ref": base_ref,
         "head_ref": head_ref,
+        "output_format": output_format,
+        "jsonl_output": Path(jsonl_output) if jsonl_output else None,
     }
+
+    # P10-07: Handle JSONL output format
+    if output_format == "jsonl" or jsonl_output:
+        # JSONL output mode - structured machine-readable output
+        jsonl_file = Path(jsonl_output) if jsonl_output else None
+        run_security_scan_jsonl(source_path, options, jsonl_file)
+        return
 
     if export_path:
         # Non-interactive mode for export
@@ -3329,6 +3368,86 @@ def run_security_scan_export(source_path: Path, export_path: str, options: dict[
                 show_error("Export Failed", str(e))
         else:
             show_error("Scan Failed", "\n".join(scan_result.errors or ["Unknown error"]))
+
+
+def run_security_scan_jsonl(
+    source_path: Path,
+    options: dict[str, Any],
+    jsonl_file: Path | None = None,
+) -> None:
+    """Run security scan with JSONL structured output.
+
+    P10-07: This function handles JSONL output format for machine-readable
+    event streaming. It creates an EventEmitter and passes it to the
+    scanning workflow.
+
+    Args:
+        source_path: Path to source code
+        options: Scan options
+        jsonl_file: Optional file to write JSONL output to
+    """
+    import asyncio
+
+    from src.cli.output import EventEmitter
+
+    # Create event emitter
+    emitter = EventEmitter(
+        output_format="jsonl",
+        output_file=jsonl_file,
+    )
+
+    # Emit scan start event
+    scan_type = "full" if options.get("full_scan") else (
+        "base" if options.get("base_scan") else
+        "incremental" if options.get("incremental") else
+        "custom"
+    )
+    emitter.emit_scan_start(
+        source_path=str(source_path),
+        scan_type=scan_type,
+        config=options,
+    )
+
+    # Add emitter to options for use in scan workflow
+    options["event_emitter"] = emitter
+
+    try:
+        # Run scan - emitter is available through options dict
+        result = asyncio.run(run_full_security_scan(
+            source_path=source_path,
+            options=options,
+        ))
+
+        # Calculate statistics
+        stats = result.get("statistics", {})
+        findings_by_severity = {}
+        if "verified_findings" in result:
+            for verified in result["verified_findings"]:
+                finding = verified.get("finding")
+                if finding:
+                    severity = finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity)
+                    findings_by_severity[severity] = findings_by_severity.get(severity, 0) + 1
+
+        # Emit scan complete event
+        emitter.emit_scan_complete(
+            duration_seconds=result.get("duration_seconds", 0),
+            findings_total=stats.get("total_findings", 0),
+            findings_by_severity=findings_by_severity,
+            tokens_used=result.get("tokens_used", 0),
+            result_path=result.get("result_path", ""),
+        )
+
+    except Exception as e:
+        # Emit scan failed event
+        import traceback
+        result_local = locals().get("result")
+        emitter.emit_scan_failed(
+            error_message=str(e),
+            error_type=type(e).__name__,
+            phase=result_local.get("current_phase", "") if result_local else "",
+        )
+    finally:
+        emitter.close()
 
 
 @main.command("config-analyze")
