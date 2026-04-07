@@ -858,10 +858,20 @@ tests/unit/test_l3/test_pre_filter/
 
 |任务|描述|依赖|状态|
 |---|---|---|---|
-|P8-09|Code Property Graph 基础实现|P8-05|todo|
-|P8-09a|融合 AST Graph + Call Graph|P8-09|todo|
-|P8-09b|添加 CFG（控制流图）支持|P8-09a|todo|
-|P8-09c|攻击路径搜索算法|P8-09b|todo|
+|P8-09|Code Property Graph 基础实现|P8-05|done|
+|P8-09a|融合 AST Graph + Call Graph|P8-09|done|
+|P8-09b|添加 CFG（控制流图）支持|P8-09a|done|
+|P8-09c|攻击路径搜索算法|P8-09b|done|
+
+**实现文件**:
+- `src/layers/l3_analysis/engines/ast_engine/cpg/` (CPG 统一代码图)
+- `src/layers/l3_analysis/engines/ast_engine/cfg/` (控制流图，4 种语言)
+- `src/layers/l3_analysis/engines/ast_engine/path_finder/` (攻击路径搜索)
+- `tests/unit/test_l3/test_cpg/`, `tests/unit/test_l3/test_cfg/`, `tests/unit/test_l3/test_path_finder/`
+
+**测试结果**: 47 单元测试通过 (15 CPG + 18 CFG + 14 PathFinder)
+**完成日期**: 2026-04-07
+**多语言支持**: Python (完整) + JavaScript + Java + Go (框架)
 
 ---
 
@@ -880,7 +890,7 @@ tests/unit/test_l3/test_pre_filter/
 |v0.7|报告可信度|结果边界清晰 + 噪声治理 + 覆盖率透明|done|2026-04|
 |v0.75|CodeQL 智能构建|LLM 决策 + 分语言构建编排 + 构建成功率提升|done|2026-04|
 |v0.8|AST Engine|结构级代码理解 + Code Graph + AI 结构化上下文 + 前置防误报|done|2026-04|
-|v0.9|CPG 基础|完整代码图 + 攻击路径搜索|todo|2026-Q2|
+|v0.9|CPG 基础|完整代码图 + 攻击路径搜索|done|2026-04-07|
 |v1.0|企业稳定版|高精度、低误报、CI 可用|todo|2026-Q2|
 
 ---
@@ -889,11 +899,11 @@ tests/unit/test_l3/test_pre_filter/
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 7 & 8 已完成，等待下一目标|
-|**当前进度**|Phase 7 (CodeQL 智能构建) ✅ done, Phase 8 (AST Engine + 前置防误报) ✅ done|
-|**最近完成**|P8-08 (前置防误报架构), P8-07 (规则库扩展), Phase 7 全部任务|
-|**下一步**|更新路线图或启动新目标 (P8-09 CPG 基础或其他)|
-|**里程碑**|v0.8 已完成 (AST Engine + 前置防误报)|
+|**阶段**|Phase 8 已完成，v0.9 里程碑达成|
+|**当前进度**|Phase 7 ✅ done, Phase 8 ✅ done, P8-09 ✅ done|
+|**最近完成**|P8-09 (CPG 基础实现), P8-08 (前置防误报架构)|
+|**下一步**|v1.0 企业稳定版或自定义新目标|
+|**里程碑**|v0.9 已完成 (CPG 基础)|
 
 ---
 

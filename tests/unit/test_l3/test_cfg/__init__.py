@@ -1,0 +1,1 @@
+"""CFG module tests package."""

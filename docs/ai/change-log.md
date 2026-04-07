@@ -1,5 +1,41 @@
 # Change Log
 
+## 2026-04-07
+
+### P8-09: CPG 基础实现
+
+- **Goal ID**: P8-09
+- **Summary**: 实现 Code Property Graph 基础，融合 AST Graph + Call Graph + CFG，支持攻击路径搜索
+- **Impact**:
+  - `src/layers/l3_analysis/engines/ast_engine/cpg/`: 新增 CPG 统一代码图模块
+    - `models.py`: CPGNode, CPGEdge, CodePropertyGraph 数据结构
+    - `builder.py`: CPGBuilder 融合 AST + Call Graph
+  - `src/layers/l3_analysis/engines/ast_engine/cfg/`: 新增控制流图模块
+    - `models.py`: CFGNode, CFGEdge, ControlFlowGraph, BasicBlock
+    - `base.py`: LanguageCFGBuilder 抽象基类
+    - `factory.py`: CFGBuilderFactory 语言路由
+    - `builders/python_cfg.py`: Python CFG 构建器（完整支持）
+    - `builders/js_cfg.py`: JavaScript/TypeScript CFG 构建器
+    - `builders/java_cfg.py`: Java CFG 构建器
+    - `builders/go_cfg.py`: Go CFG 构建器
+  - `src/layers/l3_analysis/engines/ast_engine/path_finder/`: 新增攻击路径搜索模块
+    - `models.py`: AttackPath, PathFinderConfig, PathType
+    - `finder.py`: AttackPathFinder BFS 路径搜索算法
+- **Features**:
+  - **CPG 统一视图**: 融合 AST Graph（语句级）+ Call Graph（函数级）到统一代码图
+  - **多语言 CFG 支持**: Python（完整）+ JavaScript + Java + Go（基础）
+    - Python: if/while/for/try/match/async/break/continue/return
+    - JavaScript: if/while/for/try/switch/break/continue
+    - Java: if/while/for/try/switch/break/continue
+    - Go: if/while/for/switch/break/continue
+  - **语言抽象接口**: `LanguageCFGBuilder` 基类，支持扩展到其他语言
+  - **攻击路径搜索**: BFS 算法从入口点到危险函数
+  - **Sanitizer 检测**: 自动识别清洗函数（sanitize/escape/validate/filter）
+  - **路径属性**: confidence 计算、可达性验证、条件分支记录
+- **Tests**: 47 单元测试通过 (CPG: 15, CFG: 18, PathFinder: 14)
+- **Multi-language**: Python (完整) + JavaScript + Java + Go (框架支持)
+- **Next**: v0.9 里程碑完整验证 / CPG 与 Agent 集成
+
 ## 2026-04-05
 
 ### P8-08: 前置防误报架构
