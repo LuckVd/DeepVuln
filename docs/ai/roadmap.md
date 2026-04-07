@@ -1118,20 +1118,26 @@ GET    /api/v1/scans/{id}/report            # 获取报告
 **测试结果**: 7/7 单元测试通过 ✅
 **完成日期**: 2026-04-07
 
-### P10-07: CLI 集成服务（P0）
+### P10-07: CLI 集成服务（P0）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P10-07 | CLI 调用服务层 | - | todo |
-| P10-07a | ScanExecutor 核心实现 | P10-05, P10-06 | todo |
-| P10-07b | 子进程调用现有 CLI | P10-07a | todo |
-| P10-07c | 实时输出解析与进度更新 | P10-07b | todo |
-| P10-07d | 结果 JSON 解析与入库 | P10-07c | todo |
-| P10-07e | 错误处理与状态同步 | P10-07d | todo |
+| P10-07 | CLI 调用服务层 | - | done |
+| P10-07a | Celery 依赖与配置 | P10-07 | done |
+| P10-07b | Celery 扫描任务 | P10-07a | done |
+| P10-07c | CLI 适配器 | P10-07b | done |
+| P10-07d | 扫描执行器服务 | P10-07c | done |
 
 **实现文件**:
-- `src/web/services/scan_executor.py`
-- `src/web/services/cli_adapter.py`
+- `pyproject.toml`: 添加 celery>=5.3.0, redis>=5.0.0
+- `src/web/core/celery_app.py`: Celery 应用配置 (122 行)
+- `src/web/tasks/scan_tasks.py`: Celery 扫描任务 (176 行)
+- `src/web/services/cli_adapter.py`: CLI 适配器，解析 JSONL 输出 (494 行)
+- `src/web/services/scan_executor.py`: 扫描执行器，生命周期管理 (482 行)
+- `tests/unit/test_web/test_services.py`: 服务层单元测试 (14 测试)
+
+**测试结果**: 78/78 通过 (64 原有 + 14 新增) ✅
+**完成日期**: 2026-04-07
 
 ### P10-08: 基础 API 测试（P1）✅
 

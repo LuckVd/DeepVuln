@@ -857,8 +857,40 @@ print("[DV_FINDING]{"type": "new", ...}")
 |------|------|--------|------|
 | S5 | 项目管理 API (P10-04) | P1 | ✅ 完成 |
 | S6 | 扫描任务 API (P10-05) | P0 | ✅ 完成 |
-| S7 | CLI 集成服务 (P10-07) | P0 | in_progress |
+| S7 | CLI 集成服务 (P10-07) | P0 | ✅ 完成 |
 | S8 | API 测试 (P10-08) | P1 | ✅ 完成 |
+
+**状态**: 所有核心步骤已完成 ✅
+
+---
+
+## 完成总结 (P10-07: CLI 集成服务 - 2026-04-07)
+
+### P10-07: CLI 集成服务 ✅
+
+**实现文件**:
+- `pyproject.toml` - 添加 Celery 和 Redis 依赖
+- `src/web/core/celery_app.py` - Celery 应用配置 (122 行)
+- `src/web/tasks/scan_tasks.py` - Celery 扫描任务 (176 行)
+- `src/web/services/cli_adapter.py` - CLI 适配器 (494 行)
+- `src/web/services/scan_executor.py` - 扫描执行器 (482 行)
+- `tests/unit/test_web/test_services.py` - 服务层单元测试 (14 测试)
+
+**核心功能**:
+- **Celery 集成**: Redis broker，异步任务执行
+- **CLIAdapter**: 子进程调用 deepvuln CLI，解析 JSONL 输出
+- **实时进度**: 文件级、引擎级、Token 级进度追踪
+- **ScanExecutor**: 扫描生命周期管理（创建/启动/查询/取消/重试）
+- **事件处理**: 18+ 种事件类型支持
+
+**API 端点集成**:
+- `POST /api/v1/scans` - 创建扫描 → 触发 Celery 任务
+- `GET /api/v1/scans/{id}/progress` - 查询详细进度
+- `GET /api/v1/scans/{id}/agent-conversation` - 获取 Agent 对话
+- `GET /api/v1/scans/{id}/current-file` - 获取当前处理文件
+
+**测试结果**: 14/14 服务层测试通过 ✅
+**总测试数**: 78/78 (64 原有 + 14 新增)
 
 ---
 

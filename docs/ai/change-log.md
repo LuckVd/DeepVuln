@@ -2,6 +2,54 @@
 
 ## 2026-04-07 (续)
 
+### P10-07: CLI 集成服务完成
+
+- **Goal ID**: P10-00
+- **Summary**: 完成 CLI 集成服务，实现 Celery 后台任务和实时进度追踪
+- **Impact**:
+  - `pyproject.toml`: 添加 celery>=5.3.0, redis>=5.0.0
+  - `src/web/core/celery_app.py`: Celery 应用配置 (122 行)
+  - `src/web/tasks/scan_tasks.py`: Celery 扫描任务 (176 行)
+  - `src/web/services/cli_adapter.py`: CLI 适配器 (494 行)
+  - `src/web/services/scan_executor.py`: 扫描执行器 (482 行)
+  - `src/web/services/__init__.py`: 服务模块导出
+  - `tests/unit/test_web/test_services.py`: 服务层单元测试 (14 测试)
+- **Features**:
+  - **Celery 集成**: Redis broker，异步任务执行，任务状态追踪
+  - **CLIAdapter**: 子进程调用 deepvuln CLI，解析 JSONL 输出
+  - **实时进度**: 文件级、引擎级、Token 级进度追踪
+  - **事件处理**: 18+ 种事件类型 (phase_start/complete, file_start/complete, finding_new/verified, agent_thinking, adversarial_start/round)
+  - **ScanExecutor**: 扫描生命周期管理（创建/启动/查询/取消/重试）
+  - **asyncio.run()**: Celery 同步任务包装异步实现
+- **Event Types Supported**:
+  ```
+  phase_start, phase_complete, engine_start, engine_complete
+  file_start, file_complete
+  agent_thinking, agent_action, agent_observation
+  adversarial_start, adversarial_round, adversarial_complete
+  finding_new, finding_verified, finding_false_positive
+  progress, error, warning, info
+  scan_complete, scan_failed
+  ```
+- **Tests**: 14/14 服务层测试通过 ✅
+  - test_scan_executor_initialization: 初始化验证
+  - test_get_scan_executor_singleton: 单例模式验证
+  - test_create_scan: 创建扫描验证
+  - test_get_scan_status: 状态查询验证
+  - test_get_scan_progress: 详细进度查询验证
+  - test_cancel_scan: 取消扫描验证
+  - test_retry_scan: 重试扫描验证
+  - test_extract_adversarial_status: 对抗状态提取
+  - test_extract_current_file_info: 当前文件提取
+- **Total Tests**: 78/78 (64 原有 + 14 新增)
+- **Security**: No hardcoded secrets, Redis URL from environment
+- **Dead Code**: 未检测到死代码
+- **Next**: P10-00 完成 / v0.95 里程碑 / 或开始 P11 暂停续扫功能
+
+---
+
+## 2026-04-07 (续)
+
 ### P10-04/05/08: API 端点与测试完成
 
 - **Goal ID**: P10-00
