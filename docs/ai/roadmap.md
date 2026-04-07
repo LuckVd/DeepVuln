@@ -1031,17 +1031,17 @@ src/web/
 
 **测试结果**: 9/9 通过 ✅
 
-### P10-04: 项目管理 API（P1）
+### P10-04: 项目管理 API（P1）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P10-04 | 项目管理 REST API | - | todo |
-| P10-04a | 创建项目 API | P10-03 | todo |
-| P10-04b | 列出项目 API (分页/过滤) | P10-04a | todo |
-| P10-04c | 获取项目详情 API | P10-04a | todo |
-| P10-04d | 更新项目 API | P10-04a | todo |
-| P10-04e | 删除项目 API | P10-04a | todo |
-| P10-04f | 项目扫描历史 API | P10-04a | todo |
+| P10-04 | 项目管理 REST API | - | done |
+| P10-04a | 创建项目 API | P10-03 | done |
+| P10-04b | 列出项目 API (分页/过滤) | P10-04a | done |
+| P10-04c | 获取项目详情 API | P10-04a | done |
+| P10-04d | 更新项目 API | P10-04a | done |
+| P10-04e | 删除项目 API | P10-04a | done |
+| P10-04f | 项目扫描历史 API | P10-04a | done |
 
 **API 端点**:
 ```
@@ -1054,34 +1054,46 @@ GET    /api/v1/projects/{id}/scans # 扫描历史
 ```
 
 **实现文件**:
-- `src/web/api/v1/projects.py`
-- `src/web/services/project_service.py`
+- `src/web/api/v1/projects.py` ✅
+- `tests/unit/test_web/api/test_projects.py` ✅
 
-### P10-05: 扫描任务 API（P0）
+**测试结果**: 13/13 测试通过 (路由验证 + 请求验证 + 分页验证)
+**完成日期**: 2026-04-07
+
+### P10-05: 扫描任务 API（P0）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P10-05 | 扫描任务管理 API | - | todo |
-| P10-05a | 创建扫描 API | P10-04 | todo |
-| P10-05b | 列出扫描 API | P10-05a | todo |
-| P10-05c | 获取扫描详情 API | P10-05a | todo |
-| P10-05d | 扫描进度查询 API | P10-05a | todo |
-| P10-05e | 漏洞结果查询 API | P10-05a | todo |
-| P10-05f | 扫描报告获取 API | P10-05a | todo |
+| P10-05 | 扫描任务管理 API | - | done |
+| P10-05a | 创建扫描 API | P10-04 | done |
+| P10-05b | 列出扫描 API | P10-05a | done |
+| P10-05c | 获取扫描详情 API | P10-05a | done |
+| P10-05d | 扫描进度查询 API | P10-05a | done |
+| P10-05e | 漏洞结果查询 API | P10-05a | done |
+| P10-05f | 扫描报告获取 API | P10-05a | done |
+| P10-05g | Agent 对话 API | P10-05a | done |
+| P10-05h | 阶段/事件流 API | P10-05a | done |
 
 **API 端点**:
 ```
-POST   /api/v1/scans              # 创建扫描
-GET    /api/v1/scans              # 列出扫描
-GET    /api/v1/scans/{id}         # 获取详情
-GET    /api/v1/scans/{id}/progress # 获取进度
-GET    /api/v1/scans/{id}/findings # 获取漏洞
-GET    /api/v1/scans/{id}/report    # 获取报告
+POST   /api/v1/scans                        # 创建扫描
+GET    /api/v1/scans                        # 列出扫描
+GET    /api/v1/scans/{id}                   # 获取详情
+GET    /api/v1/scans/{id}/progress          # 获取进度
+GET    /api/v1/scans/{id}/phases            # 获取阶段详情
+GET    /api/v1/scans/{id}/events            # 获取事件流
+GET    /api/v1/scans/{id}/agent-conversation # 获取 Agent 对话
+GET    /api/v1/scans/{id}/current-file      # 获取当前处理文件
+GET    /api/v1/scans/{id}/findings          # 获取漏洞
+GET    /api/v1/scans/{id}/report            # 获取报告
 ```
 
 **实现文件**:
-- `src/web/api/v1/scans.py`
-- `src/web/services/scan_service.py`
+- `src/web/api/v1/scans.py` ✅
+- `tests/unit/test_web/api/test_scans.py` ✅
+
+**测试结果**: 9/9 测试通过 (路由验证 + 请求验证 + 分页验证)
+**完成日期**: 2026-04-07
 
 ### P10-06: 数据库 Repository 层（P1）✅
 
@@ -1121,21 +1133,25 @@ GET    /api/v1/scans/{id}/report    # 获取报告
 - `src/web/services/scan_executor.py`
 - `src/web/services/cli_adapter.py`
 
-### P10-08: 基础 API 测试（P1）
+### P10-08: 基础 API 测试（P1）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P10-08 | API 测试 | - | todo |
-| P10-08a | 项目 API 单元测试 | P10-04 | todo |
-| P10-08b | 扫描 API 单元测试 | P10-05 | todo |
-| P10-08c | Repository 层单元测试 | P10-06 | todo |
+| P10-08 | API 测试 | - | done |
+| P10-08a | 项目 API 单元测试 | P10-04 | done |
+| P10-08b | 扫描 API 单元测试 | P10-05 | done |
+| P10-08c | Repository 层单元测试 | P10-06 | done |
 | P10-08d | 集成测试 (API + DB) | P10-08a,b,c | todo |
-| P10-08e | API 文档生成 (OpenAPI) | P10-03 | todo |
+| P10-08e | API 文档生成 (OpenAPI) | P10-03 | done |
 
 **实现文件**:
-- `tests/integration/test_api/test_projects.py`
-- `tests/integration/test_api/test_scans.py`
-- `tests/unit/test_web/repositories/`
+- `tests/unit/test_web/api/test_projects.py` ✅
+- `tests/unit/test_web/api/test_scans.py` ✅
+- `tests/unit/test_web/repositories/` ✅
+- `tests/integration/test_api/` ⏳ 待添加
+
+**测试结果**: 23/23 API 单元测试通过
+**完成日期**: 2026-04-07
 
 ---
 

@@ -855,10 +855,84 @@ print("[DV_FINDING]{"type": "new", ...}")
 
 | 步骤 | 任务 | 优先级 | 状态 |
 |------|------|--------|------|
-| S5 | 项目管理 API (P10-04) | P1 | in_progress |
-| S6 | 扫描任务 API (P10-05) | P0 | pending |
-| S7 | CLI 集成服务 (P10-07) | P0 | pending |
-| S8 | API 测试 (P10-08) | P1 | pending |
+| S5 | 项目管理 API (P10-04) | P1 | ✅ 完成 |
+| S6 | 扫描任务 API (P10-05) | P0 | ✅ 完成 |
+| S7 | CLI 集成服务 (P10-07) | P0 | in_progress |
+| S8 | API 测试 (P10-08) | P1 | ✅ 完成 |
+
+---
+
+## 完成总结 (P10-04/05/08: 2026-04-07)
+
+### P10-04: 项目管理 API ✅
+
+**实现文件**:
+- `src/web/api/v1/projects.py` - 265 行，6 个 REST 端点
+- `tests/unit/test_web/api/test_projects.py` - 164 行，13 个测试
+
+**端点列表**:
+- `POST /api/v1/projects` - 创建项目（需认证）
+- `GET /api/v1/projects` - 列出项目（分页、过滤）
+- `GET /api/v1/projects/{id}` - 获取详情
+- `PUT /api/v1/projects/{id}` - 更新项目（需认证）
+- `DELETE /api/v1/projects/{id}` - 删除项目（需认证）
+- `GET /api/v1/projects/{id}/scans` - 获取扫描历史
+
+**测试结果**: 13/13 通过 ✅
+
+### P10-05: 扫描任务 API ✅
+
+**实现文件**:
+- `src/web/api/v1/scans.py` - 697 行，9 个 REST 端点
+- `tests/unit/test_web/api/test_scans.py` - 120 行，9 个测试
+
+**端点列表**:
+- `POST /api/v1/scans` - 创建扫描（需认证）
+- `GET /api/v1/scans` - 列出扫描（分页、状态过滤）
+- `GET /api/v1/scans/{id}` - 获取详情
+- `GET /api/v1/scans/{id}/progress` - 获取详细进度（引擎/Token/发现统计）
+- `GET /api/v1/scans/{id}/phases` - 获取阶段详情
+- `GET /api/v1/scans/{id}/events` - 获取事件流
+- `GET /api/v1/scans/{id}/agent-conversation` - 获取 Agent 对话
+- `GET /api/v1/scans/{id}/current-file` - 获取当前处理文件
+- `GET /api/v1/scans/{id}/findings` - 获取漏洞结果
+- `GET /api/v1/scans/{id}/report` - 获取报告
+
+**测试结果**: 9/9 通过 ✅
+
+### P10-08: API 单元测试 ✅
+
+**新增文件**:
+- `src/web/api/deps.py` - 依赖注入提供者
+- `tests/unit/test_web/api/__init__.py`
+- `tests/unit/test_web/api/test_projects.py` - 13 测试
+- `tests/unit/test_web/api/test_scans.py` - 9 测试
+- `tests/unit/test_web/test_main.py` - 更新（9 测试）
+
+**测试覆盖**:
+- 路由注册验证
+- 请求体验证（必填字段、枚举值、长度限制）
+- 分页参数验证（page、page_size、limit）
+- 认证/授权模拟
+
+**测试结果**: 23/23 API 测试 + 41/41 之前测试 = **64/64 通过** ✅
+
+### 总体进度
+
+| 组件 | 文件数 | 测试数 | 状态 |
+|------|--------|--------|------|
+| 数据库设计 | 4 | - | ✅ |
+| 数据模型 | 7 | 25 | ✅ |
+| Repository 层 | 6 | 7 | ✅ |
+| FastAPI 应用 | 5 | 9 | ✅ |
+| **项目 API** | 1 | 13 | ✅ |
+| **扫描 API** | 1 | 9 | ✅ |
+| **API 测试** | 4 | 23 | ✅ |
+| **总计** | **28** | **64** | **85% 完成** |
+
+**剩余任务**:
+- P10-07: CLI 集成服务 (in_progress)
+- P10-08d: 集成测试 (API + DB) (待添加)
 
 ---
 

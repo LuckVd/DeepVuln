@@ -1,5 +1,64 @@
 # Change Log
 
+## 2026-04-07 (续)
+
+### P10-04/05/08: API 端点与测试完成
+
+- **Goal ID**: P10-00
+- **Summary**: 完成 Web 服务 API 端点和单元测试，实现 15 个 RESTful 接口
+- **Impact**:
+  - `src/web/api/v1/projects.py`: 265 行，6 个项目管理端点
+  - `src/web/api/v1/scans.py`: 697 行，9 个扫描管理端点
+  - `src/web/api/deps.py`: 依赖注入提供者
+  - `tests/unit/test_web/api/`: 新增 API 测试目录
+  - `tests/unit/test_web/api/test_projects.py`: 13 个单元测试
+  - `tests/unit/test_web/api/test_scans.py`: 9 个单元测试
+  - `tests/unit/test_web/test_main.py`: 更新路由测试
+- **Features**:
+  - **项目管理 API**: 创建/列出/获取/更新/删除项目，查询扫描历史
+  - **扫描管理 API**: 创建/列出/获取扫描，查询进度/阶段/事件
+  - **Agent 对话 API**: 获取 Agent 对话历史（含对抗辩论）
+  - **进度追踪 API**: 详细进度（引擎状态、Token 消耗、发现统计）
+  - **文件追踪 API**: 获取当前处理文件详情
+  - **认证分层**: 写操作需 API Key，读操作可选认证
+  - **分页支持**: 所有列表端点支持分页（page/page_size）
+  - **过滤支持**: 按状态、项目、严重程度过滤
+- **API 端点清单**:
+  ```
+  项目管理:
+    POST   /api/v1/projects          创建项目
+    GET    /api/v1/projects          列出项目 (分页/过滤)
+    GET    /api/v1/projects/{id}     获取详情
+    PUT    /api/v1/projects/{id}     更新项目
+    DELETE /api/v1/projects/{id}     删除项目
+    GET    /api/v1/projects/{id}/scans 扫描历史
+
+  扫描管理:
+    POST   /api/v1/scans                        创建扫描
+    GET    /api/v1/scans                        列出扫描 (分页/过滤)
+    GET    /api/v1/scans/{id}                   获取详情
+    GET    /api/v1/scans/{id}/progress          详细进度
+    GET    /api/v1/scans/{id}/phases            阶段详情
+    GET    /api/v1/scans/{id}/events            事件流
+    GET    /api/v1/scans/{id}/agent-conversation Agent 对话
+    GET    /api/v1/scans/{id}/current-file      当前文件
+    GET    /api/v1/scans/{id}/findings          漏洞结果
+    GET    /api/v1/scans/{id}/report            扫描报告
+  ```
+- **Tests**: 64/64 单元测试通过 ✅
+  - 数据模型: 10/10
+  - Schema 验证: 15/15
+  - Repository: 7/7
+  - Main 应用: 9/9
+  - **Projects API: 13/13** (路由 + 请求验证 + 分页)
+  - **Scans API: 9/9** (路由 + 请求验证 + 分页)
+  - **新增: 23 API 测试**
+- **Security**: No hardcoded secrets, API authentication from environment
+- **Dead Code**: not run
+- **Next**: P10-07 CLI 集成服务 (当前 in_progress)
+
+---
+
 ## 2026-04-07
 
 ### P10-01~P10-06: Web 服务基础架构

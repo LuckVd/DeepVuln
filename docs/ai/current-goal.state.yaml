@@ -30,18 +30,18 @@ implementation_steps:
     status: "completed"
   - step: "S5: 项目管理 API (P10-04)"
     file: "src/web/api/v1/projects.py"
-    status: "in_progress"
+    status: "completed"
   - step: "S6: 扫描任务 API (P10-05)"
     file: "src/web/api/v1/scans.py"
-    status: "pending"
+    status: "completed"
   - step: "S7: CLI 集成服务 (P10-07)"
     file: "src/web/services/scan_executor.py"
-    status: "pending"
+    status: "in_progress"
   - step: "S8: API 测试 (P10-08)"
-    file: "tests/integration/test_api/"
-    status: "pending"
+    file: "tests/unit/test_web/api/"
+    status: "completed"
 test_scope: []
-test_result: "41/41 passed"
+test_result: "64/64 passed"
 new_files:
   - "migrations/alembic.ini"
   - "migrations/env.py"
@@ -56,12 +56,19 @@ new_files:
   - "src/web/models/schemas.py"
   - "tests/unit/test_web/models/test_models.py"
   - "tests/unit/test_web/models/test_schemas.py"
+  - "src/web/api/deps.py"
+  - "tests/unit/test_web/api/__init__.py"
+  - "tests/unit/test_web/api/test_projects.py"
+  - "tests/unit/test_web/api/test_scans.py"
 modified_files:
   - "pyproject.toml"
+  - "src/web/api/v1/projects.py"
+  - "src/web/api/v1/scans.py"
+  - "tests/unit/test_web/test_main.py"
 security_blockers: []
 dead_code_actions: []
-sync_status: "ready"
-commit_id: null
+sync_status: "completed"
+commit_id: "c1dd568"
 last_check_at: "2026-04-07"
 last_synced_at: "2026-04-07"
 previous_goal:
