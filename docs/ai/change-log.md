@@ -2,6 +2,33 @@
 
 ## 2026-04-07
 
+### P10-01~P10-06: Web 服务基础架构
+
+- **Goal ID**: P10-00
+- **Summary**: 实现 FastAPI 后端基础架构，包括 PostgreSQL 数据库、Pydantic 模型、Repository 层
+- **Impact**:
+  - `migrations/`: Alembic 迁移框架 + 初始 schema (001_init_schema.py)
+  - `src/web/models/`: 7 个数据模型文件 (project/scan/finding/checkpoint/schemas/database)
+  - `src/web/core/`: 配置管理 (config.py)、数据库连接 (database.py)、API Key 认证 (security.py)
+  - `src/web/repositories/`: 6 个 Repository 类 (base/project/scan/finding/event)
+  - `src/web/main.py`: FastAPI 应用入口
+  - `pyproject.toml`: 添加 web 依赖 (fastapi, uvicorn, sqlalchemy, alembic, asyncpg)
+- **Features**:
+  - **数据库设计**: 7 张核心表 (projects/scans/scan_phases/scan_events/findings/scan_files/api_keys)
+  - **细粒度进度追踪**: 引擎级、步骤级、Token 消耗、发现统计 (参考 DeepAudit)
+  - **Agent 对话支持**: scan_events 表存储 agent_turn/agent_role/agent_message
+  - **Phase 9 集成**: findings.cpg_path JSONB 字段
+  - **异步支持**: SQLAlchemy 2.0 Async + AsyncSession
+  - **API Key 认证**: 基于头部的简单认证 (X-API-Key)
+- **Tests**: 41/41 单元测试通过 ✅
+  - 数据模型: 10/10
+  - Schema 验证: 15/15
+  - Repository: 7/7
+  - Main 应用: 9/9
+- **Security**: No hardcoded secrets, API keys from environment
+- **Dead Code**: not run
+- **Next**: P10-04 项目管理 API (当前 in_progress)
+
 ### P9-01: CPG 与 Agent 标准集成
 
 - **Goal ID**: P9-01

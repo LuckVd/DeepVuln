@@ -934,6 +934,602 @@ tests/unit/test_l3/test_pre_filter/
 
 ---
 
+## Phase 10: Web 服务与持久化存储
+
+> **目标**: 建立完整的 Web 服务，支持项目管理、扫描任务管理和结果持久化
+> **交付物**: FastAPI 后端 + PostgreSQL 数据库 + RESTful API
+> **状态**: 进行中 (50%) - P10-01/02/03/06 已完成
+
+### P10-01: 数据库设计与迁移（P0）✅
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P10-01 | PostgreSQL 数据库设计 | - | done |
+| P10-01a | 设计核心数据表 (projects/scans/findings/scan_phases/scan_files) | P10-01 | done |
+| P10-01b | 设计索引和约束 | P10-01a | done |
+| P10-01c | Alembic 迁移框架集成 | P10-01a | done |
+| P10-01d | 创建初始迁移脚本 | P10-01b | done |
+| P10-01e | 自动更新 updated_at 触发器 | P10-01d | done |
+
+**数据表清单**:
+```sql
+-- projects: 项目信息
+-- scans: 扫描任务
+-- scan_phases: 扫描阶段状态 (用于续扫)
+-- findings: 漏洞结果
+-- scan_files: 文件扫描状态 (用于增量扫描)
+-- api_keys: API 密钥管理
+```
+
+**实现文件**:
+- `migrations/versions/001_init_schema.py` ✅
+- `migrations/env.py` ✅
+- `src/web/models/database.py` ✅
+
+**测试结果**: 通过
+**完成日期**: 2026-04-07
+
+### P10-02: Pydantic 数据模型（P0）✅
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P10-02 | Pydantic 数据模型定义 | - | done |
+| P10-02a | Project 系列模型 | P10-01 | done |
+| P10-02b | Scan 系列模型 | P10-02a | done |
+| P10-02c | Finding 系列模型 | P10-02a | done |
+| P10-02d | Checkpoint 系列模型 | P10-02a | done |
+| P10-02e | 请求/响应模型 | P10-02a | done |
+| P10-02f | 枚举类型定义 (ScanStatus/ScanType/SeverityLevel/FindingStatus) | P10-02a | done |
+
+**实现文件**:
+- `src/web/models/project.py` ✅
+- `src/web/models/scan.py` ✅
+- `src/web/models/finding.py` ✅
+- `src/web/models/checkpoint.py` ✅
+- `src/web/models/schemas.py` ✅
+
+**测试结果**: 25/25 通过 ✅
+
+### P10-03: FastAPI 项目初始化（P0）✅
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P10-03 | FastAPI 应用框架搭建 | - | done |
+| P10-03a | 项目目录结构创建 | P10-03 | done |
+| P10-03b | 依赖安装 (fastapi/uvicorn/sqlalchemy/alembic) | P10-03a | done |
+| P10-03c | 配置管理 (环境变量/Settings) | P10-03b | done |
+| P10-03d | 数据库连接池配置 | P10-03c | done |
+| P10-03e | 应用入口 (main.py) | P10-03d | done |
+| P10-03f | CORS 中间件配置 | P10-03e | done |
+| P10-03g | 生命周期管理 (startup/shutdown) | P10-03e | done |
+
+**目录结构**:
+```
+src/web/
+├── api/
+│   ├── __init__.py
+│   ├── deps.py                  # 依赖注入
+│   └── v1/
+│       ├── api.py               # 路由聚合
+│       ├── projects.py          # 项目管理 API
+│       └── scans.py             # 扫描管理 API
+├── core/
+│   ├── __init__.py
+│   ├── database.py              # 数据库连接
+│   ├── config.py                # 配置管理
+│   └── security.py              # 认证授权
+├── models/                       # Pydantic 模型
+├── services/                     # 业务逻辑
+└── main.py                       # FastAPI 应用
+```
+
+**实现文件**:
+- `src/web/main.py` ✅
+- `src/web/core/database.py` ✅
+- `src/web/core/config.py` ✅
+- `src/web/core/security.py` ✅
+
+**测试结果**: 9/9 通过 ✅
+
+### P10-04: 项目管理 API（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P10-04 | 项目管理 REST API | - | todo |
+| P10-04a | 创建项目 API | P10-03 | todo |
+| P10-04b | 列出项目 API (分页/过滤) | P10-04a | todo |
+| P10-04c | 获取项目详情 API | P10-04a | todo |
+| P10-04d | 更新项目 API | P10-04a | todo |
+| P10-04e | 删除项目 API | P10-04a | todo |
+| P10-04f | 项目扫描历史 API | P10-04a | todo |
+
+**API 端点**:
+```
+POST   /api/v1/projects          # 创建项目
+GET    /api/v1/projects          # 列出项目
+GET    /api/v1/projects/{id}     # 获取详情
+PUT    /api/v1/projects/{id}     # 更新项目
+DELETE /api/v1/projects/{id}     # 删除项目
+GET    /api/v1/projects/{id}/scans # 扫描历史
+```
+
+**实现文件**:
+- `src/web/api/v1/projects.py`
+- `src/web/services/project_service.py`
+
+### P10-05: 扫描任务 API（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P10-05 | 扫描任务管理 API | - | todo |
+| P10-05a | 创建扫描 API | P10-04 | todo |
+| P10-05b | 列出扫描 API | P10-05a | todo |
+| P10-05c | 获取扫描详情 API | P10-05a | todo |
+| P10-05d | 扫描进度查询 API | P10-05a | todo |
+| P10-05e | 漏洞结果查询 API | P10-05a | todo |
+| P10-05f | 扫描报告获取 API | P10-05a | todo |
+
+**API 端点**:
+```
+POST   /api/v1/scans              # 创建扫描
+GET    /api/v1/scans              # 列出扫描
+GET    /api/v1/scans/{id}         # 获取详情
+GET    /api/v1/scans/{id}/progress # 获取进度
+GET    /api/v1/scans/{id}/findings # 获取漏洞
+GET    /api/v1/scans/{id}/report    # 获取报告
+```
+
+**实现文件**:
+- `src/web/api/v1/scans.py`
+- `src/web/services/scan_service.py`
+
+### P10-06: 数据库 Repository 层（P1）✅
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P10-06 | 数据访问层实现 | - | done |
+| P10-06a | ProjectRepository | P10-02 | done |
+| P10-06b | ScanRepository | P10-06a | done |
+| P10-06c | FindingRepository | P10-06a | done |
+| P10-06d | ScanPhaseRepository | P10-06a | done |
+| P10-06e | ScanEventRepository | P10-06a | done |
+| P10-06f | 异步数据库会话管理 | P10-06a | done |
+
+**实现文件**:
+- `src/web/repositories/__init__.py` ✅
+- `src/web/repositories/base.py` ✅
+- `src/web/repositories/project.py` ✅
+- `src/web/repositories/scan.py` ✅
+- `src/web/repositories/finding.py` ✅
+- `src/web/repositories/event.py` ✅ (ScanPhaseRepository + ScanEventRepository)
+
+**测试结果**: 7/7 单元测试通过 ✅
+**完成日期**: 2026-04-07
+
+### P10-07: CLI 集成服务（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P10-07 | CLI 调用服务层 | - | todo |
+| P10-07a | ScanExecutor 核心实现 | P10-05, P10-06 | todo |
+| P10-07b | 子进程调用现有 CLI | P10-07a | todo |
+| P10-07c | 实时输出解析与进度更新 | P10-07b | todo |
+| P10-07d | 结果 JSON 解析与入库 | P10-07c | todo |
+| P10-07e | 错误处理与状态同步 | P10-07d | todo |
+
+**实现文件**:
+- `src/web/services/scan_executor.py`
+- `src/web/services/cli_adapter.py`
+
+### P10-08: 基础 API 测试（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P10-08 | API 测试 | - | todo |
+| P10-08a | 项目 API 单元测试 | P10-04 | todo |
+| P10-08b | 扫描 API 单元测试 | P10-05 | todo |
+| P10-08c | Repository 层单元测试 | P10-06 | todo |
+| P10-08d | 集成测试 (API + DB) | P10-08a,b,c | todo |
+| P10-08e | API 文档生成 (OpenAPI) | P10-03 | todo |
+
+**实现文件**:
+- `tests/integration/test_api/test_projects.py`
+- `tests/integration/test_api/test_scans.py`
+- `tests/unit/test_web/repositories/`
+
+---
+
+## Phase 11: 暂停/续扫机制
+
+> **目标**: 支持长时间扫描任务的暂停、续扫和取消，提升用户体验和资源利用率
+
+### P11-01: 检查点服务（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P11-01 | 检查点管理服务 | - | todo |
+| P11-01a | 检查点数据结构定义 | P10-02 | todo |
+| P11-01b | 保存检查点 (文件 + 数据库) | P11-01a | todo |
+| P11-01c | 加载检查点 (验证完整性) | P11-01b | todo |
+| P11-01d | 检查点清理策略 | P11-01b | todo |
+| P11-01e | 检查点版本管理 | P11-01d | todo |
+
+**检查点数据结构**:
+```python
+class CheckpointData:
+    scan_id: int
+    current_phase: PhaseName          # 当前执行阶段
+    phases: dict[str, PhaseInfo]      # 各阶段状态
+    global_state: dict[str, Any]     # 全局状态
+    resume_data: dict[str, Any]      # 恢复数据
+
+class PhaseInfo:
+    status: PhaseStatus              # pending/running/completed/failed/skipped
+    output_path: Optional[str]        # 阶段输出文件路径
+    output_data: Optional[dict]        # 阶段输出数据 (可复用)
+    error_message: Optional[str]
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+```
+
+**实现文件**:
+- `src/web/services/checkpoint_service.py`
+
+### P11-02: 扫描阶段管理（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P11-02 | 扫描阶段状态管理 | - | todo |
+| P11-02a | 阶段枚举定义 | P11-01 | todo |
+| P11-02b | 阶段状态跟踪 | P11-02a | todo |
+| P11-02c | 阶段切换逻辑 | P11-02b | todo |
+| P11-02d | 阶段失败处理 | P11-02c | todo |
+| P11-02e | 阶段输出管理 | P11-02d | todo |
+| P11-02f | 阶段状态数据库记录 | P11-02e | todo |
+
+**扫描阶段定义**:
+```python
+class PhaseName(str, Enum):
+    L1_PREPARATION = "L1_preparation"
+    L1_ATTACK_SURFACE = "L1_attack_surface"
+    L2_SEMGREP = "L2_semgrep"
+    L2_CODEQL = "L2_codeql"
+    L3_AGENT = "L3_agent"
+    L3_ADJUDICATION = "L3_adjudication"
+    REPORT_GENERATION = "report_generation"
+```
+
+**实现文件**:
+- `src/web/services/phase_manager.py`
+
+### P11-03: 扫描执行器（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P11-03 | 扫描执行器核心实现 | - | todo |
+| P11-03a | 异步执行流程控制 | P11-02 | todo |
+| P11-03b | 暂停信号处理 | P11-03a | todo |
+| P11-03c | 取消信号处理 | P11-03a | todo |
+| P11-03d | 续扫状态恢复逻辑 | P11-01, P11-03a | todo |
+| P11-03e | 阶段跳过逻辑 (续扫优化) | P11-03d | todo |
+| P11-03f | 进度更新机制 | P11-03a | todo |
+| P11-03g | 错误恢复与重试 | P11-03f | todo |
+
+**执行流程**:
+```
+1. 检查是否需要续扫
+2. 加载检查点数据
+3. 恢复全局状态
+4. 执行各阶段 (跳过已完成)
+5. 每阶段完成后保存检查点
+6. 处理暂停/取消请求
+```
+
+**实现文件**:
+- `src/web/services/scan_executor.py`
+
+### P11-04: 暂停/继续/取消 API（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P11-04 | 扫描控制 API | - | todo |
+| P11-04a | 暂停扫描 API | P11-03 | todo |
+| P11-04b | 继续扫描 API | P11-04a | todo |
+| P11-04c | 取消扫描 API | P11-04a | todo |
+| P11-04d | 扫描状态转换逻辑 | P11-04a,b,c | todo |
+| P11-04e | 信号传递机制 (asyncio.Event) | P11-04d | todo |
+
+**API 端点**:
+```
+POST /api/v1/scans/{id}/pause    # 暂停扫描
+POST /api/v1/scans/{id}/resume   # 继续扫描
+POST /api/v1/scans/{id}/cancel   # 取消扫描
+```
+
+**实现文件**:
+- `src/web/api/v1/scans.py` (扩展)
+- `src/web/services/scan_control_service.py`
+
+### P11-05: 增量扫描支持（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P11-05 | 增量扫描功能 | - | todo |
+| P11-05a | 扫描文件表 (scan_files) | P10-01 | todo |
+| P11-05b | 文件变更检测 (hash 对比) | P11-05a | todo |
+| P11-05c | 增量扫描策略 (只扫描变更文件) | P11-05b | todo |
+| P11-05d | 增量结果合并 | P11-05c | todo |
+| P11-05e | 增量扫描 API | P11-05d | todo |
+
+**实现文件**:
+- `src/web/services/incremental_scan_service.py`
+
+### P11-06: 状态同步与事件通知（P2）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P11-06 | 实时状态同步 | - | todo |
+| P11-06a | WebSocket 服务端实现 | P11-03 | todo |
+| P11-06b | 进度事件广播 | P11-06a | todo |
+| P11-06c | 连接状态管理 | P11-06a | todo |
+| P11-06d | 心跳机制 | P11-06c | todo |
+| P11-06e | 重连处理 | P11-06d | todo |
+
+**WebSocket 端点**:
+```
+WS /api/v1/ws/scans/{scan_id}/progress
+```
+
+**实现文件**:
+- `src/web/api/websocket/scans.py`
+
+### P11-07: 暂停/续扫测试（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P11-07 | 暂停/续扫功能测试 | - | todo |
+| P11-07a | 检查点保存/加载测试 | P11-01 | todo |
+| P11-07b | 暂停后继续测试 | P11-03, P11-04 | todo |
+| P11-07c | 阶段跳过验证测试 | P11-03e | todo |
+| P11-07d | 取消扫描清理测试 | P11-03, P11-04c | todo |
+| P11-07e | 端到端暂停/续扫测试 | P11-07a,b,c,d | todo |
+
+**实现文件**:
+- `tests/integration/test_pause_resume/`
+- `tests/unit/test_web/test_checkpoint_service.py`
+
+---
+
+## Phase 12: 前端界面
+
+> **目标**: 提供友好的 Web UI，支持项目管理、扫描控制和结果查看
+
+### P12-01: 前端项目初始化（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P12-01 | React + TypeScript 项目 | - | todo |
+| P12-01a | Vite + React 18 项目创建 | P12-01 | todo |
+| P12-01b | TypeScript 配置 | P12-01a | todo |
+| P12-01c | ESLint + Prettier 配置 | P12-01b | todo |
+| P12-01d | 路由管理 (react-router) | P12-01a | todo |
+| P12-01e | 状态管理 (Zustand) | P12-01d | todo |
+| P12-01f | API 客户端 (axios/fetch) | P12-01e | todo |
+| P12-01g | 样式管理 (Tailwind CSS) | P12-01f | todo |
+
+**目录结构**:
+```
+frontend/
+├── src/
+│   ├── components/
+│   │   ├── layout/
+│   │   ├── project/
+│   │   ├── scan/
+│   │   ├── finding/
+│   │   └── common/
+│   ├── pages/
+│   ├── hooks/
+│   ├── services/
+│   ├── stores/
+│   ├── types/
+│   └── App.tsx
+├── public/
+├── package.json
+├── vite.config.ts
+└── tailwind.config.js
+```
+
+**实现文件**:
+- `frontend/vite.config.ts`
+- `frontend/src/App.tsx`
+- `frontend/src/main.tsx`
+
+### P12-02: 通用组件库（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P12-02 | 通用 UI 组件 | - | todo |
+| P12-02a | Button 组件 (加载状态/禁用状态) | P12-01 | todo |
+| P12-02b | Modal 组件 | P12-02a | todo |
+| P12-02c | ProgressBar 组件 | P12-02a | todo |
+| P12-02d | Card 组件 | P12-02a | todo |
+| P12-02e | Table 组件 (分页/排序) | P12-02d | todo |
+| P12-02f | Form 组件 (输入/验证) | P12-02e | todo |
+| P12-02g | Toast 通知组件 | P12-02f | todo |
+| P12-02h | Loading/Empty 状态组件 | P12-02g | todo |
+
+**实现文件**:
+- `frontend/src/components/common/Button.tsx`
+- `frontend/src/components/common/Modal.tsx`
+- `frontend/src/components/common/ProgressBar.tsx`
+- `frontend/src/components/common/Table.tsx`
+
+### P12-03: 项目管理界面（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P12-03 | 项目管理功能 | - | todo |
+| P12-03a | 项目列表页 | P12-02 | todo |
+| P12-03b | 项目卡片组件 | P12-03a | todo |
+| P12-03c | 创建项目表单 | P12-03a | todo |
+| P12-03d | 项目详情页 | P12-03a | todo |
+| P12-03e | 项目删除确认 | P12-03d | todo |
+| P12-03f | 项目扫描历史展示 | P12-03d | todo |
+
+**实现文件**:
+- `frontend/src/pages/Projects.tsx`
+- `frontend/src/components/project/ProjectList.tsx`
+- `frontend/src/components/project/ProjectCard.tsx`
+- `frontend/src/components/project/ProjectForm.tsx`
+
+### P12-04: 扫描管理界面（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P12-04 | 扫描管理功能 | - | todo |
+| P12-04a | 扫描列表页 | P12-03 | todo |
+| P12-04b | 扫描卡片组件 | P12-04a | todo |
+| P12-04c | 创建扫描表单 | P12-04a | todo |
+| P12-04d | 扫描进度组件 | P12-04b | todo |
+| P12-04e | 暂停/继续/取消按钮 | P12-04d | todo |
+| P12-04f | 扫描详情页 | P12-04a | todo |
+| P12-04g | 扫描日志流式展示 | P12-04f | todo |
+
+**实现文件**:
+- `frontend/src/pages/Scans.tsx`
+- `frontend/src/components/scan/ScanList.tsx`
+- `frontend/src/components/scan/ScanCard.tsx`
+- `frontend/src/components/scan/ScanProgress.tsx`
+- `frontend/src/components/scan/ScanActions.tsx`
+
+### P12-05: 实时进度更新（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P12-05 | WebSocket 实时通信 | - | todo |
+| P12-05a | WebSocket 客户端封装 | P12-01 | todo |
+| P12-05b | 进度更新 Hook (useScanProgress) | P12-05a | todo |
+| P12-05c | 自动重连机制 | P12-05b | todo |
+| P12-05d | 心跳机制 | P12-05c | todo |
+| P12-05e | 轮询作为 Fallback | P12-05c | todo |
+| P12-05f | 进度条实时更新 | P12-05e | todo |
+
+**实现文件**:
+- `frontend/src/services/websocket.ts`
+- `frontend/src/hooks/useWebSocket.ts`
+- `frontend/src/hooks/useScanProgress.ts`
+
+### P12-06: 漏洞结果界面（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P12-06 | 漏洞结果展示 | - | todo |
+| P12-06a | 漏洞列表页 (分页/过滤/搜索) | P12-02 | todo |
+| P12-06b | 漏洞卡片组件 | P12-06a | todo |
+| P12-06c | 漏洞详情页 (完整信息) | P12-06a | todo |
+| P12-06d | 漏洞状态管理 (确认/误报/条件) | P12-06c | todo |
+| P12-06e | 严重程度标签筛选 | P12-06a | todo |
+| P12-06f | 文件路径导航 | P12-06c | todo |
+| P12-06g | 代码高亮显示 | P12-06f | todo |
+
+**实现文件**:
+- `frontend/src/pages/Findings.tsx`
+- `frontend/src/components/finding/FindingList.tsx`
+- `frontend/src/components/finding/FindingCard.tsx`
+- `frontend/src/components/finding/FindingDetails.tsx`
+
+### P12-07: 报告生成与导出（P2）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P12-07 | 报告生成功能 | - | todo |
+| P12-07a | Markdown 报告生成 | P12-06 | todo |
+| P12-07b | PDF 报告生成 | P12-07a | todo |
+| P12-07c | 报告模板设计 | P12-07b | todo |
+| P12-07d | 报告导出 API | P12-07a | todo |
+| P12-07e | 报告历史对比 | P12-07d | todo |
+| P12-07f | 报告分享功能 | P12-07e | todo |
+
+**实现文件**:
+- `frontend/src/pages/ReportView.tsx`
+- `frontend/src/components/report/ReportExport.tsx`
+- `src/web/services/report_service.py`
+
+---
+
+## Phase 13: 企业级功能
+
+> **目标**: 完善企业级功能，支持 CI/CD 集成和团队协作
+
+### P13-01: 用户认证与权限（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P13-01 | 用户认证系统 | - | todo |
+| P13-01a | API Key 认证机制 | P13-01 | todo |
+| P13-01b | 用户注册/登录 (可选) | P13-01a | todo |
+| P13-01c | 基于角色的权限控制 (RBAC) | P13-01a | todo |
+| P13-01d | API Key 生成与管理 | P13-01a | todo |
+| P13-01e | 操作审计日志 | P13-01d | todo |
+
+**实现文件**:
+- `src/web/core/security.py`
+- `src/web/api/v1/auth.py`
+- `src/web/models/user.py`
+
+### P13-02: CI/CD 集成（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P13-02 | CI/CD 集成支持 | - | todo |
+| P13-02a | Docker 镜像构建 | P13-01 | todo |
+| P13-02b | Docker Compose 配置 | P13-02a | todo |
+| P13-02c | 环境变量配置文档 | P13-02b | todo |
+| P13-02d | CLI 容器化入口 | P13-02b | todo |
+| P13-02e | CI 配置示例 (GitHub Actions/GitLab CI) | P13-02d | todo |
+| P13-02f | 扫描结果输出格式 (SARIF) | P13-02e | todo |
+
+**实现文件**:
+- `Dockerfile`
+- `docker-compose.yml`
+- `.github/workflows/scan.yml`
+- `DEPLOYMENT.md`
+
+### P13-03: 多租户支持（P2）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P13-03 | 多租户架构 | - | todo |
+| P13-03a | 数据隔离策略 | P13-01 | todo |
+| P13-03b | 租户级配额管理 | P13-03a | todo |
+| P13-03c | 资源使用统计 | P13-03b | todo |
+| P13-03d | 租户管理界面 | P13-03a | todo |
+
+---
+
+## 里程碑更新
+
+|里程碑|交付物|能力描述|状态|日期|
+|---|---|---|---|---|
+|v0.1|L1|支持源码获取、技术栈识别、攻击面探测|done|2026-02|
+|v0.2|+ Semgrep|支持模式匹配扫描|done|2026-02|
+|v0.2.1|+ CodeQL|支持数据流分析|done|2026-02|
+|v0.2.2|+ Agent|支持 AI 驱动深度审计|done|2026-02|
+|v0.3|L3 完整|三引擎 + 多轮审计|done|2026-02|
+|v0.4|精度重构|Rule Gating + 语言重构|done|2026-03|
+|v0.5|裁决统一|Exploitability 主导裁决|done|2026-03-06|
+|v0.6|精度深化|可利用性评估增强 + 调用图分析|done|2026-03-09|
+|v0.7|报告可信度|结果边界清晰 + 噪声治理 + 覆盖率透明|done|2026-04|
+|v0.75|CodeQL 智能构建|LLM 决策 + 分语言构建编排 + 构建成功率提升|done|2026-04|
+|v0.8|AST Engine|结构级代码理解 + Code Graph + AI 结构化上下文 + 前置防误报|done|2026-04|
+|v0.9|CPG 基础|完整代码图 + 攻击路径搜索 + Agent 集成|done|2026-04-07|
+|v0.95|Web 服务与持久化|FastAPI 后端 + PostgreSQL + RESTful API + 项目管理|todo|2026-04|
+|v0.96|暂停/续扫功能|检查点机制 + 阶段恢复 + 控制接口|todo|2026-04|
+|v0.97|前端界面|React + TypeScript + 实时进度 + 漏洞展示|todo|2026-04|
+|v1.0|企业稳定版|高精度、低误报、CI 可用 + Web UI + 暂停续扫|todo|2026-Q2|
+
+---
+
 ## 当前焦点
 
 |字段|值|
