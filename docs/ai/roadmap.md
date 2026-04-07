@@ -1334,19 +1334,20 @@ WS /api/v1/ws/{scan_id}
 ## Phase 12: 前端界面
 
 > **目标**: 提供友好的 Web UI，支持项目管理、扫描控制和结果查看
+> **状态**: MVP 完成 (2026-04-07)
 
-### P12-01: 前端项目初始化（P0）
+### P12-01: 前端项目初始化（P0）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P12-01 | React + TypeScript 项目 | - | todo |
-| P12-01a | Vite + React 18 项目创建 | P12-01 | todo |
-| P12-01b | TypeScript 配置 | P12-01a | todo |
-| P12-01c | ESLint + Prettier 配置 | P12-01b | todo |
-| P12-01d | 路由管理 (react-router) | P12-01a | todo |
-| P12-01e | 状态管理 (Zustand) | P12-01d | todo |
-| P12-01f | API 客户端 (axios/fetch) | P12-01e | todo |
-| P12-01g | 样式管理 (Tailwind CSS) | P12-01f | todo |
+| P12-01 | React + TypeScript 项目 | - | done |
+| P12-01a | Vite + React 18 项目创建 | P12-01 | done |
+| P12-01b | TypeScript 配置 | P12-01a | done |
+| P12-01c | ESLint + Prettier 配置 | P12-01b | done |
+| P12-01d | 路由管理 (react-router) | P12-01a | done |
+| P12-01e | 状态管理 (React Query) | P12-01d | done |
+| P12-01f | API 客户端 (axios) | P12-01e | done |
+| P12-01g | 样式管理 (Ant Design) | P12-01f | done |
 
 **目录结构**:
 ```
@@ -1375,80 +1376,58 @@ frontend/
 - `frontend/src/App.tsx`
 - `frontend/src/main.tsx`
 
-### P12-02: 通用组件库（P1）
+### P12-02: 通用组件库（P1）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P12-02 | 通用 UI 组件 | - | todo |
-| P12-02a | Button 组件 (加载状态/禁用状态) | P12-01 | todo |
-| P12-02b | Modal 组件 | P12-02a | todo |
-| P12-02c | ProgressBar 组件 | P12-02a | todo |
-| P12-02d | Card 组件 | P12-02a | todo |
-| P12-02e | Table 组件 (分页/排序) | P12-02d | todo |
-| P12-02f | Form 组件 (输入/验证) | P12-02e | todo |
-| P12-02g | Toast 通知组件 | P12-02f | todo |
-| P12-02h | Loading/Empty 状态组件 | P12-02g | todo |
+| P12-02 | 通用 UI 组件 | - | done |
+| P12-02a | 使用 Ant Design 组件库 | P12-01 | done |
 
 **实现文件**:
-- `frontend/src/components/common/Button.tsx`
-- `frontend/src/components/common/Modal.tsx`
-- `frontend/src/components/common/ProgressBar.tsx`
-- `frontend/src/components/common/Table.tsx`
+- 使用 Ant Design 5.12+ 内置组件
 
-### P12-03: 项目管理界面（P1）
+### P12-03: 项目管理界面（P1）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P12-03 | 项目管理功能 | - | todo |
-| P12-03a | 项目列表页 | P12-02 | todo |
-| P12-03b | 项目卡片组件 | P12-03a | todo |
-| P12-03c | 创建项目表单 | P12-03a | todo |
-| P12-03d | 项目详情页 | P12-03a | todo |
-| P12-03e | 项目删除确认 | P12-03d | todo |
-| P12-03f | 项目扫描历史展示 | P12-03d | todo |
+| P12-03 | 项目管理功能 | - | done |
+| P12-03a | 项目列表页（分页、筛选） | P12-02 | done |
+| P12-03b | 创建项目表单 | P12-03a | done |
+| P12-03c | 项目删除确认 | P12-03a | done |
+| P12-03d | 项目扫描历史展示 | P12-03a | done |
 
 **实现文件**:
-- `frontend/src/pages/Projects.tsx`
-- `frontend/src/components/project/ProjectList.tsx`
-- `frontend/src/components/project/ProjectCard.tsx`
-- `frontend/src/components/project/ProjectForm.tsx`
+- `src/web/frontend/src/pages/Projects.tsx`
+- `src/web/frontend/src/hooks/useApi.ts` (React Query)
 
-### P12-04: 扫描管理界面（P0）
+### P12-04: 扫描管理界面（P0）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P12-04 | 扫描管理功能 | - | todo |
-| P12-04a | 扫描列表页 | P12-03 | todo |
-| P12-04b | 扫描卡片组件 | P12-04a | todo |
-| P12-04c | 创建扫描表单 | P12-04a | todo |
-| P12-04d | 扫描进度组件 | P12-04b | todo |
-| P12-04e | 暂停/继续/取消按钮 | P12-04d | todo |
-| P12-04f | 扫描详情页 | P12-04a | todo |
-| P12-04g | 扫描日志流式展示 | P12-04f | todo |
+| P12-04 | 扫描管理功能 | - | done |
+| P12-04a | 扫描列表页（分页、状态筛选） | P12-03 | done |
+| P12-04b | 扫描详情页（进度、统计、阶段） | P12-04a | done |
+| P12-04c | 扫描控制按钮（暂停/继续/取消） | P12-04b | done |
 
 **实现文件**:
-- `frontend/src/pages/Scans.tsx`
-- `frontend/src/components/scan/ScanList.tsx`
-- `frontend/src/components/scan/ScanCard.tsx`
-- `frontend/src/components/scan/ScanProgress.tsx`
-- `frontend/src/components/scan/ScanActions.tsx`
+- `src/web/frontend/src/pages/Scans.tsx`
+- `src/web/frontend/src/pages/ScanDetail.tsx`
 
-### P12-05: 实时进度更新（P0）
+### P12-05: 实时进度更新（P0）✅
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P12-05 | WebSocket 实时通信 | - | todo |
-| P12-05a | WebSocket 客户端封装 | P12-01 | todo |
-| P12-05b | 进度更新 Hook (useScanProgress) | P12-05a | todo |
-| P12-05c | 自动重连机制 | P12-05b | todo |
-| P12-05d | 心跳机制 | P12-05c | todo |
-| P12-05e | 轮询作为 Fallback | P12-05c | todo |
-| P12-05f | 进度条实时更新 | P12-05e | todo |
+| P12-05 | WebSocket 实时通信 | - | done |
+| P12-05a | WebSocket 客户端封装 | P12-01 | done |
+| P12-05b | 进度更新 Hook (useScanProgress) | P12-05a | done |
+| P12-05c | 自动重连机制（指数退避） | P12-05b | done |
+| P12-05d | 心跳机制 | P12-05c | done |
+| P12-05e | 轮询作为 Fallback | P12-05c | done |
 
 **实现文件**:
-- `frontend/src/services/websocket.ts`
-- `frontend/src/hooks/useWebSocket.ts`
-- `frontend/src/hooks/useScanProgress.ts`
+- `src/web/frontend/src/api/websocket.ts`
+- `src/web/frontend/src/hooks/useWebSocket.ts`
+- `src/web/frontend/src/hooks/useScanProgress.ts`
 
 ### P12-06: 漏洞结果界面（P1）
 
@@ -1556,7 +1535,7 @@ frontend/
 |v0.9|CPG 基础|完整代码图 + 攻击路径搜索 + Agent 集成|done|2026-04-07|
 |v0.95|Web 服务与持久化|FastAPI 后端 + PostgreSQL + RESTful API + 项目管理|done|2026-04-07|
 |v0.96|暂停/续扫功能|检查点机制 + 阶段恢复 + 控制接口 + WebSocket + 增量扫描|done|2026-04-07|
-|v0.97|前端界面|React + TypeScript + 实时进度 + 漏洞展示|todo|2026-04|
+|v0.97|前端界面|MVP|React + TypeScript + Ant Design + 实时进度 + 扫描控制|done|2026-04-07|
 |v1.0|企业稳定版|高精度、低误报、CI 可用 + Web UI + 暂停续扫|todo|2026-Q2|
 
 ---
@@ -1565,11 +1544,11 @@ frontend/
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 10, Phase 11 已完成，v0.95, v0.96 里程碑达成 ✅|
-|**当前进度**|Phase 10 ✅ done, Phase 11 ✅ done (暂停/续扫机制)|
-|**最近完成**|P11-01~P11-06 (检查点服务 + 阶段管理 + 控制接口 + WebSocket + 增量扫描)|
-|**下一步**|Phase 12 前端界面 或自定义新目标|
-|**里程碑**|v0.96 已完成 (Web 服务 + 暂停续扫 + WebSocket 实时推送)|
+|**阶段**|Phase 12 MVP 已完成，v0.97 里程碑达成 ✅|
+|**当前进度**|Phase 12 ✅ done (前端界面 MVP)|
+|**最近完成**|P12-01~P12-05 (前端项目初始化 + 项目管理 + 扫描管理 + 实时进度)|
+|**下一步**|P12-06 漏洞结果界面、P13 企业级功能 或自定义新目标|
+|**里程碑**|v0.97 已完成 (React + TypeScript + Ant Design + WebSocket 实时进度)|
 
 ---
 

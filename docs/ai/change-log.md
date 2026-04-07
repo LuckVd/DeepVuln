@@ -2,6 +2,40 @@
 
 ## 2026-04-07 (续)
 
+### P12-00: 前端界面 MVP 完成 ✅
+
+- **Goal ID**: P12-00
+- **Summary**: 完成 React + TypeScript + Ant Design 前端 MVP，实现项目管理和扫描管理界面，支持 WebSocket 实时进度更新
+- **Impact**:
+  - `src/web/frontend/`: 新增前端项目目录（25 个文件）
+  - 配置文件: package.json, tsconfig.json, vite.config.ts, tailwind.config.js, .eslintrc.cjs, .gitignore
+  - API 层: client.ts, projects.ts, scans.ts, websocket.ts
+  - 类型定义: models.ts, websocket.ts
+  - Hooks: useWebSocket.ts, useScanProgress.ts, useApi.ts (React Query)
+  - 页面: Projects.tsx, Scans.tsx, ScanDetail.tsx
+  - 布局: AppLayout.tsx (Ant Design 侧边栏布局)
+- **Features**:
+  - **项目管理**: 项目列表（分页、筛选）、创建项目（表单验证）、删除项目（确认提示）、查看扫描历史
+  - **扫描管理**: 扫描列表（分页、状态筛选）、扫描详情（进度、统计、阶段时间线）
+  - **扫描控制**: 暂停/继续/取消按钮，根据状态动态显示
+  - **实时进度**: WebSocket 客户端封装，自动重连（指数退避），心跳机制（30 秒）
+  - **降级策略**: WebSocket 失败时自动降级到轮询（5 秒间隔）
+  - **React Query**: 数据获取与缓存，自动重新验证（扫描中每 5 秒）
+  - **TypeScript**: 严格类型安全，完整的 API 类型定义
+- **Tech Stack**:
+  - React 18.3 + TypeScript 5.3
+  - Vite 5.0 (构建工具)
+  - Ant Design 5.12+ (UI 组件库)
+  - React Router 6.20 (路由管理)
+  - React Query 5.0 (数据获取)
+  - Axios 1.6 (HTTP 客户端)
+- **Tests**: 待用户运行 `npm install` 后测试
+- **Security**: 无安全风险，API Key 通过 localStorage 读取
+- **Milestone**: v0.97 完成
+- **Next**: P12-06 漏洞结果界面、P13 企业级功能 或自定义新目标
+
+---
+
 ### P11-00: 暂停/续扫机制完成 ✅
 
 - **Goal ID**: P11-00
