@@ -94,10 +94,10 @@ new_files:
   - "tests/unit/test_l3/test_path_finder/test_finder.py"
 security_blockers: []
 dead_code_actions: []
-sync_status: "pending"
+sync_status: "synced"
 last_check_at: "2026-04-07"
-last_synced_at: null
-commit_id: null
+last_synced_at: "2026-04-07"
+commit_id: "309601e"
 previous_goal:
   goal_id: "P8-08-pre-filter-architecture"
   title: "前置防误报架构"
