@@ -14,7 +14,7 @@ from typing import Any, Dict
 from celery import Task
 
 from src.web.core.celery_app import get_celery_app
-from src.web.models.database import AsyncSessionLocal
+from src.web.models.database import get_session_local
 from src.web.models.scan import Scan, ScanStatus
 from src.web.repositories.scan import ScanRepository
 from src.web.repositories.event import ScanEventRepository, ScanPhaseRepository
@@ -48,7 +48,7 @@ async def _execute_scan_async(
 
     try:
         # Get scan details from database
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await scan_repo.get(db, id=scan_id)
             if scan is None:
                 raise ValueError(f"Scan {scan_id} not found")
@@ -89,7 +89,7 @@ async def _execute_scan_async(
         result = await cli_adapter.run_scan()
 
         # Update scan status based on result
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             if result["success"]:
                 scan.status = ScanStatus.COMPLETED
                 scan.completed_at = datetime.now(timezone.utc)
@@ -122,7 +122,7 @@ async def _execute_scan_async(
 
         # Update scan status to failed
         try:
-            async with AsyncSessionLocal() as db:
+            async with get_session_local() as db:
                 scan = await scan_repo.get(db, id=scan_id)
                 if scan:
                     scan.status = ScanStatus.FAILED
@@ -198,7 +198,7 @@ async def _check_scan_progress_async(scan_id: int) -> Dict[str, Any]:
     """
     scan_repo = ScanRepository()
 
-    async with AsyncSessionLocal() as db:
+    async with get_session_local() as db:
         scan = await scan_repo.get(db, id=scan_id)
         if scan is None:
             return {

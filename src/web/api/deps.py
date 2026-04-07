@@ -1,24 +1,7 @@
 """FastAPI dependency injection providers."""
 
-from typing import AsyncGenerator
+from src.web.models.database import get_db as _get_db
 
-from fastapi import Depends
-
-from src.web.models.database import AsyncSessionLocal
-
-
-async def get_db() -> AsyncGenerator:
-    """
-    Get database session.
-
-    Yields:
-        AsyncSession: Database session
-
-    Example:
-        @app.get("/items")
-        async def get_items(db: AsyncSession = Depends(get_db)):
-            result = await db.execute(select(Item))
-            return result.scalars().all()
-    """
-    async with AsyncSessionLocal() as session:
-        yield session
+# Re-export the get_db function from database.py
+# This ensures we always use the initialized AsyncSessionLocal
+get_db = _get_db

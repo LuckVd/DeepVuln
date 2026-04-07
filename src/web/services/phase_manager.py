@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from src.web.models.database import AsyncSessionLocal
+from src.web.models.database import get_session_local
 from src.web.models.scan import Scan, ScanPhase, ScanStatus, ScanType, PhaseName
 from src.web.repositories.scan import ScanRepository
 from src.web.repositories.event import ScanPhaseRepository
@@ -159,7 +159,7 @@ class PhaseManager:
             PhaseInfo with phase details, or None if not found
         """
         try:
-            async with AsyncSessionLocal() as db:
+            async with get_session_local() as db:
                 phase = await self.phase_repo.get_by_name(
                     db,
                     scan_id=scan_id,
@@ -207,7 +207,7 @@ class PhaseManager:
             PhaseTransition with result
         """
         try:
-            async with AsyncSessionLocal() as db:
+            async with get_session_local() as db:
                 phase = await self.phase_repo.get_by_name(
                     db,
                     scan_id=scan_id,
@@ -288,7 +288,7 @@ class PhaseManager:
             PhaseTransition with result
         """
         try:
-            async with AsyncSessionLocal() as db:
+            async with get_session_local() as db:
                 phase = await self.phase_repo.get_by_name(
                     db,
                     scan_id=scan_id,
@@ -377,7 +377,7 @@ class PhaseManager:
             PhaseTransition with result
         """
         try:
-            async with AsyncSessionLocal() as db:
+            async with get_session_local() as db:
                 phase = await self.phase_repo.get_by_name(
                     db,
                     scan_id=scan_id,
@@ -446,7 +446,7 @@ class PhaseManager:
             PhaseTransition with result
         """
         try:
-            async with AsyncSessionLocal() as db:
+            async with get_session_local() as db:
                 phase = await self.phase_repo.get_by_name(
                     db,
                     scan_id=scan_id,
@@ -520,7 +520,7 @@ class PhaseManager:
             Name of next phase, or None if all phases complete
         """
         try:
-            async with AsyncSessionLocal() as db:
+            async with get_session_local() as db:
                 scan = await self.scan_repo.get(db, id=scan_id)
                 if scan is None:
                     return None
@@ -562,7 +562,7 @@ class PhaseManager:
             True if resuming is possible, False otherwise
         """
         try:
-            async with AsyncSessionLocal() as db:
+            async with get_session_local() as db:
                 # Get the phase to resume from
                 phase = await self.phase_repo.get_by_name(
                     db,

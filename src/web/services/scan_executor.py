@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from src.web.models.database import AsyncSessionLocal
+from src.web.models.database import get_session_local
 from src.web.models.scan import Scan, ScanStatus, ScanType, ScanPhase, ScanEvent
 from src.web.models.schemas import (
     ScanCreate,
@@ -77,7 +77,7 @@ class ScanExecutor:
         Raises:
             ValueError: If project not found or invalid configuration
         """
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             # Verify project exists
             project = await self.project_repo.get(db, id=project_id)
             if project is None:
@@ -163,7 +163,7 @@ class ScanExecutor:
         """
         from src.web.tasks.scan_tasks import execute_scan_task
 
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await self.scan_repo.get(db, id=scan_id)
             if scan is None:
                 raise ValueError(f"Scan {scan_id} not found")
@@ -193,7 +193,7 @@ class ScanExecutor:
         Returns:
             Dictionary with scan status or None if not found
         """
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await self.scan_repo.get(db, id=scan_id)
             if scan is None:
                 return None
@@ -220,7 +220,7 @@ class ScanExecutor:
         Returns:
             ScanProgressResponse with detailed progress or None
         """
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await self.scan_repo.get_with_phases(db, id=scan_id)
             if scan is None:
                 return None
@@ -291,7 +291,7 @@ class ScanExecutor:
         Returns:
             AgentConversationResponse with conversation or None
         """
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await self.scan_repo.get(db, id=scan_id)
             if scan is None:
                 return None
@@ -388,7 +388,7 @@ class ScanExecutor:
         Returns:
             CurrentFileResponse with file details or None
         """
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await self.scan_repo.get(db, id=scan_id)
             if scan is None:
                 return None
@@ -433,7 +433,7 @@ class ScanExecutor:
         Raises:
             ValueError: If scan not found or cannot be paused
         """
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await self.scan_repo.get(db, id=scan_id)
             if scan is None:
                 raise ValueError(f"Scan {scan_id} not found")
@@ -505,7 +505,7 @@ class ScanExecutor:
         Raises:
             ValueError: If scan not found or cannot be resumed
         """
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await self.scan_repo.get(db, id=scan_id)
             if scan is None:
                 raise ValueError(f"Scan {scan_id} not found")
@@ -573,7 +573,7 @@ class ScanExecutor:
         # TODO: Implement Celery task revocation when task_id is stored
         # from src.web.tasks.scan_tasks import execute_scan_task
 
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await self.scan_repo.get(db, id=scan_id)
             if scan is None:
                 return False
@@ -608,7 +608,7 @@ class ScanExecutor:
         Raises:
             ValueError: If original scan not found or not failed
         """
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             scan = await self.scan_repo.get(db, id=scan_id)
             if scan is None:
                 raise ValueError(f"Scan {scan_id} not found")

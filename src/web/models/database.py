@@ -37,6 +37,24 @@ def get_engine():
     return engine
 
 
+def get_session_local() -> async_sessionmaker:
+    """
+    Get the current AsyncSessionLocal factory.
+
+    This function should be used instead of importing AsyncSessionLocal directly,
+    to ensure the initialized value is always returned.
+
+    Returns:
+        async_sessionmaker: The session factory
+
+    Raises:
+        RuntimeError: If database has not been initialized
+    """
+    if AsyncSessionLocal is None:
+        raise RuntimeError("Database not initialized. Call init_db() first.")
+    return AsyncSessionLocal
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Get database session for dependency injection."""
     if AsyncSessionLocal is None:

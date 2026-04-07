@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.web.models.scan import Scan, ScanStatus
-from src.web.models.database import AsyncSessionLocal
+from src.web.models.database import get_session_local
 
 logger = logging.getLogger(__name__)
 

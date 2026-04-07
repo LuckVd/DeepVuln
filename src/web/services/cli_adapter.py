@@ -152,13 +152,13 @@ class CLIAdapter:
         self._events_emitted += 1
 
         # Update database based on event type
-        from src.web.models.database import AsyncSessionLocal
+        from src.web.models.database import get_session_local
         from src.web.repositories.event import ScanEventRepository, ScanPhaseRepository
 
         event_repo = ScanEventRepository()
         phase_repo = ScanPhaseRepository()
 
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             event_type = event.get("type", "")
 
             # Handle different event types
@@ -408,12 +408,13 @@ class CLIAdapter:
         from src.web.repositories.project import ProjectRepository
         from src.web.repositories.scan import ScanRepository
         from src.web.services.incremental_scan import get_incremental_scan_service
+        from src.web.models.database import get_session_local
 
         # Get project details
         project_repo = ProjectRepository()
         scan_repo = ScanRepository()
 
-        async with AsyncSessionLocal() as db:
+        async with get_session_local() as db:
             project = await project_repo.get(db, id=self.project_id)
             if project is None:
                 raise ValueError(f"Project {self.project_id} not found")
