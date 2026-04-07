@@ -32,6 +32,7 @@ class CLIAdapter:
         scan_id: int,
         project_id: int,
         scan_config: Dict[str, Any],
+        resume_from: Optional[Dict[str, Any]] = None,
     ):
         """Initialize CLI adapter.
 
@@ -39,10 +40,12 @@ class CLIAdapter:
             scan_id: ID of the scan in the database
             project_id: ID of the project being scanned
             scan_config: Scan configuration dictionary
+            resume_from: Optional resume data containing phase and checkpoint
         """
         self.scan_id = scan_id
         self.project_id = project_id
         self.scan_config = scan_config
+        self.resume_from = resume_from
 
         # Internal state
         self._process: Optional[asyncio.subprocess.Process] = None
@@ -59,6 +62,13 @@ class CLIAdapter:
             List of command arguments
         """
         cmd = ["deepvuln", "scan", "-p", str(source_path)]
+
+        # Resume support
+        if self.resume_from:
+            resume_phase = self.resume_from.get("resume_phase")
+            if resume_phase:
+                cmd.extend(["--resume-phase", resume_phase])
+                logger.info(f"Resuming scan from phase: {resume_phase}")
 
         # Scan type
         scan_type = self.scan_config.get("scan_type", "full")
@@ -397,6 +407,7 @@ class CLIAdapter:
         """
         from src.web.repositories.project import ProjectRepository
         from src.web.repositories.scan import ScanRepository
+        from src.web.services.incremental_scan import get_incremental_scan_service
 
         # Get project details
         project_repo = ProjectRepository()
@@ -408,6 +419,30 @@ class CLIAdapter:
                 raise ValueError(f"Project {self.project_id} not found")
 
             source_path = Path(project.source_path)
+
+            # For incremental scans, analyze changes first
+            scan_type = self.scan_config.get("scan_type", "full")
+            if scan_type == "incremental":
+                incremental_service = get_incremental_scan_service(
+                    self.scan_id, self.project_id
+                )
+                base_ref = self.scan_config.get("base_ref", "HEAD~1")
+                head_ref = self.scan_config.get("head_ref", "HEAD")
+
+                try:
+                    context = await incremental_service.analyze_incremental_changes(
+                        source_path, base_ref, head_ref
+                    )
+                    # Update scan with incremental statistics
+                    await incremental_service.update_scan_with_incremental_stats(
+                        db, context
+                    )
+                    logger.info(
+                        f"Incremental scan analysis complete: "
+                        f"{context.added_files} added, {context.modified_files} modified"
+                    )
+                except Exception as e:
+                    logger.warning(f"Incremental analysis failed: {e}, continuing with full scan")
 
         # Build command
         cmd = self._build_command(source_path)

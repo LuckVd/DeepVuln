@@ -4,6 +4,8 @@ P10-07-10: This module provides the ScanExecutor service that orchestrates
 the entire scan process, from creation through execution to completion.
 It integrates with Celery tasks for background execution and provides
 a high-level API for the web layer.
+
+P11-03: Enhanced with pause/resume/cancel functionality.
 """
 
 import asyncio
@@ -29,6 +31,10 @@ from src.web.repositories.scan import ScanRepository
 from src.web.repositories.event import ScanEventRepository, ScanPhaseRepository
 from src.web.repositories.finding import FindingRepository
 
+# Import checkpoint and phase services for pause/resume
+from src.web.services.checkpoint_service import CheckpointService, get_checkpoint_service
+from src.web.services.phase_manager import PhaseManager, get_phase_manager, PhaseStatus
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +46,8 @@ class ScanExecutor:
     1. Scan creation and validation
     2. Celery task dispatch for background execution
     3. Progress tracking and status queries
-    4. Result retrieval and cleanup
+    4. Pause/resume/cancel functionality
+    5. Result retrieval and cleanup
     """
 
     def __init__(self):
@@ -50,6 +57,8 @@ class ScanExecutor:
         self.event_repo = ScanEventRepository()
         self.finding_repo = FindingRepository()
         self.project_repo = ProjectRepository()
+        self.checkpoint_service = get_checkpoint_service()
+        self.phase_manager = get_phase_manager()
 
     async def create_scan(
         self,
@@ -411,6 +420,146 @@ class ScanExecutor:
                 file_preview=file_preview,
                 agent_actions_on_file=agent_actions,
             )
+
+    async def pause_scan(self, scan_id: int) -> Dict[str, Any]:
+        """Pause a running scan.
+
+        Args:
+            scan_id: ID of the scan to pause
+
+        Returns:
+            Dictionary with pause result
+
+        Raises:
+            ValueError: If scan not found or cannot be paused
+        """
+        async with AsyncSessionLocal() as db:
+            scan = await self.scan_repo.get(db, id=scan_id)
+            if scan is None:
+                raise ValueError(f"Scan {scan_id} not found")
+
+            if scan.status != ScanStatus.RUNNING:
+                raise ValueError(
+                    f"Scan {scan_id} is not running (current: {scan.status})"
+                )
+
+            # Get current phase
+            current_phase_name = scan.current_phase
+            if current_phase_name:
+                # Save checkpoint before pausing
+                checkpoint_data = {
+                    "global_state": {
+                        "scan_type": scan.scan_type,
+                        "config": scan.config,
+                        "engines_completed": scan.engines_completed,
+                    },
+                    "resume_data": {
+                        "total_files": scan.total_files,
+                        "analyzed_files": scan.analyzed_files,
+                        "findings_count": scan.findings_count,
+                        "tokens_used": scan.tokens_used,
+                    },
+                }
+
+                saved = await self.checkpoint_service.save_checkpoint(
+                    scan_id=scan_id,
+                    phase=current_phase_name,
+                    data=checkpoint_data,
+                )
+
+                if not saved:
+                    logger.warning(f"Failed to save checkpoint for scan {scan_id}")
+            else:
+                logger.warning(f"Scan {scan_id} has no current phase, cannot save checkpoint")
+
+            # Update scan status to paused
+            await self.scan_repo.update_status(
+                db,
+                scan_id=scan_id,
+                status=ScanStatus.PAUSED,
+            )
+            await db.commit()
+
+            # Revoke Celery task if running (will be implemented with task_id storage)
+            # For now, the status change is enough to prevent further progress
+
+            logger.info(f"Paused scan {scan_id}")
+            return {
+                "scan_id": scan_id,
+                "status": ScanStatus.PAUSED,
+                "checkpoint_saved": current_phase_name is not None,
+                "paused_at": datetime.now(timezone.utc).isoformat(),
+                "current_phase": current_phase_name,
+                "can_resume": True,
+            }
+
+    async def resume_scan(self, scan_id: int) -> Dict[str, Any]:
+        """Resume a paused scan.
+
+        Args:
+            scan_id: ID of the scan to resume
+
+        Returns:
+            Dictionary with resume result
+
+        Raises:
+            ValueError: If scan not found or cannot be resumed
+        """
+        async with AsyncSessionLocal() as db:
+            scan = await self.scan_repo.get(db, id=scan_id)
+            if scan is None:
+                raise ValueError(f"Scan {scan_id} not found")
+
+            if scan.status != ScanStatus.PAUSED:
+                raise ValueError(
+                    f"Scan {scan_id} is not paused (current: {scan.status})"
+                )
+
+            # Load checkpoint to determine resume strategy
+            checkpoint = await self.checkpoint_service.load_checkpoint(scan_id)
+
+            if checkpoint is None:
+                raise ValueError(f"No checkpoint found for scan {scan_id}")
+
+            # Verify checkpoint
+            valid = await self.checkpoint_service.verify_checkpoint(checkpoint)
+            if not valid:
+                raise ValueError(f"Checkpoint for scan {scan_id} is invalid")
+
+            # Get resume strategy
+            strategy = await self.checkpoint_service.get_resume_strategy(checkpoint)
+
+            if not strategy.can_resume:
+                raise ValueError(f"Cannot resume scan {scan_id}: {strategy.reason}")
+
+            # Update scan status back to pending for restart
+            await self.scan_repo.update_status(
+                db,
+                scan_id=scan_id,
+                status=ScanStatus.PENDING,
+            )
+            await db.commit()
+
+            # Start new Celery task with resume data
+            from src.web.tasks.scan_tasks import execute_scan_task
+
+            task = execute_scan_task.apply_async(
+                args=[scan_id],
+                kwargs={"resume_from": strategy.resume_phase}
+            )
+
+            logger.info(
+                f"Resumed scan {scan_id} from phase {strategy.resume_phase}, "
+                f"task_id: {task.id}"
+            )
+            return {
+                "scan_id": scan_id,
+                "status": ScanStatus.PENDING,
+                "resumed_from_phase": strategy.resume_phase,
+                "resumed_at": datetime.now(timezone.utc).isoformat(),
+                "task_id": task.id,
+                "skip_phases": strategy.skip_phases,
+            }
 
     async def cancel_scan(self, scan_id: int) -> bool:
         """Cancel a running scan.

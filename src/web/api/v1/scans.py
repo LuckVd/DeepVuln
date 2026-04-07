@@ -1,5 +1,7 @@
 """Scan management API endpoints."""
 
+import json
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,6 +22,10 @@ from src.web.models.schemas import (
     PhaseInfo,
     TokenInfo,
     FindingSummary,
+    PauseScanResponse,
+    ResumeScanResponse,
+    CancelScanResponse,
+    ScanStatusResponse,
 )
 from src.web.repositories.scan import ScanRepository
 from src.web.repositories.project import ProjectRepository
@@ -694,3 +700,275 @@ async def get_scan_report(
         "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
         "report_path": scan.report_path,
     }
+
+
+# ============================================================================
+# Control Endpoints (P11-04)
+# ============================================================================
+
+@router.post("/scans/{scan_id}/pause", response_model=PauseScanResponse)
+async def pause_scan(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(require_api_key)] = None,
+) -> PauseScanResponse:
+    """
+    Pause a running scan.
+
+    Args:
+        scan_id: ID of the scan to pause
+        db: Database session
+
+    Returns:
+        Pause result with checkpoint status
+
+    Raises:
+        HTTPException 404: If scan not found
+        HTTPException 400: If scan cannot be paused
+    """
+    from src.web.services.scan_executor import get_scan_executor
+    from src.web.models.scan import ScanStatus
+
+    executor = get_scan_executor()
+
+    # Check if scan exists first
+    scan_repo = ScanRepository()
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Check if scan can be paused
+    if scan.status != ScanStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Scan {scan_id} is not running (current: {scan.status})",
+        )
+
+    # Pause the scan
+    result = await executor.pause_scan(scan_id=scan_id)
+
+    return PauseScanResponse(**result)
+
+
+@router.post("/scans/{scan_id}/resume", response_model=ResumeScanResponse)
+async def resume_scan(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(require_api_key)] = None,
+) -> ResumeScanResponse:
+    """
+    Resume a paused scan.
+
+    Args:
+        scan_id: ID of the scan to resume
+        db: Database session
+
+    Returns:
+        Resume result with task ID
+
+    Raises:
+        HTTPException 404: If scan not found
+        HTTPException 400: If scan cannot be resumed
+    """
+    from src.web.services.scan_executor import get_scan_executor
+    from src.web.models.scan import ScanStatus
+
+    executor = get_scan_executor()
+
+    # Check if scan exists first
+    scan_repo = ScanRepository()
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Check if scan can be resumed
+    if scan.status != ScanStatus.PAUSED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Scan {scan_id} is not paused (current: {scan.status})",
+        )
+
+    # Resume the scan
+    result = await executor.resume_scan(scan_id=scan_id)
+
+    return ResumeScanResponse(**result)
+
+
+@router.post("/scans/{scan_id}/cancel", response_model=CancelScanResponse)
+async def cancel_scan(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(require_api_key)] = None,
+) -> CancelScanResponse:
+    """
+    Cancel a scan.
+
+    Args:
+        scan_id: ID of the scan to cancel
+        db: Database session
+
+    Returns:
+        Cancel result
+
+    Raises:
+        HTTPException 404: If scan not found
+        HTTPException 400: If scan cannot be cancelled
+    """
+    from src.web.services.scan_executor import get_scan_executor
+    from src.web.models.scan import ScanStatus
+
+    executor = get_scan_executor()
+
+    # Check if scan exists first
+    scan_repo = ScanRepository()
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Check if scan can be cancelled
+    if scan.status not in [ScanStatus.PENDING, ScanStatus.RUNNING]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Scan {scan_id} cannot be cancelled (current: {scan.status})",
+        )
+
+    # Cancel the scan
+    result = await executor.cancel_scan(scan_id=scan_id)
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel scan {scan_id}",
+        )
+
+    return CancelScanResponse(
+        scan_id=scan_id,
+        status=ScanStatus.CANCELLED,
+        cancelled_at=datetime.now(),
+        cleanup_started=True,
+    )
+
+
+@router.get("/scans/{scan_id}/status", response_model=ScanStatusResponse)
+async def get_scan_control_status(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(optional_api_key)] = None,
+) -> ScanStatusResponse:
+    """
+    Get scan status with available control actions.
+
+    Args:
+        scan_id: ID of the scan
+        db: Database session
+
+    Returns:
+        Scan status with available actions
+
+    Raises:
+        HTTPException 404: If scan not found
+    """
+    from src.web.models.scan import ScanStatus
+
+    scan_repo = ScanRepository()
+
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Determine available actions based on status
+    available_actions = []
+    can_pause = False
+    can_resume = False
+    can_cancel = False
+
+    if scan.status == ScanStatus.RUNNING:
+        available_actions = ["pause", "cancel"]
+        can_pause = True
+        can_cancel = True
+    elif scan.status == ScanStatus.PENDING:
+        available_actions = ["cancel"]
+        can_cancel = True
+    elif scan.status == ScanStatus.PAUSED:
+        available_actions = ["resume", "cancel"]
+        can_resume = True
+        can_cancel = True
+    elif scan.status == ScanStatus.FAILED:
+        available_actions = ["retry", "cancel"]
+        can_cancel = True
+
+    return ScanStatusResponse(
+        scan_id=scan_id,
+        status=scan.status,
+        progress_percent=scan.progress_percent,
+        current_phase=scan.current_phase,
+        available_actions=available_actions,
+        can_pause=can_pause,
+        can_resume=can_resume,
+        can_cancel=can_cancel,
+    )
+
+
+# ============================================================================
+# WebSocket Endpoint
+# ============================================================================
+
+from fastapi import WebSocket
+
+from src.web.api.websocket import get_connection_manager
+
+
+@router.websocket("/ws/{scan_id}")
+async def websocket_scan_updates(
+    websocket: WebSocket,
+    scan_id: int,
+) -> None:
+    """
+    WebSocket endpoint for real-time scan updates.
+
+    Clients can connect to receive real-time updates about scan progress,
+    including phase changes, findings, and completion status.
+
+    Args:
+        websocket: WebSocket connection
+        scan_id: ID of the scan to monitor
+    """
+    manager = get_connection_manager()
+
+    try:
+        await manager.connect(websocket, scan_id)
+
+        # Keep connection alive and handle incoming messages
+        while True:
+            data = await websocket.receive_text()
+
+            # Handle client messages (e.g., ping, subscribe)
+            try:
+                message = json.loads(data)
+                if message.get("type") == "ping":
+                    # Respond with pong
+                    from src.web.api.websocket import WebSocketEvent
+                    await manager.send_personal(
+                        WebSocketEvent(event_type="pong", data={}),
+                        websocket,
+                    )
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON from WebSocket client: {data}")
+
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error for scan {scan_id}: {e}")
+        await manager.disconnect(websocket)

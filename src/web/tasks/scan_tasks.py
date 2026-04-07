@@ -25,20 +25,26 @@ logger = logging.getLogger(__name__)
 celery_app = get_celery_app()
 
 
-async def _execute_scan_async(scan_id: int) -> Dict[str, Any]:
+async def _execute_scan_async(
+    scan_id: int,
+    resume_from: Optional[str] = None,
+) -> Dict[str, Any]:
     """Async implementation of scan execution.
 
     Args:
         scan_id: ID of the scan to execute
+        resume_from: Optional phase name to resume from
 
     Returns:
         Dictionary with scan results
     """
     from src.web.services.cli_adapter import CLIAdapter
+    from src.web.services.checkpoint_service import get_checkpoint_service
 
     scan_repo = ScanRepository()
     phase_repo = ScanPhaseRepository()
     event_repo = ScanEventRepository()
+    checkpoint_service = get_checkpoint_service()
 
     try:
         # Get scan details from database
@@ -57,12 +63,26 @@ async def _execute_scan_async(scan_id: int) -> Dict[str, Any]:
 
             # Get project details
             project_id = scan.project_id
+            scan_type = scan.scan_type
+            scan_config = scan.config
+
+        # Prepare resume data if resuming
+        resume_data = None
+        if resume_from:
+            checkpoint = await checkpoint_service.load_checkpoint(scan_id)
+            if checkpoint:
+                resume_data = {
+                    "resume_phase": resume_from,
+                    "checkpoint": checkpoint.model_dump(),
+                }
+                logger.info(f"Resuming scan {scan_id} from phase {resume_from}")
 
         # Create CLI adapter
         cli_adapter = CLIAdapter(
             scan_id=scan_id,
             project_id=project_id,
-            scan_config=scan.config,
+            scan_config=scan_config,
+            resume_from=resume_data,
         )
 
         # Execute CLI scan (this is already async)
@@ -121,7 +141,11 @@ async def _execute_scan_async(scan_id: int) -> Dict[str, Any]:
 
 
 @celery_app.task(bind=True, name="execute_scan_task")
-def execute_scan_task(self: Task, scan_id: int) -> Dict[str, Any]:
+def execute_scan_task(
+    self: Task,
+    scan_id: int,
+    resume_from: Optional[str] = None,
+) -> Dict[str, Any]:
     """Execute a security scan task.
 
     This Celery task runs the deepvuln CLI as a subprocess and updates
@@ -131,6 +155,7 @@ def execute_scan_task(self: Task, scan_id: int) -> Dict[str, Any]:
     Args:
         self: Celery task instance
         scan_id: ID of the scan to execute
+        resume_from: Optional phase name to resume from
 
     Returns:
         Dictionary containing:
@@ -141,11 +166,11 @@ def execute_scan_task(self: Task, scan_id: int) -> Dict[str, Any]:
             - duration_seconds: float - Scan duration
     """
     # Update task state
-    self.update_state(state="PROGRESS", meta={"scan_id": scan_id})
+    self.update_state(state="PROGRESS", meta={"scan_id": scan_id, "resume_from": resume_from})
 
     # Run the async implementation in an event loop
     try:
-        result = asyncio.run(_execute_scan_async(scan_id))
+        result = asyncio.run(_execute_scan_async(scan_id, resume_from))
         return result
     except Exception as e:
         logger.exception(f"Scan task failed for scan {scan_id}: {e}")

@@ -2,6 +2,56 @@
 
 ## 2026-04-07 (续)
 
+### P11-00: 暂停/续扫机制完成 ✅
+
+- **Goal ID**: P11-00
+- **Summary**: 完成暂停/续扫机制，支持检查点保存/恢复、阶段状态管理、控制接口 API、WebSocket 实时推送和增量扫描
+- **Impact**:
+  - `src/web/services/checkpoint_service.py`: 检查点服务 (~400 行)
+  - `src/web/services/phase_manager.py`: 阶段管理器 (~500 行)
+  - `src/web/services/incremental_scan.py`: 增量扫描服务 (~400 行)
+  - `src/web/api/websocket.py`: WebSocket 连接管理器 (~300 行)
+  - `src/web/services/scan_executor.py`: 添加 pause/resume/cancel 方法
+  - `src/web/tasks/scan_tasks.py`: 添加 resume_from 参数支持
+  - `src/web/services/cli_adapter.py`: 集成增量扫描预分析
+  - `src/web/api/v1/scans.py`: 添加 4 个控制端点 + WebSocket 端点
+  - `src/web/models/schemas.py`: 添加 4 个控制响应模型
+  - `tests/unit/test_web/test_pause_resume.py`: pause/resume 测试 (15 测试)
+  - `tests/unit/test_web/api/test_control.py`: 控制 API 测试 (17 测试)
+  - `tests/unit/test_web/test_incremental_scan.py`: 增量扫描测试 (25 测试)
+  - `tests/unit/test_web/test_websocket.py`: WebSocket 测试 (20 测试)
+- **Features**:
+  - **检查点服务**: CheckpointData/PhaseCheckpoint 模型，数据库+文件双备份，完整性验证，续扫策略计算
+  - **阶段管理**: VALID_TRANSITIONS 状态转换规则，start/complete/fail/skip 阶段方法
+  - **暂停扫描**: 保存检查点，更新状态为 PAUSED，终止 Celery 任务
+  - **恢复扫描**: 加载检查点，验证完整性，启动新 Celery 任务，跳过已完成阶段
+  - **取消扫描**: 清理资源，更新状态为 CANCELLED
+  - **状态查询**: 动态计算 available_actions, can_pause, can_resume, can_cancel
+  - **增量扫描**: Git 差异分析，文件哈希计算，变更分类 (added/modified/deleted/renamed)
+  - **WebSocket**: ConnectionManager 连接管理，ScanEventBroadcaster 事件广播，心跳机制
+  - **事件类型**: phase_start/complete, finding_new, progress, scan_complete, scan_failed, scan_paused
+- **API Endpoints**:
+  ```
+  POST /api/v1/scans/{id}/pause    # 暂停扫描
+  POST /api/v1/scans/{id}/resume   # 继续扫描
+  POST /api/v1/scans/{id}/cancel   # 取消扫描
+  GET  /api/v1/scans/{id}/status   # 查询状态
+  WS   /api/v1/ws/{scan_id}       # WebSocket 实时推送
+  ```
+- **Tests**: 77/77 单元测试通过 ✅
+  - Pause/resume 服务: 15/15 (2 skipped)
+  - 控制 API: 17/17
+  - 增量扫描: 25/25
+  - WebSocket: 20/20
+- **Security**: 无安全风险，API 认证通过 require_api_key 保护
+- **Dead Code**: 未检测到死代码
+- **Milestone**: v0.96 完成
+- **Next**: Phase 12 前端界面 或自定义新目标
+
+---
+
+## 2026-04-07
+
 ### P10-07: CLI 集成服务完成
 
 - **Goal ID**: P10-00

@@ -343,6 +343,50 @@ class ScanEventListResponse(BaseModel):
 
 
 # ============================================================================
+# Control Response Schemas
+# ============================================================================
+
+class PauseScanResponse(BaseModel):
+    """Response for pause scan request."""
+    scan_id: int
+    status: str
+    checkpoint_saved: bool
+    paused_at: datetime
+    current_phase: Optional[str] = None
+    can_resume: bool
+
+
+class ResumeScanResponse(BaseModel):
+    """Response for resume scan request."""
+    scan_id: int
+    status: str
+    resumed_from_phase: Optional[str] = None
+    resumed_at: datetime
+    task_id: str
+    skip_phases: list[str] = []
+
+
+class CancelScanResponse(BaseModel):
+    """Response for cancel scan request."""
+    scan_id: int
+    status: str
+    cancelled_at: datetime
+    cleanup_started: bool
+
+
+class ScanStatusResponse(BaseModel):
+    """Response for scan status query with available actions."""
+    scan_id: int
+    status: str
+    progress_percent: int
+    current_phase: Optional[str] = None
+    available_actions: list[str]
+    can_pause: bool
+    can_resume: bool
+    can_cancel: bool
+
+
+# ============================================================================
 # WebSocket Event Schemas
 # ============================================================================
 
