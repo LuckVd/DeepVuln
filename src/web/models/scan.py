@@ -103,6 +103,21 @@ class Scan(Base):
     # Checkpoint data (for pause/resume)
     checkpoint_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
+    # P14-01: 攻击面统计
+    attack_surface: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    # P14-03: 仲裁摘要
+    adjudication_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    # P14-04: 对抗性摘要
+    adversarial_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    # P14-05: Token 使用详情 (扩展 tokens_used 为 JSON)
+    token_usage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    # P14-06: 增量扫描统计
+    incremental_stats: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     # Result reference
     report_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

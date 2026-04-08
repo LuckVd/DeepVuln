@@ -89,3 +89,4 @@ tests/llm_test_concurrency_5_long.py
 
 # Claude Code plugin (local)
 .claude/.claude-plugin/
+logs/

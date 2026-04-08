@@ -1501,6 +1501,15 @@ async def run_full_security_scan(
     else:
         result["partial_success"] = False
 
+    # P10-07: Emit L1_preparation phase complete event
+    if event_emitter:
+        event_emitter.emit_phase_complete(
+            phase="L1_preparation",
+            duration_seconds=0,  # TODO: track actual duration
+            findings=0,
+            tokens_used=0,
+        )
+
     # Execute all scans in parallel
     if scan_tasks:
         console.print("\n[bold cyan]Phase 1/2/3: Parallel Engine Scan[/]")
@@ -1603,6 +1612,18 @@ async def run_full_security_scan(
                 error_msg = scan_result.error_message if hasattr(scan_result, 'error_message') else "Unknown error"
                 console.print(f"  ✗ {engine_name.capitalize()} failed: {error_msg}", markup=False)
                 result["phases"][engine_name] = {"success": False, "error": error_msg}
+
+        # P10-07: Emit L2_L3_engines phase complete event
+        if event_emitter:
+            total_findings = sum(
+                p.get("findings_count", 0) for p in result["phases"].values() if isinstance(p, dict)
+            )
+            event_emitter.emit_phase_complete(
+                phase="L2_L3_engines",
+                duration_seconds=0,  # TODO: track actual duration
+                findings=total_findings,
+                tokens_used=0,  # TODO: track actual tokens
+            )
 
     # =========================================================================
     # Phase 4: Exploitability Verification (with optional LLM) - PARALLEL
@@ -3418,7 +3439,7 @@ def run_security_scan_jsonl(
             options=options,
         ))
 
-        # Calculate statistics
+        # Calculate statistics and emit findings
         stats = result.get("statistics", {})
         findings_by_severity = {}
         if "verified_findings" in result:
@@ -3427,6 +3448,32 @@ def run_security_scan_jsonl(
                 if finding:
                     severity = finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity)
                     findings_by_severity[severity] = findings_by_severity.get(severity, 0) + 1
+
+                    # Extract finding location information
+                    file_path = ""
+                    line_number = 0
+                    if hasattr(finding, 'location') and finding.location:
+                        file_path = getattr(finding.location, 'file', '')
+                        line_number = getattr(finding.location, 'line', 0)
+
+                    # Extract source engine
+                    engine = getattr(finding, 'source', 'unknown')
+
+                    # Extract vulnerability type
+                    vuln_type = ""
+                    if hasattr(finding, 'type') and finding.type:
+                        vuln_type = finding.type.value if hasattr(finding.type, 'value') else str(finding.type)
+
+                    # Emit individual finding event
+                    emitter.emit_finding_new(
+                        file=file_path,
+                        line=line_number,
+                        severity=severity,
+                        vuln_type=vuln_type,
+                        title=finding.title if hasattr(finding, 'title') else '',
+                        engine=engine,
+                        confidence=float(getattr(finding, 'confidence', 0.0) or 0.0),
+                    )
 
         # Emit scan complete event
         emitter.emit_scan_complete(

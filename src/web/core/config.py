@@ -11,7 +11,7 @@ class DatabaseSettings(BaseSettings):
     """Database configuration settings."""
     model_config = SettingsConfigDict(
         env_prefix="DEEPVULN_DB_",
-        env_file=".env",
+        env_file="/opt/projects/DeepVuln/.env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -42,7 +42,7 @@ class WebSettings(BaseSettings):
     """Web service configuration settings."""
     model_config = SettingsConfigDict(
         env_prefix="DEEPVULN_WEB_",
-        env_file=".env",
+        env_file="/opt/projects/DeepVuln/.env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -96,6 +96,12 @@ class WebSettings(BaseSettings):
         description="WebSocket route path"
     )
 
+    # Upload
+    upload_dir: str = Field(
+        default="/opt/projects/deepvuln/uploads",
+        description="Directory for uploaded files"
+    )
+
     # Pagination
     default_page_size: int = Field(
         default=20,
@@ -123,14 +129,14 @@ class SecuritySettings(BaseSettings):
     """Security configuration settings."""
     model_config = SettingsConfigDict(
         env_prefix="DEEPVULN_SECURITY_",
-        env_file=".env",
+        env_file="/opt/projects/DeepVuln/.env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
     # API Key
     api_key_enabled: bool = Field(
-        default=True,
+        default=False,  # Disabled for development
         description="Enable API key authentication"
     )
     api_key_header: str = Field(

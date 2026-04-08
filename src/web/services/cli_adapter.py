@@ -61,7 +61,10 @@ class CLIAdapter:
         Returns:
             List of command arguments
         """
-        cmd = ["deepvuln", "scan", "-p", str(source_path)]
+        import sys
+        # Use the same Python interpreter that's running the web service
+        python_executable = sys.executable
+        cmd = [python_executable, "-m", "src.cli.main", "scan", "-p", str(source_path)]
 
         # Resume support
         if self.resume_from:
@@ -132,7 +135,7 @@ class CLIAdapter:
             event = json.loads(line.strip())
             # Add scan_id and timestamp
             event["scan_id"] = self.scan_id
-            event["created_at"] = datetime.now(timezone.utc).isoformat()
+            event["created_at"] = datetime.utcnow().isoformat()
             return event
         except json.JSONDecodeError:
             return None
@@ -158,7 +161,8 @@ class CLIAdapter:
         event_repo = ScanEventRepository()
         phase_repo = ScanPhaseRepository()
 
-        async with get_session_local() as db:
+        session_maker = get_session_local()
+        async with session_maker() as db:
             event_type = event.get("type", "")
 
             # Handle different event types
@@ -170,7 +174,7 @@ class CLIAdapter:
                     scan_id=self.scan_id,
                     phase_name=event.get("phase", ""),
                     status="running",
-                    started_at=datetime.now(timezone.utc),
+                    started_at=datetime.utcnow(),
                 )
                 await phase_repo.create(db, obj_in=phase)
 
@@ -213,7 +217,27 @@ class CLIAdapter:
                 await self._handle_scan_failure(db, event)
 
             # Store all events for real-time WebSocket streaming
-            await event_repo.create(db, obj_in=event)
+            # Map CLI event fields to database model fields
+            event_data = {
+                "scan_id": self.scan_id,
+                "event_type": event.get("type", "info"),
+                "event_level": event.get("level", "info"),
+                "message": event.get("message", ""),
+                "details": event.get("data"),
+                "engine_name": event.get("engine"),
+                "agent_turn": event.get("turn", 0),
+                "agent_role": event.get("role"),
+                "agent_message": event.get("agent_message"),
+                "agent_reasoning": event.get("reasoning"),
+                "file_path": event.get("file"),
+                "file_index": event.get("index", 0),
+                "file_total": event.get("total", 0),
+                "tokens_used": event.get("tokens", 0),
+                "tokens_input": event.get("tokens_in", 0),
+                "tokens_output": event.get("tokens_out", 0),
+                "sequence": event.get("seq", 0),
+            }
+            await event_repo.create(db, obj_in=event_data)
 
     async def _update_phase_complete(
         self,
@@ -248,7 +272,7 @@ class CLIAdapter:
                 .where(ScanPhase.id == phase.id)
                 .values(
                     status="completed",
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.utcnow(),
                     duration_seconds=event.get("duration_seconds", 0),
                     findings_found=event.get("findings", 0),
                     tokens_used=event.get("tokens_used", 0),
@@ -297,9 +321,31 @@ class CLIAdapter:
             db: Database session
             event: File complete event
         """
-        # Update analyzed_files count
-        # This is a simplified implementation
-        pass
+        from src.web.models.scan import Scan
+        from sqlalchemy import update
+
+        # Get file index and total from event
+        file_index = event.get("index", 0)
+        total_files = event.get("total", 0)
+
+        # Update scan with progress and file count
+        update_values = {
+            "analyzed_files": file_index,
+        }
+
+        # Also set total_files if we have it
+        if total_files > 0:
+            update_values["total_files"] = total_files
+            update_values["indexed_files"] = file_index
+            progress_percent = int((file_index / total_files) * 100)
+            update_values["progress_percent"] = progress_percent
+
+        await db.execute(
+            update(Scan)
+            .where(Scan.id == self.scan_id)
+            .values(**update_values)
+        )
+        await db.commit()
 
     async def _store_finding(
         self,
@@ -314,12 +360,25 @@ class CLIAdapter:
         """
         from src.web.models.finding import Finding
 
+        # Clean up file path - remove temporary directory prefix
+        file_path = event.get("file", "")
+        if file_path and "/deepvuln_scan_" in file_path:
+            # Extract relative path after temporary directory
+            parts = file_path.split("/java-simple-vuln/")
+            if len(parts) > 1:
+                file_path = parts[1]
+            else:
+                # Fallback: get last 2 parts
+                parts = file_path.split("/")
+                if len(parts) >= 2:
+                    file_path = "/".join(parts[-2:])
+
         finding = Finding(
             scan_id=self.scan_id,
             vuln_type=event.get("vuln_type", ""),
             severity=event.get("severity", ""),
             confidence=event.get("confidence", 0.0),
-            file_path=event.get("file", ""),
+            file_path=file_path,
             line_start=event.get("line", 0),
             title=event.get("title", ""),
             engine=event.get("engine", ""),
@@ -354,18 +413,51 @@ class CLIAdapter:
             event: Scan complete event
         """
         from src.web.models.scan import Scan
-        from sqlalchemy import update
+        from src.web.models.finding import Finding
+        from sqlalchemy import update, select, func
+
+        # Calculate statistics from findings table
+        findings_result = await db.execute(
+            select(
+                func.count().label("total"),
+                func.sum(func.case((Finding.severity == "critical", 1), else_=0)).label("critical"),
+                func.sum(func.case((Finding.severity == "high", 1), else_=0)).label("high"),
+                func.sum(func.case((Finding.severity == "medium", 1), else_=0)).label("medium"),
+                func.sum(func.case((Finding.severity == "low", 1), else_=0)).label("low"),
+                func.sum(func.case((Finding.severity == "info", 1), else_=0)).label("info"),
+            ).where(Finding.scan_id == self.scan_id)
+        )
+        stats = findings_result.one()
+
+        # Get file statistics from phases
+        from src.web.models.scan import ScanPhase
+        phases_result = await db.execute(
+            select(
+                func.sum(ScanPhase.files_processed).label("files_processed"),
+                func.sum(ScanPhase.tokens_used).label("tokens_used"),
+            ).where(ScanPhase.scan_id == self.scan_id)
+        )
+        phase_stats = phases_result.one()
+
+        # Update scan with complete statistics
+        update_values = {
+            "status": "completed",
+            "completed_at": datetime.utcnow(),
+            "progress_percent": 100,
+            "findings_count": stats.total or 0,
+            "critical_count": int(stats.critical or 0),
+            "high_count": int(stats.high or 0),
+            "medium_count": int(stats.medium or 0),
+            "low_count": int(stats.low or 0),
+            "info_count": int(stats.info or 0),
+            "analyzed_files": int(phase_stats.files_processed or 0),
+            "tokens_used": event.get("tokens_used", 0) or int(phase_stats.tokens_used or 0),
+        }
 
         await db.execute(
             update(Scan)
             .where(Scan.id == self.scan_id)
-            .values(
-                status="completed",
-                completed_at=datetime.now(timezone.utc),
-                progress_percent=100,
-                findings_count=event.get("findings_total", 0),
-                tokens_used=event.get("tokens_used", 0),
-            )
+            .values(**update_values)
         )
         await db.commit()
 
@@ -414,12 +506,43 @@ class CLIAdapter:
         project_repo = ProjectRepository()
         scan_repo = ScanRepository()
 
-        async with get_session_local() as db:
+        session_maker = get_session_local()
+        async with session_maker() as db:
             project = await project_repo.get(db, id=self.project_id)
             if project is None:
                 raise ValueError(f"Project {self.project_id} not found")
 
             source_path = Path(project.source_path)
+
+            # Handle ZIP files - extract to a temporary directory
+            if source_path.suffix == ".zip":
+                import tempfile
+                import shutil
+
+                # Create temp directory for extraction
+                temp_dir = Path(tempfile.mkdtemp(prefix="deepvuln_scan_"))
+                try:
+                    logger.info(f"Extracting ZIP file: {source_path} -> {temp_dir}")
+                    shutil.unpack_archive(source_path, temp_dir)
+
+                    # Find the extracted directory (usually contains the actual files)
+                    extracted_items = list(temp_dir.iterdir())
+                    if extracted_items and len(extracted_items) == 1 and extracted_items[0].is_dir():
+                        source_path = extracted_items[0]
+                        logger.info(f"Using extracted directory: {source_path}")
+                    else:
+                        # If extraction resulted in multiple files/directories, use the temp dir itself
+                        source_path = temp_dir
+                        logger.info(f"Using temp extraction directory: {source_path}")
+
+                    # Store temp_dir for cleanup
+                    self._temp_extraction_dir = temp_dir
+                except Exception as e:
+                    # Clean up temp dir if extraction failed
+                    import os
+                    if os.path.exists(temp_dir):
+                        shutil.rmtree(temp_dir)
+                    raise ValueError(f"Failed to extract ZIP file: {e}")
 
             # For incremental scans, analyze changes first
             scan_type = self.scan_config.get("scan_type", "full")
@@ -451,7 +574,7 @@ class CLIAdapter:
         logger.info(f"Running scan {self.scan_id} with command: {' '.join(cmd)}")
 
         # Track start time
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.utcnow()
 
         try:
             # Run subprocess
@@ -487,7 +610,7 @@ class CLIAdapter:
                     "success": False,
                     "error": f"CLI exited with code {return_code}: {stderr_str}",
                     "findings_count": 0,
-                    "duration_seconds": (datetime.now(timezone.utc) - start_time).total_seconds(),
+                    "duration_seconds": (datetime.utcnow() - start_time).total_seconds(),
                 }
 
             # Parse final output
@@ -501,7 +624,7 @@ class CLIAdapter:
             return {
                 "success": True,
                 "findings_count": findings_count,
-                "duration_seconds": (datetime.now(timezone.utc) - start_time).total_seconds(),
+                "duration_seconds": (datetime.utcnow() - start_time).total_seconds(),
             }
 
         except asyncio.CancelledError:
@@ -513,7 +636,7 @@ class CLIAdapter:
                 "success": False,
                 "error": "Scan was cancelled",
                 "findings_count": 0,
-                "duration_seconds": (datetime.now(timezone.utc) - start_time).total_seconds(),
+                "duration_seconds": (datetime.utcnow() - start_time).total_seconds(),
             }
 
         except Exception as e:
@@ -522,8 +645,28 @@ class CLIAdapter:
                 "success": False,
                 "error": str(e),
                 "findings_count": 0,
-                "duration_seconds": (datetime.now(timezone.utc) - start_time).total_seconds(),
+                "duration_seconds": (datetime.utcnow() - start_time).total_seconds(),
             }
         finally:
+            # Clean up process if still running
             if self._process:
-                self._process.kill()
+                try:
+                    if self._process.returncode is None:
+                        self._process.kill()
+                except ProcessLookupError:
+                    # Process already terminated
+                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to kill process: {e}")
+            # Clean up temporary extraction directory if created
+            if hasattr(self, '_temp_extraction_dir') and self._temp_extraction_dir:
+                import shutil
+                import os
+                try:
+                    if os.path.exists(self._temp_extraction_dir):
+                        shutil.rmtree(self._temp_extraction_dir)
+                        logger.info(f"Cleaned up temp directory: {self._temp_extraction_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp directory: {e}")
+                finally:
+                    self._temp_extraction_dir = None

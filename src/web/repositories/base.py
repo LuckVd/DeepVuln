@@ -120,10 +120,29 @@ class AsyncRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         Returns:
             Created model instance
         """
-        obj_data = obj_in.model_dump() if hasattr(obj_in, "model_dump") else obj_in.dict()
+        # Handle different input types for obj_in
+        if isinstance(obj_in, dict):
+            # Plain dict
+            obj_data = obj_in
+        elif hasattr(obj_in, "model_dump"):
+            # Pydantic v2 model
+            obj_data = obj_in.model_dump()
+        elif hasattr(obj_in, "__table__"):
+            # SQLAlchemy model object - extract attributes
+            obj_data = {c.name: getattr(obj_in, c.name)
+                      for c in obj_in.__table__.columns
+                      if not c.primary_key}  # Skip primary key
+        else:
+            # Fallback for Pydantic v1
+            try:
+                obj_data = obj_in.dict()
+            except AttributeError:
+                # If obj_in is already a model instance, use it as-is
+                obj_data = {c.name: getattr(obj_in, c.name)
+                          for c in obj_in.__table__.columns}
         db_obj = self.model(**obj_data)
         db.add(db_obj)
-        await db.flush()
+        await db.commit()
         await db.refresh(db_obj)
         return db_obj
 
@@ -155,7 +174,7 @@ class AsyncRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
                 setattr(db_obj, field, value)
 
         db.add(db_obj)
-        await db.flush()
+        await db.commit()
         await db.refresh(db_obj)
         return db_obj
 
@@ -176,6 +195,7 @@ class AsyncRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             True if deleted, False if not found
         """
         result = await db.execute(delete(self.model).where(self.model.id == id))
+        await db.commit()
         return result.rowcount > 0
 
     async def exists(

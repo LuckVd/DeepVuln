@@ -69,7 +69,7 @@ def create_celery_app() -> Celery:
     app = Celery(
         "deepvuln",
         broker=settings.broker_url,
-        backend=settings.result_backend,
+        backend=None,  # 禁用 result backend - 扫描结果直接存数据库
         include=[
             "src.web.tasks.scan_tasks",
         ],
@@ -93,8 +93,11 @@ def create_celery_app() -> Celery:
         worker_max_tasks_per_child=settings.worker_max_tasks_per_child,
         # Task routing (optional)
         task_routes={
-            "src.web.tasks.scan_tasks.execute_scan_task": {"queue": "scan"},
+            "execute_scan_task": {"queue": "scan"},
+            "check_scan_progress": {"queue": "scan"},
         },
+        # Default queue for tasks without explicit routing
+        task_default_queue="scan",
         # Task serialization
         task_serializer="json",
         task_accept_content=["json"],
