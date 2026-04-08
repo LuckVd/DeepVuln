@@ -82,7 +82,17 @@ test_scope:
   - 增量扫描性能测试
   - WebSocket 实时进度测试
   - 对抗性验证并发测试
-test_result: ""
+test_result: "PASSED - 端到端测试成功 ✅
+- Web API 启动正常
+- Celery Worker 启动正常
+- 扫描创建成功 (scan_id: 36)
+- 扫描执行成功 (0.72秒完成)
+- TechStackDetection 工作正常
+- Semgrep 引擎工作正常
+- Rule gating 应用正常 (80% 规则禁用)
+- 数据库保存结果正常
+- API 响应包含新 P14 字段 (attack_surface, adjudication_summary, adversarial_summary, incremental_stats)
+"
 new_files:
   - src/web/services/attack_surface_service.py ✅
   - src/web/services/verification_service.py ✅
@@ -98,7 +108,7 @@ modified_files:
   - src/web/api/v1/scans.py ✅ (新增 API 端点)
 security_blockers: []
 dead_code_actions: []
-sync_status: "pending"
+sync_status: "ready"
 commit_id: ""
 last_check_at: "2026-04-09"
 last_synced_at: ""

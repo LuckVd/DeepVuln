@@ -1798,7 +1798,7 @@ incremental_stats: Optional[JSON]       # 增量扫描统计
 |v0.97|前端界面|MVP|React + TypeScript + Ant Design + 实时进度 + 扫描控制|done|2026-04-07|
 |v0.98|漏洞结果界面|列表/详情/代码高亮/状态管理|React + SyntaxHighlighter + 状态 API|done|2026-04-07|
 |v1.0|Web 基础版|高精度、低误报 + Web UI + 暂停续扫|done|2026-04-09|
-|v1.1|Web 完整能力|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|in_progress|2026-04-09|
+|v1.1|Web 完整能力|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|done|2026-04-09|
 |v1.5|企业稳定版|CI/CD 集成 + 多租户 + 用户认证 + 报告导出|todo|2026-Q2|
 
 ---
@@ -1807,11 +1807,9 @@ incremental_stats: Optional[JSON]       # 增量扫描统计
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 14 Web 服务完整能力迁移，P14-web-capability-migration|
-|**当前进度**|设计阶段 (design) - 等待实现|
-|**目标范围**|完整迁移 5 项 CLI 核心功能 + 增量扫描增强|
-|**核心任务**|P14-01~P14-09: 攻击面检测/可利用性验证/去重仲裁/对抗性验证/Token统计/增量扫描增强/数据模型/API扩展/测试|
-|**里程碑**|v1.1 进行中 (Web 完整扫描能力)|
+|**阶段**|无 - 上一阶段已完成|
+|**上一阶段**|Phase 14 Web 服务完整能力迁移，P14-web-capability-migration (已完成 ✅)|
+|**里程碑**|v1.1 已完成 (Web 完整扫描能力)|
 
 ---
 

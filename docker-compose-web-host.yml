@@ -1,0 +1,96 @@
+# DeepVuln Web Service Docker Compose 配置 (使用主机 PostgreSQL/Redis)
+#
+# 此配置适用于主机已安装 PostgreSQL 和 Redis 的场景
+# 使用 host 网络模式连接主机服务
+#
+# 使用方法:
+#   1. 确保主机 PostgreSQL 和 Redis 正在运行
+#   2. 配置环境变量（参考 .env.web.example）
+#   3. docker-compose -f docker-compose-web-host.yml up -d
+#   4. 访问 http://localhost:8000/api/v1/health
+
+services:
+  # Celery Worker - 处理后台扫描任务
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+    image: deepvuln:latest
+    container_name: deepvuln-celery-worker
+    entrypoint: ["python", "-m", "celery", "-A", "src.web.tasks.scan_tasks", "worker", "-l", "info", "-Q", "scan", "--concurrency=2"]
+    network_mode: host
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.lkeap.cloud.tencent.com/coding/v3}
+      - PYTHONUNBUFFERED=1
+      # 数据库连接 - 使用主机 localhost
+      - DATABASE_URL=postgresql+asyncpg://deepvuln:deepvuln_password@localhost:5432/deepvuln
+      # Redis 连接 - 使用主机 localhost
+      - CELERY_BROKER_URL=redis://localhost:6379/0
+      - CELERY_RESULT_BACKEND=redis://localhost:6379/0
+    volumes:
+      - ./src:/app/src:ro
+      - ./config.local.toml:/app/config.local.toml:ro
+      - deepvuln-cache:/home/deepvuln/.cache
+      - codeql-databases:/tmp/codeql_cache
+      - codeql-packs:/home/deepvuln/.codeql
+      # 挂载主机目录以访问代码仓库
+      - /opt/projects:/opt/projects:rw
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # Web API 服务器
+  web-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+    image: deepvuln:latest
+    container_name: deepvuln-web-api
+    entrypoint: ["python", "-m", "uvicorn", "src.web.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    network_mode: host
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.lkeap.cloud.tencent.com/coding/v3}
+      - PYTHONUNBUFFERED=1
+      # 数据库连接 - 使用主机 localhost
+      - DATABASE_URL=postgresql+asyncpg://deepvuln:deepvuln_password@localhost:5432/deepvuln
+      # Redis 连接 - 使用主机 localhost
+      - CELERY_BROKER_URL=redis://localhost:6379/0
+      - CELERY_RESULT_BACKEND=redis://localhost:6379/0
+    volumes:
+      - ./src:/app/src:ro
+      - ./config.local.toml:/app/config.local.toml:ro
+      - deepvuln-cache:/home/deepvuln/.cache
+      - codeql-databases:/tmp/codeql_cache
+      - codeql-packs:/home/deepvuln/.codeql
+      # 挂载主机目录以访问代码仓库
+      - /opt/projects:/opt/projects:rw
+    depends_on:
+      celery-worker:
+        condition: service_started
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  deepvuln-cache:
+    name: deepvuln-cache
+  codeql-databases:
+    name: codeql-databases
+  codeql-packs:
+    name: codeql-packs

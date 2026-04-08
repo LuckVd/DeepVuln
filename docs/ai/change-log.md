@@ -46,7 +46,12 @@
     "head_ref": "HEAD"               // 增量扫描目标引用
   }
   ```
-- **Tests**: 15 个单元测试全部通过
+- **Tests**: 15 个单元测试全部通过 + 端到端测试成功 ✅
+- **E2E Test**:
+  - Web API + Celery Worker 启动成功
+  - 扫描创建和执行正常 (0.72秒完成)
+  - TechStackDetection 和 Semgrep 引擎工作正常
+  - API 响应包含所有 P14 新字段
 - **Security**: 无安全风险
 - **Milestone**: v1.1 完成
 - **Next**: 集成测试 (P14-09) 或开始下一个里程碑

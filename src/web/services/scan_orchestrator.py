@@ -200,7 +200,7 @@ class ScanOrchestrator:
             )
 
             # Phase 3.5: Exploitability Verification (P14-02)
-            if self.scan_config.get("llm_verify", True):
+            if self.config.get("llm_verify", True):
                 await self.progress_callback.on_phase_start("exploitability_verification")
                 verified_count = await self._run_exploitability_verification()
                 await self.progress_callback.on_phase_complete(
@@ -220,7 +220,7 @@ class ScanOrchestrator:
             )
 
             # Phase 5: Adversarial Verification (P14-04)
-            if self.scan_config.get("adversarial", False):
+            if self.config.get("adversarial", False):
                 await self.progress_callback.on_phase_start("adversarial_verification")
                 adversarial_summary = await self._run_adversarial_verification()
                 await self.progress_callback.on_phase_complete(
@@ -329,7 +329,7 @@ class ScanOrchestrator:
             self.source_path = source_path
 
         # P14-06: Incremental scan mode
-        if self.scan_config.get("incremental", False):
+        if self.config.get("incremental", False):
             await self._prepare_incremental_scan()
 
         # Count total files (with basic filtering)
@@ -451,8 +451,8 @@ class ScanOrchestrator:
         from pathlib import Path as PathLib
 
         # Get incremental scan configuration
-        base_ref = self.scan_config.get("base_ref", "HEAD~1")
-        head_ref = self.scan_config.get("head_ref", "HEAD")
+        base_ref = self.config.get("base_ref", "HEAD~1")
+        head_ref = self.config.get("head_ref", "HEAD")
 
         logger.info(
             f"Preparing incremental scan: {base_ref}...{head_ref}"
@@ -818,7 +818,7 @@ class ScanOrchestrator:
         from src.layers.l3_analysis.models import Finding
 
         # Get verification configuration
-        llm_verify = self.scan_config.get("llm_verify", True)
+        llm_verify = self.config.get("llm_verify", True)
         if not llm_verify:
             logger.info("LLM verification disabled (llm_verify=False)")
             return 0
@@ -964,9 +964,9 @@ class ScanOrchestrator:
             return {"verified_count": 0, "confirmed": 0, "rejected": 0}
 
         # Get adversarial configuration
-        adversarial_config = self.scan_config.get("adversarial", False)
-        max_rounds = self.scan_config.get("adversarial_max_rounds", 5)
-        round_timeout = self.scan_config.get("adversarial_round_timeout", 180)
+        adversarial_config = self.config.get("adversarial", False)
+        max_rounds = self.config.get("adversarial_max_rounds", 5)
+        round_timeout = self.config.get("adversarial_round_timeout", 180)
 
         if not adversarial_config:
             logger.info("Adversarial verification disabled by config")
