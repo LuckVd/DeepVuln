@@ -297,8 +297,19 @@ class ScanOrchestrator:
         - Directory structure detection
         - File filtering and counting
 
+        Optimization: Reuses extracted directory from Phase 0 if available.
+
         Reference: DeepAudit scanner.py:297-350 (process_zip_task)
         """
+        # Check if source_path was already set by Phase 0 (L1_Preparation)
+        if self.source_path is not None:
+            logger.info(f"Scan {self.scan_id}: Reusing extracted directory from Phase 0: {self.source_path}")
+            # Update total_files count
+            self.total_files = self._count_code_files()
+            logger.info(f"Scan {self.scan_id}: {self.total_files} code files in {self.source_path}")
+            return
+
+        # Need to extract source (this happens when Phase 0 was skipped or source is not a ZIP)
         async with self.db_session_factory() as db:
             project = await self.project_repo.get(db, id=self.project_id)
             if not project:
@@ -1188,15 +1199,16 @@ class ScanOrchestrator:
 
         # Handle ZIP files for path resolution
         if source_path.suffix == ".zip":
-            # For now, we'll use the temp directory created during source preparation
-            # This is a placeholder - actual ZIP extraction happens in _prepare_source
-            # For attack surface detection, we need the actual code
+            # Extract ZIP for Phase 0 analysis (tech stack + attack surface)
+            # The extracted directory will be reused in Phase 1 to avoid double extraction
             self.temp_dir = Path(
                 tempfile.mkdtemp(prefix=f"deepvuln_l1_{self.scan_id}_")
             )
             try:
+                logger.info(f"Phase 0: Extracting ZIP: {source_path} -> {self.temp_dir}")
                 shutil.unpack_archive(source_path, self.temp_dir)
                 self.source_path = self._find_code_directory(self.temp_dir)
+                logger.info(f"Phase 0: Using code directory: {self.source_path}")
             except Exception as e:
                 if self.temp_dir and self.temp_dir.exists():
                     shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -1250,10 +1262,8 @@ class ScanOrchestrator:
                     f"AttackSurfaceDetection failed: {e}"
                 )
 
-        # Clean up temp directory if we created one
-        if self.temp_dir and self.temp_dir.exists():
-            shutil.rmtree(self.temp_dir, ignore_errors=True)
-            self.temp_dir = None
+        # NOTE: Don't clean up temp_dir here - it will be reused by Phase 1
+        # The temp_dir will be cleaned up at the end of the scan in _cleanup()
 
     async def _detect_tech_stack_for_l1(self) -> Dict[str, Any]:
         """
