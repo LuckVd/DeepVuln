@@ -108,10 +108,10 @@ modified_files:
   - src/web/api/v1/scans.py ✅ (新增 API 端点)
 security_blockers: []
 dead_code_actions: []
-sync_status: "ready"
-commit_id: ""
+sync_status: "synced"
+commit_id: "9214465"
 last_check_at: "2026-04-09"
-last_synced_at: ""
+last_synced_at: "2026-04-09"
 previous_goal:
   goal_id: "P10-07-scan-architecture-refactor"
   title: "扫描架构重构 - 进程内引擎调用"
