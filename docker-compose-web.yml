@@ -1,0 +1,154 @@
+# DeepVuln Web Service Docker Compose 配置
+#
+# 启动 Web 服务所需的全部组件：
+# - Web API (FastAPI + Uvicorn)
+# - Celery Worker (后台扫描任务)
+# - Redis (Celery broker)
+# - PostgreSQL (数据库)
+#
+# 使用方法:
+#   1. 配置环境变量（参考 .env.example）
+#   2. docker-compose -f docker-compose-web.yml up -d
+#   3. 访问 http://localhost:8000/api/v1/health
+
+version: "3.8"
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:16-alpine
+    container_name: deepvuln-postgres
+    environment:
+      POSTGRES_USER: deepvuln
+      POSTGRES_PASSWORD: deepvuln_password
+      POSTGRES_DB: deepvuln
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deepvuln"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - deepvuln-network
+
+  # Redis - Celery broker
+  redis:
+    image: redis:7-alpine
+    container_name: deepvuln-redis
+    command: redis-server --appendonly yes --appendfilename "appendonly.aof"
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - deepvuln-network
+
+  # Celery Worker - 处理后台扫描任务
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+    image: deepvuln:latest
+    container_name: deepvuln-celery-worker
+    command: ["python", "-m", "celery", "-A", "src.web.tasks.scan_tasks", "worker", "-l", "info", "-Q", "scan", "--concurrency=2"]
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.lkeap.cloud.tencent.com/coding/v3}
+      - PYTHONUNBUFFERED=1
+      # 数据库连接
+      - DATABASE_URL=postgresql+asyncpg://deepvuln:deepvuln_password@postgres:5432/deepvuln
+      # Redis 连接
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./src:/app/src:ro
+      - ./config.local.toml:/app/config.local.toml:ro
+      - deepvuln-cache:/home/deepvuln/.cache
+      - codeql-databases:/tmp/codeql_cache
+      - codeql-packs:/home/deepvuln/.codeql
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - deepvuln-network
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # Web API 服务器
+  web-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+    image: deepvuln:latest
+    container_name: deepvuln-web-api
+    command: ["python", "-m", "uvicorn", "src.web.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.lkeap.cloud.tencent.com/coding/v3}
+      - PYTHONUNBUFFERED=1
+      # 数据库连接
+      - DATABASE_URL=postgresql+asyncpg://deepvuln:deepvuln_password@postgres:5432/deepvuln
+      # Redis 连接
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src:ro
+      - ./config.local.toml:/app/config.local.toml:ro
+      - deepvuln-cache:/home/deepvuln/.cache
+      - codeql-databases:/tmp/codeql_cache
+      - codeql-packs:/home/deepvuln/.codeql
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery-worker:
+        condition: service_started
+    networks:
+      - deepvuln-network
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres-data:
+    name: deepvuln-postgres-data
+  redis-data:
+    name: deepvuln-redis-data
+  deepvuln-cache:
+    name: deepvuln-cache
+  codeql-databases:
+    name: codeql-databases
+  codeql-packs:
+    name: codeql-packs
+
+networks:
+  deepvuln-network:
+    name: deepvuln-network
