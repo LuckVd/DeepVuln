@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Card,
@@ -10,13 +11,16 @@ import {
   Form,
   Input,
   Select,
+  Upload,
   message,
   Popconfirm,
 } from 'antd'
-import { PlusOutlined, DeleteOutlined, EyeOutlined, HistoryOutlined } from '@ant-design/icons'
+import { PlusOutlined, DeleteOutlined, EyeOutlined, HistoryOutlined, UploadOutlined } from '@ant-design/icons'
+import type { UploadProps } from 'antd'
 import { useProjects, useCreateProject, useDeleteProject, useProjectScans } from '@/hooks/useApi'
 import type { Project, SourceType } from '@/types/models'
 import type { ColumnsType } from 'antd/es/table'
+import apiClient from '@/api/client'
 
 const SOURCE_TYPE_MAP: Record<SourceType, { text: string; color: string }> = {
   local: { text: '本地', color: 'blue' },
@@ -26,11 +30,14 @@ const SOURCE_TYPE_MAP: Record<SourceType, { text: string; color: string }> = {
 
 export default function ProjectsPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [form] = Form.useForm()
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
 
   const { data, isLoading } = useProjects({ page, page_size: pageSize })
   const createMutation = useCreateProject()
@@ -130,15 +137,65 @@ export default function ProjectsPage() {
   const handleCreate = async () => {
     try {
       const values = await form.validateFields()
-      await createMutation.mutateAsync(values)
-      message.success('项目创建成功')
-      setIsModalOpen(false)
-      form.resetFields()
+
+      // If ZIP upload, use the upload endpoint
+      if (values.source_type === 'zip') {
+        if (!uploadedFile) {
+          message.error('请选择 ZIP 文件')
+          return
+        }
+        setIsUploading(true)
+        try {
+          const formData = new FormData()
+          formData.append('name', values.name)
+          formData.append('file', uploadedFile)
+          if (values.description) formData.append('description', values.description)
+          if (values.branch) formData.append('branch', values.branch)
+
+          const response = await fetch('/api/v1/projects/upload-zip', {
+            method: 'POST',
+            body: formData,
+          })
+
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({ detail: '上传失败' }))
+            throw new Error(error.detail || error.message || '上传失败')
+          }
+
+          message.success('项目创建成功')
+          setIsModalOpen(false)
+          form.resetFields()
+          setUploadedFile(null)
+          // 刷新项目列表
+          queryClient.invalidateQueries({ queryKey: ['projects'] })
+        } finally {
+          setIsUploading(false)
+        }
+      } else {
+        // For local and git, use the regular create endpoint
+        await createMutation.mutateAsync(values)
+        message.success('项目创建成功')
+        setIsModalOpen(false)
+        form.resetFields()
+      }
     } catch (error) {
       // form.validateFields 会抛出验证错误，这里只处理 API 错误
-      if (error instanceof Error) {
-        message.error(`创建失败: ${error.message}`)
+      const err = error as any
+      let errorMsg = '创建失败，请稍后重试'
+
+      if (err?.errorFields) {
+        // Ant Design 表单验证错误
+        errorMsg = err.errorFields.map((e: any) => e.message).join(', ')
+      } else if (err?.response?.data?.detail) {
+        errorMsg = err.response.data.detail
+      } else if (err?.response?.data?.message) {
+        errorMsg = err.response.data.message
+      } else if (err?.message) {
+        errorMsg = err.message
       }
+
+      message.error(errorMsg)
+      console.error('Create project error:', error)
     }
   }
 
@@ -191,8 +248,9 @@ export default function ProjectsPage() {
         onCancel={() => {
           setIsModalOpen(false)
           form.resetFields()
+          setUploadedFile(null)
         }}
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || isUploading}
         okText="创建"
         cancelText="取消"
       >
@@ -222,12 +280,18 @@ export default function ProjectsPage() {
             </Select>
           </Form.Item>
 
-          <Form.Item
-            name="source_path"
-            label="来源路径"
-            rules={[{ required: true, message: '请输入来源路径' }]}
-          >
-            <Input placeholder="/path/to/project 或 https://github.com/user/repo" />
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.source_type !== curr.source_type}>
+            {({ getFieldValue }) =>
+              getFieldValue('source_type') !== 'zip' ? (
+                <Form.Item
+                  name="source_path"
+                  label="来源路径"
+                  rules={[{ required: true, message: '请输入来源路径' }]}
+                >
+                  <Input placeholder="/path/to/project 或 https://github.com/user/repo" />
+                </Form.Item>
+              ) : null
+            }
           </Form.Item>
 
           <Form.Item noStyle shouldUpdate={(prev, curr) => prev.source_type !== curr.source_type}>
@@ -235,6 +299,36 @@ export default function ProjectsPage() {
               getFieldValue('source_type') === 'git' ? (
                 <Form.Item name="branch" label="分支">
                   <Input placeholder="main 或 master (留空使用默认)" />
+                </Form.Item>
+              ) : null
+            }
+          </Form.Item>
+
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.source_type !== curr.source_type}>
+            {({ getFieldValue }) =>
+              getFieldValue('source_type') === 'zip' ? (
+                <Form.Item label="ZIP 文件" rules={[{ required: true, message: '请上传 ZIP 文件' }]}>
+                  <Upload
+                    accept=".zip"
+                    maxCount={1}
+                    beforeUpload={(file) => {
+                      if (!file.name.toLowerCase().endsWith('.zip')) {
+                        message.error('只能上传 ZIP 文件')
+                        return Upload.LIST_IGNORE
+                      }
+                      setUploadedFile(file)
+                      return false // 阻止自动上传
+                    }}
+                    onRemove={() => setUploadedFile(null)}
+                    fileList={uploadedFile ? [ { uid: '1', name: uploadedFile.name, status: 'done' } ] : []}
+                  >
+                    <Button icon={<UploadOutlined />}>选择 ZIP 文件</Button>
+                  </Upload>
+                  {uploadedFile && (
+                    <div style={{ marginTop: 8, color: '#52c41a' }}>
+                      已选择: {uploadedFile.name} ({(uploadedFile.size / 1024 / 1024).toFixed(2)} MB)
+                    </div>
+                  )}
                 </Form.Item>
               ) : null
             }

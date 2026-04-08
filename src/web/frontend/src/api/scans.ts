@@ -43,6 +43,14 @@ export const scansApi = {
   },
 
   /**
+   * 启动扫描
+   */
+  async start(id: number): Promise<any> {
+    const response = await client.post(`/scans/${id}/start`)
+    return response.data
+  },
+
+  /**
    * 获取扫描进度
    */
   async getProgress(id: number): Promise<ScanProgressResponse> {

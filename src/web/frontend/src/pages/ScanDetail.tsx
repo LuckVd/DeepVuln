@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Card,
   Row,
@@ -13,15 +13,21 @@ import {
   Timeline,
   Alert,
   Spin,
+  Collapse,
+  List,
+  Typography,
 } from 'antd'
 import {
   ArrowLeftOutlined,
   PlayCircleOutlined,
   PauseCircleOutlined,
   StopOutlined,
+  BugOutlined,
+  MessageOutlined,
 } from '@ant-design/icons'
-import { useScan } from '@/hooks/useApi'
+import { useScan, useScanFindings } from '@/hooks/useApi'
 import { useScanProgress } from '@/hooks/useScanProgress'
+import { ScanProgress } from '@/components/scan'
 import type { ScanStatus } from '@/types/models'
 
 const STATUS_MAP: Record<ScanStatus, { text: string; color: string }> = {
@@ -50,6 +56,29 @@ export default function ScanDetailPage() {
   } = useScanProgress(isNaN(scanId) ? null : scanId, {
     enabled: !isNaN(scanId),
   })
+
+  // 获取事件流
+  const [events, setEvents] = useState<any[]>([])
+  const [eventsLoading, setEventsLoading] = useState(false)
+
+  // 加载事件流
+  useEffect(() => {
+    if (scanId && !isNaN(scanId)) {
+      const loadEvents = async () => {
+        setEventsLoading(true)
+        try {
+          const { scansApi } = await import('@/api')
+          const data = await scansApi.getEvents(scanId, { page: 1, page_size: 50 })
+          setEvents(data.events || [])
+        } catch (err) {
+          console.error('Failed to load events:', err)
+        } finally {
+          setEventsLoading(false)
+        }
+      }
+      loadEvents()
+    }
+  }, [scanId])
 
   // 使用 progress 或 scan 的状态（优先使用 progress）
   const currentStatus = (progress?.status || scan?.status || 'pending') as ScanStatus
@@ -362,6 +391,61 @@ export default function ScanDetailPage() {
           </Timeline>
         </Card>
       )}
+
+      {/* 使用 ScanProgress 组件显示详细进度 */}
+      {currentStatus === 'running' && progress && (
+        <Card title="实时进度" style={{ marginBottom: 16 }}>
+          <ScanProgress progress={progress} />
+        </Card>
+      )}
+
+      {/* 事件流 */}
+      <Card
+        title={
+          <Space>
+            <MessageOutlined />
+            <span>事件流</span>
+          </Space>
+        }
+      >
+        <List
+          size="small"
+          loading={eventsLoading}
+          dataSource={events}
+          renderItem={(item: any) => (
+            <List.Item>
+              <List.Item.Meta
+                avatar={
+                  <Tag color={
+                    item.event_level === 'error' ? 'red' :
+                    item.event_level === 'warning' ? 'orange' :
+                    item.event_level === 'info' ? 'blue' : 'default'
+                  }>
+                    {item.event_type}
+                  </Tag>
+                }
+                title={
+                  <span style={{ fontSize: 12 }}>
+                    {item.message}
+                    {item.file_path && (
+                      <code style={{ marginLeft: 8, color: '#666' }}>{item.file_path}</code>
+                    )}
+                  </span>
+                }
+                description={
+                  <span style={{ fontSize: 11, color: '#999' }}>
+                    {new Date(item.created_at).toLocaleTimeString('zh-CN')}
+                  </span>
+                }
+              />
+            </List.Item>
+          )}
+          pagination={{
+            pageSize: 20,
+            showSizeChanger: false,
+          }}
+        />
+      </Card>
     </div>
   )
 }

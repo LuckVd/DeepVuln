@@ -2,13 +2,14 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AppLayout from './components/layout/AppLayout'
 import ProjectsPage from './pages/Projects'
+import ProjectDetailPage from './pages/ProjectDetail'
 import ScansPage from './pages/Scans'
 import ScanDetailPage from './pages/ScanDetail'
 import FindingsPage from './pages/Findings'
 
 // 临时占位页面
 const ProjectFormPage = () => <div>使用项目列表的创建按钮</div>
-const ProjectDetailPage = () => <div>项目详情页 - 待实现</div>
+// ProjectDetailPage 已移动到独立文件
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -15,11 +15,8 @@ const client: AxiosInstance = axios.create({
 // 请求拦截器 - 添加认证头
 client.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    // 从 localStorage 获取 API Key
-    const apiKey = localStorage.getItem('deepvuln_api_key')
-    if (apiKey && config.headers) {
-      config.headers['X-API-Key'] = apiKey
-    }
+    // 开发环境无需 API Key
+    // 生产环境可从 localStorage 或环境变量获取
     return config
   },
   (error) => {
