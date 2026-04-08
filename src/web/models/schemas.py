@@ -105,6 +105,87 @@ class ProjectListResponse(BaseModel):
 # Scan Schemas
 # ============================================================================
 
+
+class ScanConfig(BaseModel):
+    """Scan configuration schema with all supported parameters.
+
+    P14-01f: 添加 LLM 攻击面检测、可利用性验证、对抗性验证、增量扫描等配置参数.
+    """
+    # Engine selection
+    engines: list[str] = Field(
+        default=["semgrep", "codeql", "agent"],
+        description="List of engines to use"
+    )
+
+    # LLM 攻击面检测 (P14-01)
+    llm_detect: bool = Field(
+        default=False,
+        description="Enable LLM-based attack surface detection"
+    )
+    static_only: bool = Field(
+        default=False,
+        description="Use only static detection (no LLM)"
+    )
+
+    # 可利用性验证 (P14-02)
+    llm_verify: bool = Field(
+        default=True,
+        description="Enable exploitability verification"
+    )
+
+    # 对抗性验证 (P14-04)
+    adversarial: bool = Field(
+        default=False,
+        description="Enable adversarial verification"
+    )
+    adversarial_max_rounds: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Maximum rounds for adversarial verification"
+    )
+    adversarial_round_timeout: int = Field(
+        default=180,
+        ge=30,
+        le=600,
+        description="Timeout per round in seconds (default: 3 minutes)"
+    )
+
+    # 增量扫描 (P14-06)
+    incremental: bool = Field(
+        default=False,
+        description="Enable incremental scan mode"
+    )
+    base_ref: str = Field(
+        default="HEAD~1",
+        description="Base reference for incremental scan (e.g., HEAD~1)"
+    )
+    head_ref: str = Field(
+        default="HEAD",
+        description="Target reference for incremental scan (e.g., HEAD)"
+    )
+
+    # Agent settings
+    agent_max_files: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Maximum files for agent to analyze"
+    )
+
+    # LLM model
+    model: str = Field(
+        default="deepseek-chat",
+        description="LLM model to use for AI-based features"
+    )
+
+    # Test file filtering
+    skip_tests: bool = Field(
+        default=False,
+        description="Skip test files during scanning"
+    )
+
+
 class TokenInfo(BaseModel):
     """Token consumption information."""
     used: int = 0
@@ -213,7 +294,10 @@ class ScanBase(BaseModel):
     """Base scan schema."""
     project_id: int
     scan_type: str = Field(..., pattern="^(full|base|incremental)$")
-    config: dict = Field(default_factory=dict)
+    config: ScanConfig = Field(
+        default_factory=ScanConfig,
+        description="Scan configuration parameters"
+    )
 
 
 class ScanCreate(ScanBase):
@@ -237,6 +321,12 @@ class ScanResponse(BaseModel):
     analyzed_files: int = 0
     findings_count: int = 0
     tokens_used: int = 0
+
+    # P14-01/05/06: 扩展字段
+    attack_surface: Optional[dict] = None  # P14-01: 攻击面统计
+    adjudication_summary: Optional[dict] = None  # P14-03: 仲裁摘要
+    adversarial_summary: Optional[dict] = None  # P14-04: 对抗性摘要
+    incremental_stats: Optional[dict] = None  # P14-06: 增量扫描统计
 
     # Timestamps
     created_at: datetime

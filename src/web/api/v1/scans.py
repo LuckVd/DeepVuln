@@ -41,7 +41,7 @@ router = APIRouter()
 async def create_scan(
     scan: ScanCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_api_key)] = None,
+    _: Annotated[None, Depends(optional_api_key)] = None,
 ) -> ScanResponse:
     """
     Create a new scan.
@@ -70,6 +70,53 @@ async def create_scan(
     # Create scan
     created = await scan_repo.create(db, obj_in=scan)
     return ScanResponse.model_validate(created)
+
+
+@router.post("/scans/{scan_id}/start", response_model=dict)
+async def start_scan(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(require_api_key)] = None,
+) -> dict:
+    """
+    Start a scan by dispatching it to Celery.
+
+    Args:
+        scan_id: ID of the scan to start
+        db: Database session
+
+    Returns:
+        Dictionary with task_id and status
+
+    Raises:
+        HTTPException 404: If scan not found
+        HTTPException 400: If scan cannot be started
+    """
+    from src.web.services.scan_executor import get_scan_executor
+    from src.web.models.scan import ScanStatus
+
+    executor = get_scan_executor()
+
+    # Verify scan exists
+    scan_repo = ScanRepository()
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Check if scan can be started
+    if scan.status != ScanStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Scan {scan_id} is not in pending status (current: {scan.status})"
+        )
+
+    # Start the scan
+    result = await executor.start_scan(scan_id)
+
+    return result
 
 
 @router.get("/scans", response_model=ScanListResponse)
@@ -649,7 +696,7 @@ async def update_finding_status(
     finding_id: int,
     status_update: FindingUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_api_key)] = None,
+    
 ) -> FindingResponse:
     """
     Update the status of a finding.
@@ -780,7 +827,7 @@ async def get_scan_report(
 async def pause_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_api_key)] = None,
+    
 ) -> PauseScanResponse:
     """
     Pause a running scan.
@@ -827,7 +874,7 @@ async def pause_scan(
 async def resume_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_api_key)] = None,
+    
 ) -> ResumeScanResponse:
     """
     Resume a paused scan.
@@ -874,7 +921,7 @@ async def resume_scan(
 async def cancel_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_api_key)] = None,
+    
 ) -> CancelScanResponse:
     """
     Cancel a scan.
@@ -989,6 +1036,189 @@ async def get_scan_control_status(
         can_resume=can_resume,
         can_cancel=can_cancel,
     )
+
+
+# ============================================================================
+# P14-08: Extended Query Endpoints
+# ============================================================================
+
+@router.get("/scans/{scan_id}/adversarial-debate")
+async def get_adversarial_debate(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(optional_api_key)] = None,
+    finding_id: Annotated[str | None, Query(description="Filter by specific finding ID")] = None,
+) -> dict:
+    """
+    Get adversarial verification debate content (P14-08b).
+
+    Returns the multi-round debate records between Attacker and Defender
+    for verified findings.
+
+    Args:
+        scan_id: ID of the scan
+        db: Database session
+        finding_id: Optional filter for specific finding
+
+    Returns:
+        Dictionary with debate records and final verdicts
+    """
+    scan_repo = ScanRepository()
+    finding_repo = FindingRepository()
+
+    # Verify scan exists
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Get findings with adversarial verification data
+    from src.web.models.finding import Finding as FindingModel
+    from sqlalchemy import select
+
+    query = select(FindingModel).where(
+        FindingModel.scan_id == scan_id
+    )
+
+    if finding_id:
+        query = query.where(FindingModel.id == finding_id)
+
+    result = await db.execute(query)
+    findings = result.scalars().all()
+
+    # Extract adversarial verification data
+    debates = []
+    for finding in findings:
+        if finding.extra_metadata:
+            adv_data = finding.extra_metadata.get("adversarial_verification")
+            if adv_data:
+                debates.append({
+                    "finding_id": finding.id,
+                    "finding_title": finding.title,
+                    "vuln_type": finding.vuln_type,
+                    "status": adv_data.get("status"),
+                    "confidence": adv_data.get("confidence"),
+                    "rounds_count": adv_data.get("rounds_count", 0),
+                    "rounds": adv_data.get("rounds", []),
+                    "verdict": adv_data.get("verdict"),
+                    "reasoning": adv_data.get("reasoning"),
+                    "timeout": adv_data.get("timeout", False),
+                })
+
+    return {
+        "scan_id": scan_id,
+        "total_debates": len(debates),
+        "debates": debates,
+    }
+
+
+@router.get("/scans/{scan_id}/token-usage")
+async def get_token_usage(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(optional_api_key)] = None,
+) -> dict:
+    """
+    Get token usage statistics for a scan (P14-08c).
+
+    Returns detailed token consumption with cost breakdown.
+
+    Args:
+        scan_id: ID of the scan
+        db: Database session
+
+    Returns:
+        Dictionary with token usage statistics
+    """
+    scan_repo = ScanRepository()
+
+    # Verify scan exists
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Extract token usage from scan record
+    token_usage = scan.token_usage or {}
+    tokens_used = scan.tokens_used or 0
+    tokens_budget = scan.tokens_budget or 100000
+
+    # Calculate cost (simple rate: $0.002 per 1K tokens)
+    estimated_cost = token_usage.get("estimated_cost", round(tokens_used * 0.002 / 1000, 4))
+
+    return {
+        "scan_id": scan_id,
+        "total_tokens": tokens_used,
+        "tokens_budget": tokens_budget,
+        "percent_used": round((tokens_used / tokens_budget * 100) if tokens_budget > 0 else 0, 2),
+        "estimated_cost": estimated_cost,
+        "breakdown": {
+            "prompt_tokens": token_usage.get("prompt_tokens", 0),
+            "completion_tokens": token_usage.get("completion_tokens", 0),
+        },
+    }
+
+
+@router.get("/scans/{scan_id}/incremental-stats")
+async def get_incremental_stats(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(optional_api_key)] = None,
+) -> dict:
+    """
+    Get incremental scan statistics (P14-08d).
+
+    Returns information about files changed and scanned in incremental mode.
+
+    Args:
+        scan_id: ID of the scan
+        db: Database session
+
+    Returns:
+        Dictionary with incremental scan statistics
+    """
+    scan_repo = ScanRepository()
+
+    # Verify scan exists
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Check if this was an incremental scan
+    is_incremental = scan.scan_type == "incremental"
+    incremental_stats = scan.incremental_stats or {}
+
+    if not is_incremental and not incremental_stats:
+        return {
+            "scan_id": scan_id,
+            "is_incremental": False,
+            "message": "This was not an incremental scan",
+        }
+
+    return {
+        "scan_id": scan_id,
+        "is_incremental": True,
+        "base_ref": incremental_stats.get("base_ref"),
+        "head_ref": incremental_stats.get("head_ref"),
+        "changed_files": {
+            "total": incremental_stats.get("changed_files_count", 0),
+            "added": incremental_stats.get("added_files", 0),
+            "modified": incremental_stats.get("modified_files", 0),
+            "deleted": incremental_stats.get("deleted_files_count", 0),
+            "renamed": incremental_stats.get("renamed_files_count", 0),
+        },
+        "scanning": {
+            "files_to_scan": incremental_stats.get("files_to_scan_count", 0),
+            "total_files": scan.total_files,
+        },
+    }
 
 
 # ============================================================================

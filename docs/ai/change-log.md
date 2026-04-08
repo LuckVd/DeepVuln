@@ -1,5 +1,58 @@
 # Change Log
 
+## 2026-04-09
+
+### P14: Web 服务完整能力迁移 ✅
+
+- **Goal ID**: P14-web-capability-migration
+- **Summary**: 将 CLI 的所有高级功能迁移到 Web 服务，实现攻击面检测、可利用性验证、去重仲裁、对抗性验证、Token 统计、增量扫描增强
+- **Impact**:
+  - **新增服务** (4 个):
+    - `src/web/services/attack_surface_service.py`: 攻击面检测服务 (P14-01)
+    - `src/web/services/verification_service.py`: 可利用性验证服务 (P14-02)
+    - `src/web/services/adjudication_service.py`: 仲裁和去重服务 (P14-03)
+    - `src/web/services/adversarial_service.py`: 对抗性验证服务 (P14-04)
+  - **核心修改**:
+    - `src/web/services/scan_orchestrator.py`: 重构扫描流程，新增 7 个 Phase
+    - `src/web/services/incremental_scan.py`: 增强增量扫描功能
+    - `src/web/models/schemas.py`: 配置参数扩展 (llm_detect, llm_verify, adversarial, incremental 等)
+    - `src/web/api/v1/scans.py`: 新增 3 个 API 端点
+  - **数据库迁移**:
+    - `migrations/versions/002_add_p14_verification_fields.py`: 添加 P14 字段
+- **新增功能**:
+  - **Phase 0 - L1_Preparation**: 攻击面检测 (静态 + LLM 模式)
+  - **Phase 3.5 - Exploitability Verification**: 可利用性验证 (CodeQL 数据流 + 攻击面集成)
+  - **Phase 4 - Deduplication + Adjudication**: 语义去重 + 仲裁决策
+  - **Phase 5 - Adversarial Verification**: 多轮辩论 (Attacker vs Defender)
+  - **Phase 7 - Token Statistics**: Token 使用统计 + 成本计算
+  - **增量扫描增强**: Git diff 分析 + 失败时报错终止
+- **新增 API**:
+  ```
+  GET /api/v1/scans/{id}/adversarial-debate      # 对抗性辩论内容
+  GET /api/v1/scans/{id}/token-usage           # Token 统计
+  GET /api/v1/scans/{id}/incremental-stats      # 增量扫描统计
+  ```
+- **配置参数**:
+  ```json
+  {
+    "llm_detect": true,              // LLM 攻击面检测
+    "static_only": false,            // 仅静态检测
+    "llm_verify": true,              // 可利用性验证
+    "adversarial": true,             // 对抗性验证
+    "adversarial_max_rounds": 5,     // 最大对抗轮数
+    "adversarial_round_timeout": 180, // 每轮超时(秒)
+    "incremental": false,            // 增量扫描模式
+    "base_ref": "HEAD~1",            // 增量扫描基准引用
+    "head_ref": "HEAD"               // 增量扫描目标引用
+  }
+  ```
+- **Tests**: 15 个单元测试全部通过
+- **Security**: 无安全风险
+- **Milestone**: v1.1 完成
+- **Next**: 集成测试 (P14-09) 或开始下一个里程碑
+
+---
+
 ## 2026-04-07 (续 2)
 
 ### P12-06: 漏洞结果界面完成 ✅

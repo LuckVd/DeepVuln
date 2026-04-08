@@ -353,6 +353,7 @@ class IncrementalScanService:
         """
         self.scan_id = scan_id
         self.project_id = project_id
+        self.context: Optional[IncrementalScanContext] = None
 
     async def analyze_incremental_changes(
         self,
@@ -449,6 +450,51 @@ class IncrementalScanService:
 
         logger.info(f"Filtered {len(filtered)} files by language from {len(context.files_to_scan)} total")
         return filtered
+
+    def get_files_to_scan(
+        self,
+        context: Optional[IncrementalScanContext] = None,
+    ) -> Set[str]:
+        """Get the set of files to scan for incremental mode.
+
+        Args:
+            context: Optional context (uses self.context if not provided)
+
+        Returns:
+            Set of file paths to scan
+        """
+        ctx = context or self.context
+        if ctx is None:
+            raise ValueError("No context available - call analyze_incremental_changes first")
+
+        return ctx.files_to_scan
+
+    def get_incremental_stats_dict(
+        self,
+        context: Optional[IncrementalScanContext] = None,
+    ) -> Dict[str, Any]:
+        """Get incremental statistics as a dictionary for storage.
+
+        Args:
+            context: Optional context (uses self.context if not provided)
+
+        Returns:
+            Dictionary with incremental scan statistics
+        """
+        ctx = context or self.context
+        if ctx is None:
+            return {}
+
+        return {
+            "base_ref": ctx.base_ref,
+            "head_ref": ctx.head_ref,
+            "changed_files_count": len(ctx.changed_files),
+            "files_to_scan_count": len(ctx.files_to_scan),
+            "added_files": ctx.added_files,
+            "modified_files": ctx.modified_files,
+            "deleted_files_count": ctx.deleted_files_count,
+            "renamed_files_count": len(ctx.renamed_files),
+        }
 
     async def update_scan_with_incremental_stats(
         self,

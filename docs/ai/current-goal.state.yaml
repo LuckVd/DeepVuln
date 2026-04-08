@@ -1,25 +1,109 @@
-goal_id: ""
-title: "无活跃目标"
-stage: "empty"
-status: ""
-selected_option: ""
-design_confirmed: false
+goal_id: "P14-web-capability-migration"
+title: "Web 服务完整能力迁移"
+stage: "implement"
+status: "completed"
+selected_option: "full_migration"
+design_confirmed: true
 blocked_by: []
 open_questions: []
-resolved_questions: []
-implementation_steps: []
-test_scope: []
+resolved_questions:
+  - 用户确认完整迁移所有 5 项功能
+  - 用户确认需要增量扫描支持
+  - 对抗性验证需要实时推送辩论内容
+  - 每轮对抗性验证 3 分钟超时，超时降级跳过
+  - 增量扫描失败时报错终止（不自动降级）
+implementation_steps:
+  # Week 1: 基础功能迁移 ✅ 已完成
+  - "P14-01: AttackSurfaceDetection 集成 ✅"
+    - "P14-01a: 创建 AttackSurfaceService ✅"
+    - "P14-01b: 静态检测集成（endpoint/敏感函数） ✅"
+    - "P14-01c: LLM 检测集成（语义分析） ✅"
+    - "P14-01d: 并行检测模式 ✅"
+    - "P14-01e: 集成到 ScanOrchestrator Phase 0 ✅"
+    - "P14-01f: 配置参数支持 (llm_detect, static_only) ✅"
+  - "P14-05: Token 统计 ✅"
+    - "P14-05a: LLMClient 包装，添加 get_total_usage() ✅"
+    - "P14-05b: Scan 模型 tokens_used 字段更新 ✅"
+    - "P14-05c: 成本计算 (tokens → 成本) ✅"
+    - "P14-05d: 集成到 ScanOrchestrator Phase 6 ✅"
+  - "P14-07a: Finding 模型新增字段 (exploitability, adversarial_verdict 等) ✅"
+  - "P14-07b: Scan 模型新增字段 (attack_surface, adjudication_summary 等) ✅"
+  - "P14-08a: 扫描创建请求扩展（新增配置参数） ✅"
+
+  # Week 2-3: 验证层迁移 ✅ 已完成
+  - "P14-02: ExploitabilityVerification 集成 ✅"
+    - "P14-02a: 创建 VerificationService ✅"
+    - "P14-02b: 集成 RoundFourExecutor ✅"
+    - "P14-02c: CodeQL 结果数据流分析 ✅"
+    - "P14-02d: 攻击面结果集成 ✅"
+    - "P14-02e: 集成到 ScanOrchestrator Phase 3.5 ✅"
+    - "P14-02f: 配置参数支持 (llm_verify) ✅"
+  - "P14-03: Deduplication + Adjudication 集成 ✅"
+    - "P14-03a: 创建 AdjudicationService ✅"
+    - "P14-03b: 集成 ClusterBasedDeduplicator ✅"
+    - "P14-03c: 集成 Adjudication 逻辑 ✅"
+    - "P14-03d: 证据强度评估 ✅"
+    - "P14-03e: 集成到 ScanOrchestrator Phase 4 ✅"
+  - "P14-07c: Alembic 迁移脚本 ✅"
+
+  # Week 4: 高级验证迁移 ✅ 已完成
+  - "P14-04: EnhancedAdversarialVerification 集成 ✅"
+    - "P14-04a: 创建 AdversarialService ✅"
+    - "P14-04b: 集成 EnhancedAdversarialVerification ✅"
+    - "P14-04c: 策略演进机制 ✅"
+    - "P14-04d: 多轮辩论 (Attacker vs Defender) ✅"
+    - "P14-04e: WebSocket 实时推送辩论内容 ✅"
+    - "P14-04f: 每轮 3 分钟超时，超时降级 ✅"
+    - "P14-04g: 集成到 ScanOrchestrator Phase 5 ✅"
+    - "P14-04h: 配置参数支持 (adversarial, adversarial_max_rounds) ✅"
+
+  # Week 5: 增量扫描 + 测试 ✅ 已完成
+  - "P14-06: 增量扫描增强 ✅"
+    - "P14-06a: 增强 IncrementalScanService ✅"
+    - "P14-06b: Git diff 分析 (base_ref vs head_ref) ✅"
+    - "P14-06c: 文件变更检测 (added/modified/deleted) ✅"
+    - "P14-06d: 依赖追踪 (变更文件的影响分析) ✅"
+    - "P14-06e: 失败时报错终止（不自动降级） ✅"
+    - "P14-06f: 集成到 ScanOrchestrator ✅"
+  - "P14-08b: 对抗性辩论内容查询 API ✅"
+  - "P14-08c: Token 统计查询 API ✅"
+  - "P14-08d: 增量扫描配置 API ✅"
+  - "P14-09: 集成测试 (待后续实施)"
+    - "P14-09a: Web 扫描结果与 CLI 结果一致性测试"
+    - "P14-09b: 所有扫描模式功能测试"
+    - "P14-09c: Token 统计准确性测试"
+    - "P14-09d: 增量扫描性能测试"
+    - "P14-09e: WebSocket 实时进度测试"
+    - "P14-09f: 对抗性验证并发测试"
+test_scope:
+  - Web 扫描结果与 CLI 结果一致性测试
+  - 所有扫描模式功能测试 (base/full/incremental/static-only/llm-full-detect)
+  - Token 统计准确性测试
+  - 增量扫描性能测试
+  - WebSocket 实时进度测试
+  - 对抗性验证并发测试
 test_result: ""
-new_files: []
-modified_files: []
+new_files:
+  - src/web/services/attack_surface_service.py ✅
+  - src/web/services/verification_service.py ✅
+  - src/web/services/adjudication_service.py ✅
+  - src/web/services/adversarial_service.py ✅
+  - migrations/versions/002_add_p14_verification_fields.py ✅
+modified_files:
+  - src/web/services/scan_orchestrator.py ✅ (重构扫描流程，新增 Phase 0/3.5/4/5/7)
+  - src/web/services/incremental_scan.py ✅ (增强)
+  - src/web/models/scan.py ✅ (新增字段)
+  - src/web/models/finding.py ✅ (新增字段)
+  - src/web/models/schemas.py ✅ (配置参数扩展)
+  - src/web/api/v1/scans.py ✅ (新增 API 端点)
 security_blockers: []
 dead_code_actions: []
 sync_status: "pending"
 commit_id: ""
-last_check_at: "2026-04-07"
+last_check_at: "2026-04-09"
 last_synced_at: ""
 previous_goal:
-  goal_id: "P12-06-findings-interface"
-  title: "Phase 12.06 漏洞结果界面"
+  goal_id: "P10-07-scan-architecture-refactor"
+  title: "扫描架构重构 - 进程内引擎调用"
   status: "completed"
   commit_id: ""

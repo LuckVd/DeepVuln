@@ -28,6 +28,7 @@
 |Phase 6.5|code-audit 集成|防幻觉规则 + 覆盖率矩阵 + 污点分析模板 + 漏洞验证方法论|done|2026-03|
 |Phase 6.6|Readiness Gate 自动修复|尽量构建环境而非跳过|done|2026-04|
 |Phase 7|CodeQL 智能构建|LLM 语言决策 + 分语言构建编排 + 多语言构建成功率提升|done|2026-04|
+|Phase 14|Web 完整能力迁移|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|done|2026-04-09|
 
 ---
 
@@ -930,7 +931,9 @@ tests/unit/test_l3/test_pre_filter/
 |v0.75|CodeQL 智能构建|LLM 决策 + 分语言构建编排 + 构建成功率提升|done|2026-04|
 |v0.8|AST Engine|结构级代码理解 + Code Graph + AI 结构化上下文 + 前置防误报|done|2026-04|
 |v0.9|CPG 基础|完整代码图 + 攻击路径搜索 + Agent 集成|done|2026-04-07|
-|v1.0|企业稳定版|高精度、低误报、CI 可用|todo|2026-Q2|
+|v1.0|Web 基础版|高精度、低误报 + Web UI + 暂停续扫|done|2026-04-09|
+|v1.1|Web 完整能力|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计|in_progress|2026-04-09|
+|v1.5|企业稳定版|CI/CD 集成 + 多租户 + 用户认证 + 报告导出|todo|2026-Q2|
 
 ---
 
@@ -1472,9 +1475,261 @@ frontend/
 
 ---
 
+## Phase 14: Web 服务完整能力迁移
+
+> **目标**: 将 CLI 的所有高级功能迁移到 Web 服务，实现与 CLI 完全一致的扫描能力
+> **状态**: 进行中 (design)
+
+### P14-01: AttackSurfaceDetection 集成（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P14-01 | 攻击面检测服务 | - | todo |
+| P14-01a | 创建 AttackSurfaceService | P14-01 | todo |
+| P14-01b | 静态检测集成（endpoint/敏感函数） | P14-01a | todo |
+| P14-01c | LLM 检测集成（语义分析） | P14-01a | todo |
+| P14-01d | 并行检测模式 | P14-01b,c | todo |
+| P14-01e | 集成到 ScanOrchestrator Phase 0 | P14-01d | todo |
+| P14-01f | 配置参数支持 (llm_detect, static_only) | P14-01e | todo |
+
+**实现文件**:
+- `src/web/services/attack_surface_service.py` (新增)
+- `src/web/services/scan_orchestrator.py` (修改，添加 L1_Preparation)
+- `src/web/models/schemas.py` (修改，配置参数)
+
+### P14-02: ExploitabilityVerification 集成（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P14-02 | 可利用性验证服务 | - | todo |
+| P14-02a | 创建 VerificationService | P14-02 | todo |
+| P14-02b | 集成 RoundFourExecutor | P14-02a | todo |
+| P14-02c | CodeQL 结果数据流分析 | P14-02b | todo |
+| P14-02d | 攻击面结果集成 | P14-02b | todo |
+| P14-02e | 集成到 ScanOrchestrator Phase 3 | P14-02d | todo |
+| P14-02f | 配置参数支持 (llm_verify) | P14-02e | todo |
+
+**实现文件**:
+- `src/web/services/verification_service.py` (新增)
+- `src/layers/l3_analysis/rounds/round_four.py` (复用)
+- `src/web/models/finding.py` (修改，添加 exploitability 字段)
+
+### P14-03: Deduplication + Adjudication 集成（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P14-03 | 去重与仲裁服务 | - | todo |
+| P14-03a | 创建 AdjudicationService | P14-03 | todo |
+| P14-03b | 集成 ClusterBasedDeduplicator | P14-03a | todo |
+| P14-03c | 集成 Adjudication 逻辑 | P14-03b | todo |
+| P14-03d | 证据强度评估 | P14-03c | todo |
+| P14-03e | 集成到 ScanOrchestrator Phase 4 | P14-03d | todo |
+
+**实现文件**:
+- `src/web/services/adjudication_service.py` (新增)
+- `src/layers/l3_analysis/deduplicator.py` (复用)
+- `src/layers/l3_analysis/adjudication.py` (复用)
+
+### P14-04: EnhancedAdversarialVerification 集成（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P14-04 | 对抗性验证服务 | - | todo |
+| P14-04a | 创建 AdversarialService | P14-04 | todo |
+| P14-04b | 集成 EnhancedAdversarialVerification | P14-04a | todo |
+| P14-04c | 策略演进机制 | P14-04b | todo |
+| P14-04d | 多轮辩论 (Attacker vs Defender) | P14-04c | todo |
+| P14-04e | WebSocket 实时推送辩论内容 | P14-04d | todo |
+| P14-04f | 每轮 3 分钟超时，超时降级 | P14-04e | todo |
+| P14-04g | 集成到 ScanOrchestrator Phase 5 | P14-04f | todo |
+| P14-04h | 配置参数支持 (adversarial, adversarial_max_rounds) | P14-04g | todo |
+
+**实现文件**:
+- `src/web/services/adversarial_service.py` (新增)
+- `src/layers/l3_analysis/verification/enhanced_adversarial.py` (复用)
+- `src/web/api/websocket.py` (修改，添加辩论事件)
+- `src/web/models/finding.py` (修改，添加 adversarial_verdict 字段)
+
+### P14-05: Token 统计（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P14-05 | Token 使用统计 | - | todo |
+| P14-05a | LLMClient 包装，添加 get_total_usage() | P14-05 | todo |
+| P14-05b | Scan 模型 tokens_used 字段更新 | P14-05a | todo |
+| P14-05c | 成本计算 (tokens → 成本) | P14-05b | todo |
+| P14-05d | 集成到 ScanOrchestrator Phase 6 | P14-05c | todo |
+
+**实现文件**:
+- `src/web/models/scan.py` (修改，tokens_used 字段)
+- `src/layers/l3_analysis/llm/client.py` (修改)
+
+### P14-06: 增量扫描增强（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P14-06 | 增量扫描增强 | - | todo |
+| P14-06a | 增强 IncrementalScanService | P14-06 | todo |
+| P14-06b | Git diff 分析 (base_ref vs head_ref) | P14-06a | todo |
+| P14-06c | 文件变更检测 (added/modified/deleted) | P14-06b | todo |
+| P14-06d | 依赖追踪 (变更文件的影响分析) | P14-06c | todo |
+| P14-06e | 失败时报错终止（不自动降级） | P14-06d | todo |
+| P14-06f | 配置参数支持 (incremental, base_ref, head_ref) | P14-06e | todo |
+
+**实现文件**:
+- `src/web/services/incremental_scan_service.py` (增强)
+- `src/web/models/scan.py` (修改，incremental_stats 字段)
+
+### P14-07: 数据模型扩展（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P14-07 | 数据库模型扩展 | - | todo |
+| P14-07a | Finding 模型新增字段 | P14-07 | todo |
+| P14-07b | Scan 模型新增字段 | P14-07a | todo |
+| P14-07c | Alembic 迁移脚本 | P14-07b | todo |
+
+**Finding 新增字段**:
+```python
+exploitability: Optional[str]          # 可利用性评级
+exploitability_confidence: Optional[float]
+exploitability_reasoning: Optional[str]
+adversarial_verdict: Optional[str]      # 对抗性验证结果
+adversarial_confidence: Optional[float]
+adversarial_reasoning: Optional[str]
+report_status: Optional[str]            # 仲裁状态
+evidence_strength: Optional[str]        # 证据强度
+```
+
+**Scan 新增字段**:
+```python
+attack_surface: Optional[JSON]         # 攻击面统计
+adjudication_summary: Optional[JSON]    # 仲裁摘要
+adversarial_summary: Optional[JSON]     # 对抗性摘要
+token_usage: Optional[JSON]             # Token 使用详情
+incremental_stats: Optional[JSON]       # 增量扫描统计
+```
+
+### P14-08: API 扩展（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P14-08 | 扫描 API 扩展 | - | todo |
+| P14-08a | 扫描创建请求扩展（新增配置参数） | P14-08 | todo |
+| P14-08b | 对抗性辩论内容查询 API | P14-04 | todo |
+| P14-08c | Token 统计查询 API | P14-05 | todo |
+| P14-08d | 增量扫描配置 API | P14-06 | todo |
+
+**扫描创建请求扩展**:
+```json
+{
+  "llm_verify": true,              // 可利用性验证
+  "llm_detect": true,              // LLM 攻击面检测
+  "static_only": false,            // 仅静态检测
+  "adversarial": true,             // 对抗性验证
+  "adversarial_max_rounds": 5,     // 最大对抗轮数
+  "adversarial_round_timeout": 180, // 每轮超时(秒)
+  "incremental": false,            // 增量扫描模式
+  "base_ref": "HEAD~1",            // 增量扫描基准引用
+  "head_ref": "HEAD"               // 增量扫描目标引用
+}
+```
+
+### P14-09: 集成测试（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P14-09 | 集成测试与验证 | - | todo |
+| P14-09a | Web 扫描结果与 CLI 结果一致性测试 | P14-01~P14-06 | todo |
+| P14-09b | 所有扫描模式功能测试 | P14-09a | todo |
+| P14-09c | Token 统计准确性测试 | P14-05 | todo |
+| P14-09d | 增量扫描性能测试 | P14-06 | todo |
+| P14-09e | WebSocket 实时进度测试 | P14-04 | todo |
+| P14-09f | 对抗性验证并发测试 | P14-04 | todo |
+
+**验收标准**:
+1. ✅ Web 扫描结果与 CLI 结果一致性 > 95%
+2. ✅ 支持所有 CLI 扫描模式 (base/full/incremental/static-only/llm-full-detect)
+3. ✅ Token 统计准确率 100%
+4. ✅ 增量扫描加速比 > 60%
+5. ✅ WebSocket 实时进度更新延迟 < 500ms
+6. ✅ 对抗性辩论内容实时展示
+7. ✅ 每轮对抗性验证 3 分钟超时，自动降级
+
+---
+
 ## Phase 13: 企业级功能
 
 > **目标**: 完善企业级功能，支持 CI/CD 集成和团队协作
+
+### P13-01: 用户认证与权限（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P13-01 | 用户认证系统 | - | todo |
+| P13-01a | API Key 认证机制 | P13-01 | todo |
+| P13-01b | 用户注册/登录 (可选) | P13-01a | todo |
+| P13-01c | 基于角色的权限控制 (RBAC) | P13-01a | todo |
+| P13-01d | API Key 生成与管理 | P13-01a | todo |
+| P13-01e | 操作审计日志 | P13-01d | todo |
+
+**实现文件**:
+- `src/web/core/security.py`
+- `src/web/api/v1/auth.py`
+- `src/web/models/user.py`
+
+### P13-02: CI/CD 集成（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P13-02 | CI/CD 集成支持 | - | todo |
+| P13-02a | Docker 镜像构建 | P13-01 | todo |
+| P13-02b | Docker Compose 配置 | P13-02a | todo |
+| P13-02c | 环境变量配置文档 | P13-02b | todo |
+| P13-02d | CLI 容器化入口 | P13-02b | todo |
+| P13-02e | CI 配置示例 (GitHub Actions/GitLab CI) | P13-02d | todo |
+| P13-02f | 扫描结果输出格式 (SARIF) | P13-02e | todo |
+
+**实现文件**:
+- `Dockerfile`
+- `docker-compose.yml`
+- `.github/workflows/scan.yml`
+- `DEPLOYMENT.md`
+
+### P13-03: 多租户支持（P2）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P13-03 | 多租户架构 | - | todo |
+| P13-03a | 数据隔离策略 | P13-01 | todo |
+| P13-03b | 租户级配额管理 | P13-03a | todo |
+| P13-03c | 资源使用统计 | P13-03b | todo |
+| P13-03d | 租户管理界面 | P13-03a | todo |
+
+---
+
+## Phase 15: 报告生成与导出
+
+> **目标**: 完善报告生成功能，支持多种格式导出
+
+### P15-01: 报告生成服务（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P15-01 | 报告生成功能 | - | todo |
+| P15-01a | Markdown 报告生成 | P15-01 | todo |
+| P15-01b | PDF 报告生成 | P15-01a | todo |
+| P15-01c | 报告模板设计 | P15-01b | todo |
+| P15-01d | 报告导出 API | P15-01a | todo |
+| P15-01e | 报告历史对比 | P15-01d | todo |
+| P15-01f | 报告分享功能 | P15-01e | todo |
+
+**实现文件**:
+- `src/web/services/report_service.py`
+- `frontend/src/pages/ReportView.tsx`
+- `frontend/src/components/report/ReportExport.tsx`
+
+---
 
 ### P13-01: 用户认证与权限（P1）
 
@@ -1542,7 +1797,9 @@ frontend/
 |v0.96|暂停/续扫功能|检查点机制 + 阶段恢复 + 控制接口 + WebSocket + 增量扫描|done|2026-04-07|
 |v0.97|前端界面|MVP|React + TypeScript + Ant Design + 实时进度 + 扫描控制|done|2026-04-07|
 |v0.98|漏洞结果界面|列表/详情/代码高亮/状态管理|React + SyntaxHighlighter + 状态 API|done|2026-04-07|
-|v1.0|企业稳定版|高精度、低误报、CI 可用 + Web UI + 暂停续扫|todo|2026-Q2|
+|v1.0|Web 基础版|高精度、低误报 + Web UI + 暂停续扫|done|2026-04-09|
+|v1.1|Web 完整能力|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|in_progress|2026-04-09|
+|v1.5|企业稳定版|CI/CD 集成 + 多租户 + 用户认证 + 报告导出|todo|2026-Q2|
 
 ---
 
@@ -1550,11 +1807,11 @@ frontend/
 
 |字段|值|
 |---|---|
-|**阶段**|Phase 12 漏洞结果界面已完成，v0.98 里程碑达成 ✅|
-|**当前进度**|Phase 12 ✅ done (漏洞结果界面)|
-|**最近完成**|P12-06 (漏洞列表/详情/代码高亮/状态管理)|
-|**下一步**|P12-07 报告生成、P13 企业级功能 或自定义新目标|
-|**里程碑**|v0.98 已完成 (漏洞结果展示 + 状态管理)|
+|**阶段**|Phase 14 Web 服务完整能力迁移，P14-web-capability-migration|
+|**当前进度**|设计阶段 (design) - 等待实现|
+|**目标范围**|完整迁移 5 项 CLI 核心功能 + 增量扫描增强|
+|**核心任务**|P14-01~P14-09: 攻击面检测/可利用性验证/去重仲裁/对抗性验证/Token统计/增量扫描增强/数据模型/API扩展/测试|
+|**里程碑**|v1.1 进行中 (Web 完整扫描能力)|
 
 ---
 
