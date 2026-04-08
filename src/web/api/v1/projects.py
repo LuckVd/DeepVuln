@@ -1,8 +1,12 @@
 """Project management API endpoints."""
 
+import os
+import shutil
+import uuid
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.web.api.deps import get_db
@@ -23,7 +27,6 @@ router = APIRouter()
 async def create_project(
     project: ProjectCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_api_key)] = None,
 ) -> ProjectResponse:
     """
     Create a new project.
@@ -262,3 +265,90 @@ async def get_project_scans(
             for scan in scans
         ],
     }
+
+
+@router.post("/projects/upload-zip", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+async def create_project_from_zip(
+    name: Annotated[str, Form(description="Project name")],
+    file: Annotated[UploadFile, File(description="ZIP file containing source code")],
+    description: Annotated[str | None, Form(description="Project description")] = None,
+    branch: Annotated[str | None, Form(description="Branch name")] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+) -> ProjectResponse:
+    """
+    Create a project from an uploaded ZIP file.
+
+    Args:
+        name: Project name
+        file: ZIP file containing source code
+        description: Optional project description
+        branch: Optional branch name (for metadata)
+        db: Database session
+
+    Returns:
+        Created project with generated ID and timestamps
+
+    Raises:
+        HTTPException 400: If file is not a ZIP or project name already exists
+    """
+    from src.web.models.schemas import ProjectCreate
+    from src.web.core.config import get_web_settings
+
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith('.zip'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only ZIP files are allowed"
+        )
+
+    repo = ProjectRepository()
+
+    # Check for duplicate name
+    existing = await repo.get_by_name(db, name=name)
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Project with name '{name}' already exists"
+        )
+
+    # Create uploads directory if it doesn't exist
+    web_settings = get_web_settings()
+    upload_dir = Path(web_settings.upload_dir) if hasattr(web_settings, 'upload_dir') else Path("/opt/projects/deepvuln/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate unique filename
+    file_id = str(uuid.uuid4())
+    file_path = upload_dir / f"{file_id}.zip"
+
+    # Save uploaded file
+    try:
+        with file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save file: {str(e)}"
+        )
+
+    # Extract ZIP file to a directory for scanning
+    extract_dir = upload_dir / file_id
+    extract_dir.mkdir(exist_ok=True)
+    try:
+        shutil.unpack_archive(file_path, extract_dir)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to extract ZIP file: {str(e)}"
+        )
+
+    # Create project with extracted directory path for scanning
+    project_data = ProjectCreate(
+        name=name,
+        description=description,
+        source_type="zip",
+        source_path=str(extract_dir),  # Use extracted directory for scanning
+        branch=branch,
+    )
+
+    created = await repo.create(db, obj_in=project_data)
+    return ProjectResponse.model_validate(created)
