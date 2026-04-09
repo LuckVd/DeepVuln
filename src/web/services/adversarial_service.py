@@ -210,14 +210,52 @@ class AdversarialService:
         Returns:
             Verification result dict
         """
-        # Note: The actual CLI AdversarialVerifier doesn't expose per-round callbacks.
-        # We'll use the verify_finding method and simulate round events.
+        # Extract code context from source file
+        code_context = ""
+        related_code = ""
 
-        # Run verification
-        session = await self.verifier.verify_finding(
+        if source_path.exists():
+            try:
+                # Read the source file and extract relevant context
+                with open(source_path, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+
+                # Get the line number from finding location
+                if hasattr(finding, 'location') and finding.location:
+                    line_num = finding.location.start_line if hasattr(finding.location, 'start_line') else None
+
+                    if line_num:
+                        lines = file_content.split('\n')
+                        # Extract context around the finding (up to 50 lines)
+                        context_start = max(0, line_num - 10)
+                        context_end = min(len(lines), line_num + 40)
+                        code_context = '\n'.join(lines[context_start:context_end])
+
+                        # Extract additional related code (before context)
+                        if context_start > 0:
+                            related_code = '\n'.join(lines[max(0, context_start - 30):context_start])
+                    else:
+                        # No line number, use entire file
+                        code_context = file_content[:5000]  # Limit to 5000 chars
+            except Exception as e:
+                logger.warning(f"Failed to read source file {source_path}: {e}")
+                code_context = finding.location.snippet if hasattr(finding, 'location') and finding.location.snippet else ""
+        else:
+            # File doesn't exist, use snippet from finding
+            code_context = finding.location.snippet if hasattr(finding, 'location') and finding.location.snippet else ""
+
+        # Run verification with correct API signature
+        result_obj = await self.verifier.verify_finding(
             finding=finding,
-            source_path=str(source_path),
+            code_context=code_context,
+            related_code=related_code if related_code else None,
         )
+
+        # Create a mock session-like structure for compatibility
+        session = type('obj', (object,), {
+            'rounds': [],
+            'result': result_obj,
+        })()
 
         # Extract rounds from session
         if session and hasattr(session, 'rounds'):

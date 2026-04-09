@@ -368,10 +368,25 @@ class OpenAIClient(LLMClient):
 
             # Extract usage
             usage_data = data.get("usage", {})
+
+            # Handle Zhipu GLM API format which uses different field names
+            # Zhipu GLM: {prompt_tokens, completion_tokens, total_tokens}
+            # But sometimes returns as ints at top level or different nesting
+            prompt_tokens = usage_data.get("prompt_tokens", 0)
+            completion_tokens = usage_data.get("completion_tokens", 0)
+            total_tokens = usage_data.get("total_tokens", 0)
+
+            # Some Zhipu GLM responses may have different format
+            if prompt_tokens == 0 and completion_tokens == 0 and total_tokens == 0:
+                # Try alternative formats
+                prompt_tokens = usage_data.get("prompt_tokens", 0) or usage_data.get("prompt", 0)
+                completion_tokens = usage_data.get("completion_tokens", 0) or usage_data.get("completion", 0)
+                total_tokens = usage_data.get("total_tokens", 0) or usage_data.get("total", 0)
+
             usage = TokenUsage(
-                prompt_tokens=usage_data.get("prompt_tokens", 0),
-                completion_tokens=usage_data.get("completion_tokens", 0),
-                total_tokens=usage_data.get("total_tokens", 0),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
             )
 
             # Check for empty response (but not truncated - truncated may have valid content)

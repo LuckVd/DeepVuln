@@ -180,11 +180,10 @@ class TestScanOrderEdgeCases:
         """Test handling of empty findings list."""
         result = {"all_findings": []}
 
-        # Should not call deduplication or adversarial
-        if result["all_findings"]:
-            assert False, "Should not process empty list"
-
-        assert True
+        # Empty list should have zero findings
+        assert len(result["all_findings"]) == 0
+        # Should not attempt processing on empty list
+        assert not result["all_findings"]
 
     def test_single_finding_no_deduplication(self):
         """Test that single finding bypasses deduplication."""

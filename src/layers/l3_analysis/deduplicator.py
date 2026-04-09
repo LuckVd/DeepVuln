@@ -860,9 +860,9 @@ class ClusterBasedDeduplicator:
         self.llm_client = llm_client
         self.logger = get_logger(__name__)
 
-    def deduplicate(self, findings: list[Any]) -> DeduplicationResult:
+    async def deduplicate(self, findings: list[Any]) -> DeduplicationResult:
         """
-        Execute cluster-based deduplication on findings.
+        Execute cluster-based deduplication on findings (async version).
 
         This is the main entry point compatible with ASTDeduplicator interface.
 
@@ -900,8 +900,8 @@ class ClusterBasedDeduplicator:
                     f"in cluster {cluster.file_path}:{cluster.start_line}-{cluster.end_line}"
                 )
             else:
-                # Use LLM to deduplicate this cluster
-                result = self._deduplicate_cluster(cluster)
+                # Use LLM to deduplicate this cluster (async)
+                result = await self._deduplicate_cluster_async(cluster)
                 unique_findings.extend(result.keep)
                 removed_count += len(result.removed)
                 if result.removed:
@@ -925,9 +925,9 @@ class ClusterBasedDeduplicator:
             merge_details=merge_details,
         )
 
-    def _deduplicate_cluster(self, cluster: LocationCluster) -> LLMClusterResult:
+    async def _deduplicate_cluster_async(self, cluster: LocationCluster) -> LLMClusterResult:
         """
-        Deduplicate findings within a single cluster using LLM judgment.
+        Deduplicate findings within a single cluster using LLM judgment (async version).
 
         Args:
             cluster: LocationCluster with findings to deduplicate.
@@ -949,98 +949,14 @@ class ClusterBasedDeduplicator:
             # Build prompt for LLM
             prompt = self._build_dedup_prompt(cluster)
 
-            # Call LLM (handle async method)
-            import asyncio
-            import sys
+            # Call LLM directly in async context
             from src.layers.l3_analysis.llm.client import LLMError
 
-            try:
-                response = asyncio.run(self.llm_client.complete(
-                    prompt=prompt,
-                    max_tokens=3000,
-                    timeout=self.config.llm_timeout,
-                ))
-            except RuntimeError as e:
-                # We're in an async context - use subprocess to avoid event loop conflict
-                if "asyncio.run()" in str(e) or "running event loop" in str(e):
-                    self.logger.warning("In async context, using subprocess for LLM call")
-                    import subprocess
-                    import tempfile
-                    import os
-                    import base64
-
-                    # Encode the prompt as base64 to avoid escaping issues
-                    prompt_b64 = base64.b64encode(prompt.encode()).decode()
-
-                    # Create a temporary script to run the LLM call
-                    script = f'''
-import asyncio
-import sys
-import base64
-sys.path.insert(0, "{os.path.abspath("/opt/projects/DeepVuln")}")
-
-from src.core.config import load_config, get_llm_model, get_openai_config
-from src.layers.l3_analysis.llm.openai_client import OpenAIClient
-
-config = load_config()
-model = get_llm_model()
-openai_config = get_openai_config()
-
-llm_client = OpenAIClient(
-    model=model,
-    api_key=openai_config.get("api_key"),
-    base_url=openai_config.get("base_url"),
-    max_tokens=3000,
-    temperature=0.1,
-    timeout={self.config.llm_timeout},
-)
-
-# Decode prompt
-prompt_bytes = base64.b64decode("{prompt_b64}")
-prompt_str = prompt_bytes.decode()
-
-async def call_llm():
-    response = await llm_client.complete(
-        prompt=prompt_str,
-        timeout={self.config.llm_timeout},
-    )
-    return response.content
-
-result = asyncio.run(call_llm())
-print(result)
-'''
-
-                    # Write to temp file and run
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                        f.write(script)
-                        script_path = f.name
-
-                    try:
-                        result = subprocess.run(
-                            [sys.executable, script_path],
-                            capture_output=True,
-                            text=True,
-                            timeout=self.config.llm_timeout + 30,  # Extra buffer for subprocess overhead
-                        )
-
-                        if result.returncode != 0:
-                            self.logger.error(f"Subprocess stderr: {result.stderr}")
-                            raise LLMError(f"Subprocess LLM call failed: {result.stderr}")
-
-                        # Create a mock response object
-                        class MockResponse:
-                            def __init__(self, content):
-                                self.content = content
-
-                        response = MockResponse(result.stdout)
-                    finally:
-                        # Clean up temp file
-                        try:
-                            os.unlink(script_path)
-                        except:
-                            pass
-                else:
-                    raise
+            response = await self.llm_client.complete(
+                prompt=prompt,
+                max_tokens=3000,
+                timeout=self.config.llm_timeout,
+            )
 
             # Parse response (use content, not text)
             result = self._parse_llm_response(cluster.findings, response.content)

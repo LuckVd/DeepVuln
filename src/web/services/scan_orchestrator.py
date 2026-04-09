@@ -34,6 +34,7 @@ from src.web.services.attack_surface_service import (
     AttackSurfaceDetectionConfig,
     DetectionMode,
 )
+from src.core.models.attack_surface import AttackSurfaceReport
 from src.web.services.verification_service import (
     VerificationService,
     create_verification_service,
@@ -104,7 +105,8 @@ class ScanOrchestrator:
         self.source_path: Optional[Path] = None
         self.temp_dir: Optional[Path] = None
         self.tech_stack: Optional[Dict[str, Any]] = None
-        self.attack_surface_report: Optional[Dict[str, Any]] = None
+        self.attack_surface_report_obj: Optional[AttackSurfaceReport] = None  # Original AttackSurfaceReport object
+        self.attack_surface_report: Optional[Dict[str, Any]] = None  # Finding context dict
         self.scan_results: Dict[str, ScanResult] = {}
         self.adjudication_summary: Optional[Dict[str, Any]] = None
 
@@ -133,7 +135,7 @@ class ScanOrchestrator:
         if self._attack_surface_service is None and self.llm_client:
             self._attack_surface_service = AttackSurfaceService(
                 llm_client=self.llm_client,
-                db_session_factory=self.db_session_factory,
+                db_session=None,
             )
         return self._attack_surface_service
 
@@ -859,7 +861,7 @@ class ScanOrchestrator:
         verification_service = create_verification_service(
             source_path=self.source_path,
             llm_client=self.llm_client,
-            attack_surface_report=self.attack_surface_report,
+            attack_surface_report=self.attack_surface_report_obj,
             codeql_findings=codeql_findings,
             enable_llm_assessment=True,
         )
@@ -872,7 +874,11 @@ class ScanOrchestrator:
 
         # Apply verification results to findings
         verified_count = 0
-        for finding, result in verification_results.items():
+        for finding in all_findings:
+            if finding.id not in verification_results:
+                continue
+
+            result = verification_results[finding.id]
             # Store verification result in finding metadata
             finding.metadata = finding.metadata or {}
             finding.metadata["exploitability_verification"] = (
@@ -916,10 +922,11 @@ class ScanOrchestrator:
             enable_deduplication=True,
             enable_adjudication=True,
             cluster_distance_threshold=0.3,
+            llm_client=self.llm_client,
         )
 
         # Run adjudication
-        adjudicated_findings, summary = adjudication_service.adjudicate_findings_batch(
+        adjudicated_findings, summary = await adjudication_service.adjudicate_findings_batch(
             findings=all_findings,
         )
 
@@ -934,6 +941,7 @@ class ScanOrchestrator:
                     engine=engine,
                     findings=[],
                     status="completed",
+                    source_path=str(self.source_path),  # Add required source_path
                 )
             self.scan_results[engine].findings.append(finding)
 
@@ -968,11 +976,14 @@ class ScanOrchestrator:
         # Collect all findings from all engines
         all_findings: list[Finding] = []
         for engine_name, scan_result in self.scan_results.items():
+            logger.info(f"Adversarial: {engine_name} has {len(scan_result.findings)} findings")
             all_findings.extend(scan_result.findings)
 
         if not all_findings:
             logger.info("No findings to verify adversarially")
             return {"verified_count": 0, "confirmed": 0, "rejected": 0}
+
+        logger.info(f"Adversarial: collected {len(all_findings)} findings for verification")
 
         # Get adversarial configuration
         adversarial_config = self.config.get("adversarial", False)
@@ -1248,6 +1259,9 @@ class ScanOrchestrator:
 
                 report = await service.detect(self.source_path, config, frameworks)
 
+                # Store original report object for verification service
+                self.attack_surface_report_obj = report
+
                 # Store finding context for downstream use
                 self.attack_surface_report = service.create_finding_context(report)
 
@@ -1334,9 +1348,11 @@ class ScanOrchestrator:
             "estimated_cost": 0.0,
         }
 
+        logger.info(f"Token statistics check: llm_client={self.llm_client is not None}")
         if self.llm_client is not None:
             # Get total usage from LLM client
             usage = self.llm_client.get_total_usage()
+            logger.info(f"LLM client total tokens: {usage.total_tokens}")
             token_stats["prompt_tokens"] = usage.prompt_tokens
             token_stats["completion_tokens"] = usage.completion_tokens
             token_stats["total_tokens"] = usage.total_tokens
@@ -1348,7 +1364,7 @@ class ScanOrchestrator:
             )
 
             # Update scan record with token usage
-            async with self._db_session() as db:
+            async with self.db_session_factory() as db:
                 from src.web.repositories.scan import ScanRepository
 
                 scan_repo = ScanRepository()

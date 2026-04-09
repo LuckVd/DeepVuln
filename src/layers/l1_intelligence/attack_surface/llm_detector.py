@@ -14,15 +14,15 @@ from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.core.utils import JSONParseError, robust_json_loads
+from src.core.exceptions.llm import (
+    LLMEmptyResponseError,
+    LLMError,
+    LLMTruncatedResponseError,
+)
 from src.layers.l1_intelligence.attack_surface.models import (
     EntryPoint,
     EntryPointType,
     HTTPMethod,
-)
-from src.layers.l3_analysis.llm.client import (
-    LLMEmptyResponseError,
-    LLMError,
-    LLMTruncatedResponseError,
 )
 
 logger = get_logger(__name__)

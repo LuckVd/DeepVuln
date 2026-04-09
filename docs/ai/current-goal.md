@@ -1,408 +1,139 @@
-# Current Goal: Web 服务完整能力迁移
+# Current Goal: 代码质量改进
 
-> **目标 ID**: P14-web-capability-migration
-> **目标**: 将 CLI 的所有高级功能迁移到 Web 服务
-> **范围**: 完整迁移 5 项核心功能 + 增量扫描增强
-> **阶段**: Phase 14 - completed ✅
-> **状态**: 实施完成
-> **里程碑**: v1.1
-> **完成日期**: 2026-04-09
+> **目标 ID**: P15-code-quality-improvement
+> **目标**: 修复跨层依赖、清理死代码、修复假测试
+> **阶段**: Phase 15 - completed
+> **状态**: 已完成 ✅
 
 ---
 
-## 功能对比
+## 问题概述
 
-| 功能 | CLI 状态 | Web 状态 | 差距 |
-|------|----------|----------|------|
-| 多引擎并发扫描 | ✅ | ✅ | 已实现 (P10-07) |
-| AttackSurfaceDetection | ✅ | ✅ | ✅ 已完成 (P14-01) |
-| ExploitabilityVerification | ✅ | ✅ | ✅ 已完成 (P14-02) |
-| Deduplication+Adjudication | ✅ | ✅ | ✅ 已完成 (P14-03) |
-| AdversarialVerification | ✅ | ✅ | ✅ 已完成 (P14-04) |
-| Token 统计 | ✅ | ✅ | ✅ 已完成 (P14-05) |
-| 增量扫描 | ✅ | ✅ | ✅ 已完成 (P14-06) |
+基于项目全面审视，发现三个主要问题：
+
+| # | 问题 | 严重性 | 影响范围 |
+|---|------|--------|----------|
+| 1 | 跨层依赖 | 🔴 高 | L3/L1 循环依赖，违反架构原则 |
+| 2 | 假测试 | 🟡 中 | 2 个测试文件包含无意义断言 |
+| 3 | 死代码 | 🟢 低 | ~2000 行未使用代码 |
 
 ---
 
-## 实施计划 (5 周)
+## 实施计划
 
-### Week 1: 基础功能迁移 ✅ 已完成
+### 阶段 1: 死代码清理 (优先)
+
+**原因**: 降低维护负担，减少混淆
+
+**任务列表**:
+- P15-01: 删除 `src/web/services/cli_adapter.py` (672 行)
+- P15-02: 删除 `src/web/services/scan/` 子目录 (约 800 行)
+- P15-03: 删除 `src/web/api/v1/scans_v2.py`
+- P15-04: 更新 `src/web/services/__init__.py` 移除 CLIAdapter 导出
+
+**验收标准**:
+- ✅ 代码编译无错误
+- ✅ 所有测试通过
+- ✅ Web 服务正常启动
+
+---
+
+### 阶段 2: 修复假测试
+
+**任务列表**:
+- P15-05: 修复 `tests/unit/test_l3/test_scan_order.py:187`
+- P15-06: 修复 `tests/unit/test_l1/test_llm_detector.py:302`
+- P15-07: 确保每个测试都有实际断言
+
+**验收标准**:
+- ✅ 所有测试通过
+- ✅ 无 `assert True` 类型的假测试
+
+---
+
+### 阶段 3: 修复跨层依赖
+
+**策略**: 将共享模型移动到 `src/core/models/`
+
+**任务列表**:
+- P15-08: 创建 `src/core/models/attack_surface.py`
+- P15-09: 移动 `EntryPoint`, `AttackSurfaceReport`, `EntryPointType` 等模型
+- P15-10: 更新 L1 层导入
+- P15-11: 更新 L3 层导入
+- P15-12: 移除 L1 对 L3 的依赖 (LLMClient)
+- P15-13: 验证无循环依赖
+
+**架构变化**:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ P14-01: AttackSurfaceDetection 集成 ✅                       │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ P14-01a: 创建 AttackSurfaceService                       │
-│ ✅ P14-01b: 静态检测集成（endpoint/敏感函数）                │
-│ ✅ P14-01c: LLM 检测集成（语义分析）                         │
-│ ✅ P14-01d: 并行检测模式                                     │
-│ ✅ P14-01e: 集成到 ScanOrchestrator Phase 0 (L1_Preparation) │
-│ ✅ P14-01f: 配置参数支持 (llm_detect, static_only)          │
-├─────────────────────────────────────────────────────────────┤
-│ P14-05: Token 统计 ✅                                        │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ P14-05a: LLMClient 包装，添加 get_total_usage()          │
-│ ✅ P14-05b: Scan 模型 tokens_used 字段更新                   │
-│ ✅ P14-05c: 成本计算 (tokens → 成本)                         │
-│ ✅ P14-05d: 集成到 ScanOrchestrator Phase 6                  │
-├─────────────────────────────────────────────────────────────┤
-│ P14-07: 数据模型扩展 ✅                                      │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ P14-07a: Finding 模型新增字段                             │
-│ ✅ P14-07b: Scan 模型新增字段                                │
-├─────────────────────────────────────────────────────────────┤
-│ P14-08a: 扫描创建请求扩展（新增配置参数） ✅                 │
+│  修复前 (循环依赖):                                          │
+│  L3 → L1 → Core                                             │
+│  ↑         ↓                                                 │
+│  └─────────┘  ← L1 导入 L3 的 LLMClient                     │
 └─────────────────────────────────────────────────────────────┘
-```
 
-### Week 2-3: 验证层迁移 ✅ 已完成
-
-```
 ┌─────────────────────────────────────────────────────────────┐
-│ P14-02: ExploitabilityVerification 集成 ✅                   │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ P14-02a: 创建 VerificationService                         │
-│ ✅ P14-02b: 集成 RoundFourExecutor                           │
-│ ✅ P14-02c: CodeQL 结果数据流分析                            │
-│ ✅ P14-02d: 攻击面结果集成                                   │
-│ ✅ P14-02e: 集成到 ScanOrchestrator Phase 3.5                │
-│ ✅ P14-02f: 配置参数支持 (llm_verify)                        │
-├─────────────────────────────────────────────────────────────┤
-│ P14-03: Deduplication + Adjudication 集成 ✅                 │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ P14-03a: 创建 AdjudicationService                         │
-│ ✅ P14-03b: 集成 ClusterBasedDeduplicator                    │
-│ ✅ P14-03c: 集成 Adjudication 逻辑                           │
-│ ✅ P14-03d: 证据强度评估                                     │
-│ ✅ P14-03e: 集成到 ScanOrchestrator Phase 4                  │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ P14-07c: Alembic 迁移脚本                                  │
+│  修复后 (单向依赖):                                          │
+│  L3 → Core ← L1                                             │
+│         ↑       ↑                                            │
+│         └───────┘  共享模型从 Core 导入                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Week 4: 高级验证迁移 ✅ 已完成
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ P14-04: EnhancedAdversarialVerification 集成 ✅              │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ P14-04a: 创建 AdversarialService                          │
-│ ✅ P14-04b: 集成 EnhancedAdversarialVerification             │
-│ ✅ P14-04c: 策略演进机制                                     │
-│ ✅ P14-04d: 多轮辩论 (Attacker vs Defender)                  │
-│ ✅ P14-04e: WebSocket 实时推送辩论内容                       │
-│ ✅ P14-04f: 每轮 3 分钟超时，超时降级                        │
-│ ✅ P14-04g: 集成到 ScanOrchestrator Phase 5                  │
-│ ✅ P14-04h: 配置参数支持 (adversarial, adversarial_max_rounds)│
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Week 5: 增量扫描 + 测试 ✅ 已完成
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ P14-06: 增量扫描增强 ✅                                      │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ P14-06a: 增强 IncrementalScanService                      │
-│ ✅ P14-06b: Git diff 分析 (base_ref vs head_ref)             │
-│ ✅ P14-06c: 文件变更检测 (added/modified/deleted)            │
-│ ✅ P14-06d: 依赖追踪 (变更文件的影响分析)                    │
-│ ✅ P14-06e: 失败时报错终止（不自动降级）                     │
-│ ✅ P14-06f: 集成到 ScanOrchestrator                         │
-├─────────────────────────────────────────────────────────────┤
-│ P14-08: API 扩展 ✅                                         │
-├─────────────────────────────────────────────────────────────┤
-│ ✅ P14-08a: 扫描创建请求扩展（新增配置参数）                 │
-│ ✅ P14-08b: 对抗性辩论内容查询 API                           │
-│ ✅ P14-08c: Token 统计查询 API                               │
-│ ✅ P14-08d: 增量扫描统计查询 API                             │
-├─────────────────────────────────────────────────────────────┤
-│ P14-09: 集成测试 (待后续实施)                               │
-├─────────────────────────────────────────────────────────────┤
-│ • P14-09a: Web 扫描结果与 CLI 结果一致性测试                │
-│ • P14-09b: 所有扫描模式功能测试                             │
-│ • P14-09c: Token 统计准确性测试                             │
-│ • P14-09d: 增量扫描性能测试                                 │
-│ • P14-09e: WebSocket 实时进度测试                           │
-│ • P14-09f: 对抗性验证并发测试                               │
-└─────────────────────────────────────────────────────────────┘
-```
+**验收标准**:
+- ✅ 无跨层直接导入
+- ✅ 所有测试通过
+- ✅ 运行 `python -c "import src.layers"` 无循环导入错误
 
 ---
 
-## 架构设计
+### 阶段 4: 修复空 except 块
 
-### 扫描流程重构
+**任务列表**:
+- P15-14: 修复 `src/web/api/v1/scans_v2.py` (如未删除)
+- P15-15: 确保所有异常处理都有明确的日志
 
-```
-ScanOrchestrator.execute_scan()
-│
-├── Phase 0: L1_Preparation (P14-01 新增)
-│   ├── TechStackDetection (已有)
-│   └── AttackSurfaceDetection (P14-01 新增)
-│       ├── Static detection (endpoint/敏感函数)
-│       ├── LLM detection (语义分析)
-│       └── Parallel mode (并行执行)
-│
-├── Phase 1: Engine_Selection (已有)
-│
-├── Phase 2: Engine_Execution (已有)
-│
-├── Phase 3: Exploitability_Verification (P14-02 新增)
-│   └── RoundFourExecutor._verify_exploitability()
-│       ├── CodeQL 数据流分析
-│       └── 攻击面结果集成
-│
-├── Phase 4: Deduplication_Adjudication (P14-03 新增)
-│   └── adjudicate_findings()
-│       ├── ClusterBasedDeduplicator (位置聚类 + LLM 判断)
-│       ├── 证据强度评估
-│       └── 仲裁决策
-│
-├── Phase 5: Adversarial_Verification (P14-04 新增)
-│   └── EnhancedAdversarialVerification.verify_finding()
-│       ├── 策略演进 (每轮 Attacker/Defender 更新策略)
-│       ├── 多轮辩论
-│       └── 超时降级 (每轮 3 分钟)
-│
-└── Phase 6: Result_Finalization (P14-05 增强)
-    ├── Token 统计 (P14-05)
-    ├── 成本计算
-    └── 报告生成
-```
-
-### 新增 Service 层
-
-```
-src/web/services/
-├── scan_orchestrator.py (修改 - 新增 Phase 0/3/4/5/6)
-├── progress_broadcaster.py (已有 - 添加对抗性辩论事件)
-├── attack_surface_service.py (P14-01 新增)
-├── verification_service.py (P14-02 新增)
-├── adjudication_service.py (P14-03 新增)
-├── adversarial_service.py (P14-04 新增)
-└── incremental_scan_service.py (P14-06 增强)
-```
-
----
-
-## 数据模型扩展
-
-### Finding 模型新增字段 (P14-07a)
-
-```python
-# src/web/models/finding.py
-
-class Finding(Base):
-    # ... 现有字段 ...
-
-    # P14-02: 可利用性验证
-    exploitability: Optional[str]          # 可利用性评级 (exploitable/likely/not_exploitable)
-    exploitability_confidence: Optional[float]  # 置信度 0-1
-    exploitability_reasoning: Optional[str]     # 推理过程
-
-    # P14-04: 对抗性验证
-    adversarial_verdict: Optional[str]      # 对抗性验证结果 (confirmed/rejected/uncertain)
-    adversarial_confidence: Optional[float] # 置信度 0-1
-    adversarial_reasoning: Optional[str]    # 推理过程
-    adversarial_rounds: Optional[int]       # 对抗轮数
-
-    # P14-03: 仲裁状态
-    report_status: Optional[str]            # 仲裁状态 (processed/duplicate/false_positive/confirmed)
-    evidence_strength: Optional[str]        # 证据强度 (strong/moderate/weak/speculative)
-```
-
-### Scan 模型新增字段 (P14-07b)
-
-```python
-# src/web/models/scan.py
-
-class Scan(Base):
-    # ... 现有字段 ...
-
-    # P14-01: 攻击面统计
-    attack_surface: Optional[JSON]         # {endpoints, sensitive_functions, attack_vectors}
-
-    # P14-03: 仲裁摘要
-    adjudication_summary: Optional[JSON]    # {total, unique, duplicates, false_positives, confirmed}
-
-    # P14-04: 对抗性摘要
-    adversarial_summary: Optional[JSON]     # {total_verified, rounds_total, avg_rounds, timeout_count}
-
-    # P14-05: Token 使用详情
-    token_usage: Optional[JSON]             # {total_tokens, estimated_cost, breakdown_by_phase}
-
-    # P14-06: 增量扫描统计
-    incremental_stats: Optional[JSON]       # {base_ref, head_ref, changed_count, scanned_count, skipped_count}
-```
-
----
-
-## API 变更
-
-### 扫描创建请求扩展 (P14-08a)
-
-```json
-{
-  "project_id": 1,
-  "scan_type": "full",
-  "config": {
-    "engines": ["semgrep", "codeql", "agent"],
-
-    // P14-01: 攻击面检测参数
-    "llm_detect": true,              // LLM 攻击面检测
-    "static_only": false,            // 仅静态检测
-
-    // P14-02: 可利用性验证参数
-    "llm_verify": true,              // 可利用性验证
-
-    // P14-04: 对抗性验证参数
-    "adversarial": true,             // 对抗性验证
-    "adversarial_max_rounds": 5,     // 最大对抗轮数
-    "adversarial_round_timeout": 180, // 每轮超时(秒)
-
-    // P14-06: 增量扫描参数
-    "incremental": false,            // 增量扫描模式
-    "base_ref": "HEAD~1",            // 增量扫描基准引用
-    "head_ref": "HEAD",              // 增量扫描目标引用
-
-    // 现有参数
-    "agent_max_files": 50,
-    "model": "glm-5"
-  }
-}
-```
-
-### 新增 API 端点
-
-```
-# P14-08b: 对抗性辩论内容查询
-GET /api/v1/scans/{id}/adversarial-debate
-Response: {
-  "finding_id": 123,
-  "rounds": [
-    {"round": 1, "role": "attacker", "content": "...", "timestamp": "..."},
-    {"round": 1, "role": "defender", "content": "...", "timestamp": "..."}
-  ],
-  "final_verdict": "confirmed"
-}
-
-# P14-08c: Token 统计查询
-GET /api/v1/scans/{id}/token-usage
-Response: {
-  "total_tokens": 125000,
-  "estimated_cost": 2.5,
-  "breakdown": {
-    "attack_surface_detection": 5000,
-    "exploitability_verification": 30000,
-    "adversarial_verification": 80000,
-    "agent_analysis": 10000
-  }
-}
-
-# P14-08d: 增量扫描配置
-GET /api/v1/scans/{id}/incremental-stats
-Response: {
-  "base_ref": "HEAD~1",
-  "head_ref": "HEAD",
-  "changed_files": 15,
-  "scanned_files": 12,
-  "skipped_files": 3
-}
-```
-
----
-
-## WebSocket 事件扩展
-
-### P14-04: 对抗性辩论实时推送
-
-```javascript
-// WebSocket 事件类型: adversarial_round
-{
-  "event_type": "adversarial_round",
-  "scan_id": 123,
-  "finding_id": 456,
-  "data": {
-    "round": 2,
-    "role": "attacker",          // 或 "defender"
-    "strategy": "dataflow_analysis",
-    "content": "根据 CodeQL 数据流分析...",
-    "confidence": 0.85
-  }
-}
-
-// WebSocket 事件类型: adversarial_complete
-{
-  "event_type": "adversarial_complete",
-  "scan_id": 123,
-  "finding_id": 456,
-  "data": {
-    "verdict": "confirmed",
-    "confidence": 0.9,
-    "rounds": 3,
-    "reasoning": "经过 3 轮辩论，确认该漏洞可利用..."
-  }
-}
-```
+**验收标准**:
+- ✅ 无空 `except:` 块
+- ✅ 所有异常都有适当的日志记录
 
 ---
 
 ## 验收标准
 
-1. ✅ Web 扫描结果与 CLI 结果一致性 > 95%
-2. ✅ 支持所有 CLI 扫描模式 (base/full/incremental/static-only/llm-full-detect)
-3. ✅ Token 统计准确率 100%
-4. ✅ 增量扫描加速比 > 60%
-5. ✅ WebSocket 实时进度更新延迟 < 500ms
-6. ✅ 对抗性辩论内容实时展示
-7. ✅ 每轮对抗性验证 3 分钟超时，自动降级
+1. ✅ 死代码已清理 (~2000 行)
+2. ✅ 假测试已修复
+3. ✅ 跨层依赖已解决
+4. ✅ 所有测试通过
+5. ✅ Web 服务正常启动运行
 
 ---
 
 ## 用户确认需求
 
-### 对抗性验证 (P14-04)
-- ✅ 需要 WebSocket 实时推送每一轮辩论进度
-- ✅ 展示对抗性辩论内容（Attacker vs Defender）
-- ✅ 每轮超时 3 分钟，超时后降级跳过
-- ✅ 不设置总体超时
+### 实施顺序
+- ✅ 死代码清理优先
+- ✅ 共享模型放在 `src/core/models/`
 
-### 增量扫描 (P14-06)
-- ✅ 失败时报错终止（不自动降级）
-
-### 配置参数扩展
-```json
-{
-  "llm_verify": true,              // 可利用性验证
-  "llm_detect": true,              // LLM 攻击面检测
-  "static_only": false,            // 仅静态检测
-  "adversarial": true,             // 对抗性验证
-  "adversarial_max_rounds": 5,     // 最大对抗轮数
-  "adversarial_round_timeout": 180, // 每轮超时(秒)
-  "incremental": false,            // 增量扫描模式
-  "base_ref": "HEAD~1",            // 增量扫描基准引用
-  "head_ref": "HEAD"               // 增量扫描目标引用
-}
-```
+### 待确认问题
+- 是否需要创建专门的共享模块 `src/shared/`? → 用户选择 `src/core/models/`
 
 ---
 
 ## 相关文件
 
-### 新增文件
-- `src/web/services/attack_surface_service.py` (P14-01)
-- `src/web/services/verification_service.py` (P14-02)
-- `src/web/services/adjudication_service.py` (P14-03)
-- `src/web/services/adversarial_service.py` (P14-04)
+### 需要删除的文件
+- `src/web/services/cli_adapter.py`
+- `src/web/services/scan/` (整个目录)
+- `src/web/api/v1/scans_v2.py`
 
-### 修改文件
-- `src/web/services/scan_orchestrator.py` (新增 Phase 0/3/4/5/6)
-- `src/web/services/progress_broadcaster.py` (添加对抗性辩论事件)
-- `src/web/models/finding.py` (新增 exploitability, adversarial_verdict 等字段)
-- `src/web/models/scan.py` (新增 attack_surface, adjudication_summary 等字段)
-- `src/web/api/v1/scans.py` (API 扩展)
-- `src/web/api/websocket.py` (WebSocket 事件扩展)
+### 需要创建的文件
+- `src/core/models/attack_surface.py`
 
-### 数据库迁移
-- `migrations/versions/XXX_add_verification_fields.py` (P14-07c)
+### 需要修改的文件
+- `src/layers/l1_intelligence/attack_surface/llm_detector.py`
+- `src/layers/l3_analysis/rounds/round_four.py`
+- `src/web/services/__init__.py`
+- `tests/unit/test_l3/test_scan_order.py`
+- `tests/unit/test_l1/test_llm_detector.py`

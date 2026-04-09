@@ -1,17 +1,59 @@
-goal_id: "P14-web-capability-migration"
-title: "Web 服务完整能力迁移"
+goal_id: "P15-code-quality-improvement"
+title: "代码质量改进：架构优化与死代码清理"
 stage: "implement"
 status: "completed"
-selected_option: "full_migration"
-design_confirmed: true
+status: "pending"
+selected_option: "dead_code_first"
+design_confirmed: false
 blocked_by: []
 open_questions: []
 resolved_questions:
-  - 用户确认完整迁移所有 5 项功能
-  - 用户确认需要增量扫描支持
-  - 对抗性验证需要实时推送辩论内容
-  - 每轮对抗性验证 3 分钟超时，超时降级跳过
-  - 增量扫描失败时报错终止（不自动降级）
+  - 用户选择死代码清理优先
+  - 共享模型放在 src/core/models/
+implementation_steps:
+  - "P15-01: 删除 CLIAdapter (672 行)"
+  - "P15-02: 删除 scan/ 子目录 (~800 行)"
+  - "P15-03: 删除 scans_v2.py"
+  - "P15-04: 更新 __init__.py 导出"
+  - "P15-05: 修复 test_scan_order.py 假测试"
+  - "P15-06: 修复 test_llm_detector.py 假测试"
+  - "P15-07: 验证所有测试有效"
+  - "P15-08: 创建 core/models/attack_surface.py"
+  - "P15-09: 移动共享模型到 Core"
+  - "P15-10: 更新 L1 层导入"
+  - "P15-11: 更新 L3 层导入"
+  - "P15-12: 移除 L1 对 L3 的依赖"
+  - "P15-13: 验证无循环依赖"
+  - "P15-14: 修复空 except 块"
+test_scope:
+  - 死代码清理后所有测试通过
+  - 假测试修复后有实际断言
+  - 跨层依赖修复后无循环导入
+test_result: "PASSED - 所有测试通过 ✅
+- 单元测试: 69 passed
+- 假测试修复: test_scan_order.py, test_llm_detector.py
+- 跨层依赖修复: src/core/models/attack_surface.py 创建
+- 死代码清理: ~1700 行删除
+- 完整扫描验证: 成功 (GLM-4.5, 114116 tokens, 4 findings)
+- Web 服务正常启动运行
+"
+new_files:
+  - src/core/models/attack_surface.py
+modified_files:
+  - src/layers/l1_intelligence/attack_surface/llm_detector.py
+  - src/layers/l3_analysis/rounds/round_four.py
+  - src/web/services/__init__.py
+  - tests/unit/test_l3/test_scan_order.py
+  - tests/unit/test_l1/test_llm_detector.py
+security_blockers: []
+dead_code_actions:
+  - 删除 src/web/services/cli_adapter.py
+  - 删除 src/web/services/scan/
+  - 删除 src/web/api/v1/scans_v2.py
+sync_status: "synced"
+commit_id: null
+last_check_at: "2026-04-09"
+last_synced_at: "2026-04-09"
 implementation_steps:
   # Week 1: 基础功能迁移 ✅ 已完成
   - "P14-01: AttackSurfaceDetection 集成 ✅"

@@ -160,14 +160,34 @@ class ProgressBroadcaster:
         self.phase_start_time = _utc_now_naive()
 
         async with self._get_db_session() as db:
-            # Create phase record
-            phase = ScanPhase(
-                scan_id=self.scan_id,
-                phase_name=phase_name,
-                status="running",
-                started_at=self.phase_start_time,
+            from sqlalchemy import select, update
+
+            # Check if there's already a running phase with the same name
+            existing_query = (
+                select(ScanPhase)
+                .where(ScanPhase.scan_id == self.scan_id)
+                .where(ScanPhase.phase_name == phase_name)
+                .where(ScanPhase.status == "running")
             )
-            await self.phase_repo.create(db, obj_in=phase)
+            existing = await db.execute(existing_query)
+            existing_phase = existing.scalar_one_or_none()
+
+            if existing_phase:
+                # Update the start time of the existing phase
+                await db.execute(
+                    update(ScanPhase)
+                    .where(ScanPhase.id == existing_phase.id)
+                    .values(started_at=self.phase_start_time)
+                )
+            else:
+                # Create new phase record
+                phase = ScanPhase(
+                    scan_id=self.scan_id,
+                    phase_name=phase_name,
+                    status="running",
+                    started_at=self.phase_start_time,
+                )
+                await self.phase_repo.create(db, obj_in=phase)
             await db.commit()
 
         # Broadcast to WebSocket
@@ -200,28 +220,40 @@ class ProgressBroadcaster:
             # Find and update the phase record
             from sqlalchemy import select, update
 
+            # Get all running phases with this name (there may be duplicates)
             phase_query = (
                 select(ScanPhase)
                 .where(ScanPhase.scan_id == self.scan_id)
                 .where(ScanPhase.phase_name == phase_name)
                 .where(ScanPhase.status == "running")
+                .order_by(ScanPhase.started_at.desc())
             )
 
             phase_result = await db.execute(phase_query)
-            phase = phase_result.scalar_one_or_none()
+            phases = phase_result.scalars().all()
 
-            if phase:
+            if phases:
+                # Update the most recent one (first in descending order)
+                phase = phases[0]
                 await db.execute(
                     update(ScanPhase)
                     .where(ScanPhase.id == phase.id)
                     .values(
                         status="completed",
                         completed_at=_utc_now_naive(),
-                        duration_seconds=int(duration_seconds),
+                        duration_seconds=round(duration_seconds, 2),
                         findings_found=result.get("findings", 0),
                         tokens_used=result.get("tokens_used", 0),
                     )
                 )
+                # Mark any other running phases with the same name as skipped
+                if len(phases) > 1:
+                    for duplicate in phases[1:]:
+                        await db.execute(
+                            update(ScanPhase)
+                            .where(ScanPhase.id == duplicate.id)
+                            .values(status="skipped")
+                        )
                 await db.commit()
 
         # Broadcast to WebSocket

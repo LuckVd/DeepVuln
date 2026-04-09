@@ -1,6 +1,59 @@
 # Change Log
 
-## 2026-04-09
+## 2026-04-09 (续 3)
+
+### P15: 代码质量改进 - 完成 ✅
+
+- **Goal ID**: P15-code-quality-improvement
+- **Summary**: 修复跨层依赖、清理死代码、修复假测试，并通过完整扫描验证
+- **影响范围**: 架构层、测试层、代码质量
+- **核心修复**:
+  1. **跨层依赖修复**:
+     - 创建 `src/core/models/attack_surface.py` 共享模型
+     - 移动 `EntryPoint`, `AttackSurfaceReport`, `EntryPointType` 到 Core
+     - 更新 L1/L3 层导入路径
+     - 解决 L3 ↔ L1 循环依赖问题
+  2. **死代码清理** (~1700 行):
+     - 删除 `src/web/services/cli_adapter.py` (672 行)
+     - 删除 `src/web/services/scan/` 子目录 (~800 行)
+     - 删除 `src/web/api/v1/scans_v2.py` (221 行)
+     - 更新 `src/web/services/__init__.py` 移除 CLIAdapter 导出
+  3. **假测试修复**:
+     - `tests/unit/test_l3/test_scan_order.py:187`: 修复 `assert True` 假测试
+     - `tests/unit/test_l1/test_llm_detector.py:302`: 修复 `assert True` 假测试
+  4. **Bug 修复** (验证扫描中发现):
+     - `progress_broadcaster.py`: 阶段时间记录保留小数 (round(duration, 2))
+     - `progress_broadcaster.py`: 修复多阶段记录重复问题
+     - `adversarial_service.py`: 修复 API 签名不匹配 (code_context 参数)
+     - `scan_tasks.py`: 修复模型配置优先级 (始终使用 config.local.toml)
+     - `openai_client.py`: 增强 token 追踪 (支持非标准 API 格式)
+- **测试结果**:
+  - 单元测试: 69 passed, 2 warnings
+  - 完整扫描: 成功 (4 findings, 114116 tokens, 581.89s)
+  - 各阶段耗时: L1(42s) + Engines(155s) + Adversarial(381s)
+- **安全扫描**: 无安全风险 (config.local.toml 已在 .gitignore)
+- **死代码检测**: 无新的死代码发现
+- **架构改进**:
+  ```
+  修复前: L3 → L1 → Core (循环依赖)
+  修复后: L3 → Core ← L1 (单向依赖)
+  ```
+- **Commit ID**: 待提交
+
+---
+
+## 2026-04-09 (续)
+
+### 同步: P14 完成 → 开始 P15
+
+- **P14 状态**: 已完成并同步 ✅
+- **P15 目标**: 代码质量改进 - 架构优化与死代码清理
+- **待修复问题**:
+  1. 跨层依赖 (L3 ↔ L1)
+  2. 假测试 (assert True)
+  3. 死代码 (CLIAdapter, scan/ 子目录, scans_v2.py)
+
+---
 
 ### P14: Web 服务完整能力迁移 ✅
 

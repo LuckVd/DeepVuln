@@ -32,7 +32,7 @@ from src.layers.l3_analysis.adjudication import (
     get_severity_value,
 )
 from src.layers.l3_analysis.models import Finding
-from src.layers.l3_analysis.reporting import apply_report_status
+from src.layers.l3_analysis.reporting import map_to_report_status
 
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,7 @@ class AdjudicationService:
         enable_deduplication: bool = True,
         enable_adjudication: bool = True,
         cluster_distance_threshold: float = 0.3,
+        llm_client: Optional[Any] = None,
     ):
         """Initialize the adjudication service.
 
@@ -118,6 +119,7 @@ class AdjudicationService:
             enable_deduplication: Whether to enable semantic deduplication
             enable_adjudication: Whether to enable exploitability adjudication
             cluster_distance_threshold: Distance threshold for clustering (0-1)
+            llm_client: Optional LLM client for semantic deduplication
         """
         self.enable_deduplication = enable_deduplication
         self.enable_adjudication = enable_adjudication
@@ -127,11 +129,15 @@ class AdjudicationService:
         if enable_deduplication:
             config = ClusterDeduplicatorConfig(
                 distance_threshold=cluster_distance_threshold,
+                enable_llm_dedup=llm_client is not None,
             )
-            self.deduplicator = ClusterBasedDeduplicator(config=config)
+            self.deduplicator = ClusterBasedDeduplicator(
+                config=config,
+                llm_client=llm_client,
+            )
             logger.info(
                 f"AdjudicationService: deduplication enabled "
-                f"(threshold={cluster_distance_threshold})"
+                f"(threshold={cluster_distance_threshold}, llm={llm_client is not None})"
             )
 
         if enable_adjudication:
@@ -158,8 +164,21 @@ class AdjudicationService:
 
         logger.info(f"Deduplicating {len(findings)} findings")
 
-        # Run deduplication
-        result = self.deduplicator.deduplicate(findings)
+        # Run deduplication (deduplicator.deduplicate is now async)
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an async context, we can't await here
+            # This method shouldn't be called from async context
+            logger.warning("deduplicate_findings() called from async context, returning all findings")
+            result = DeduplicationResult(
+                unique_findings=findings,
+                removed_count=0,
+                merged_groups=0,
+            )
+        except RuntimeError:
+            # No running loop, we can use asyncio.run
+            result = asyncio.run(self.deduplicator.deduplicate(findings))
 
         logger.info(
             f"Deduplication complete: {len(result.unique_findings)} unique, "
@@ -197,10 +216,7 @@ class AdjudicationService:
         cli_result = apply_exploitability_override(finding)
 
         # Apply report status
-        report_status_value = apply_report_status(finding)
-        report_status = ReportStatus.PROCESSED
-        if report_status_value:
-            report_status = ReportStatus(report_status_value)
+        report_status = map_to_report_status(finding)
 
         # Get evidence strength if available
         evidence_strength = None
@@ -222,11 +238,11 @@ class AdjudicationService:
             evidence_strength=evidence_strength,
         )
 
-    def adjudicate_findings_batch(
+    async def adjudicate_findings_batch(
         self,
         findings: list[Finding],
     ) -> tuple[list[Finding], AdjudicationSummary]:
-        """Adjudicate a batch of findings.
+        """Adjudicate a batch of findings (async version for proper LLM token tracking).
 
         Args:
             findings: List of findings to adjudicate
@@ -285,6 +301,7 @@ def create_adjudication_service(
     enable_deduplication: bool = True,
     enable_adjudication: bool = True,
     cluster_distance_threshold: float = 0.3,
+    llm_client: Optional[Any] = None,
 ) -> AdjudicationService:
     """Factory function to create an AdjudicationService.
 
@@ -292,6 +309,7 @@ def create_adjudication_service(
         enable_deduplication: Whether to enable semantic deduplication
         enable_adjudication: Whether to enable exploitability adjudication
         cluster_distance_threshold: Distance threshold for clustering (0-1)
+        llm_client: Optional LLM client for semantic deduplication
 
     Returns:
         Configured AdjudicationService instance
@@ -300,4 +318,5 @@ def create_adjudication_service(
         enable_deduplication=enable_deduplication,
         enable_adjudication=enable_adjudication,
         cluster_distance_threshold=cluster_distance_threshold,
+        llm_client=llm_client,
     )

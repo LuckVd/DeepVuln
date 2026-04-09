@@ -23,7 +23,7 @@ from src.web.repositories.scan import ScanRepository
 from src.web.repositories.project import ProjectRepository
 from src.web.services.scan_orchestrator import ScanOrchestrator
 from src.web.services.progress_broadcaster import ProgressBroadcaster
-from src.layers.l3_analysis.llm.client import LLMClient
+from src.layers.l3_analysis.llm import OpenAIClient
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +95,22 @@ async def _execute_scan_async(
         # Create LLM client for LLM-based features (P14-01)
         llm_client = None
         try:
-            model = scan.config.get("model", "deepseek-chat")
-            llm_client = LLMClient(model=model)
-            logger.info(f"Scan {scan_id}: LLM client initialized with model: {model}")
+            from src.core.config import get_llm_config
+            llm_config = get_llm_config()
+            openai_config = llm_config.get("openai", {})
+            # Always use model from config.local.toml, not from scan.config
+            # The scan.config might contain outdated model names from previous runs
+            model = llm_config.get("model", "gpt-4")
+
+            llm_client = OpenAIClient(
+                model=model,
+                api_key=openai_config.get("api_key"),
+                base_url=openai_config.get("base_url"),
+            )
+            logger.info(
+                f"Scan {scan_id}: LLM client initialized with model: {model}, "
+                f"base_url: {openai_config.get('base_url')}"
+            )
         except Exception as e:
             logger.warning(f"Scan {scan_id}: Failed to initialize LLM client: {e}")
 
