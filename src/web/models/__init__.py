@@ -1,7 +1,6 @@
 """Web service models."""
 
 from src.web.models.database import Base, get_db, init_db, close_db
-from src.web.models.project import Project
 from src.web.models.scan import Scan, ScanPhase, ScanEvent
 from src.web.models.finding import Finding
 from src.web.models.checkpoint import ScanFile, ApiKey
@@ -14,7 +13,6 @@ __all__ = [
     "init_db",
     "close_db",
     # ORM Models
-    "Project",
     "Scan",
     "ScanPhase",
     "ScanEvent",
@@ -22,10 +20,6 @@ __all__ = [
     "ScanFile",
     "ApiKey",
     # Schemas (Pydantic)
-    "ProjectCreate",
-    "ProjectUpdate",
-    "ProjectResponse",
-    "ProjectListResponse",
     "ScanCreate",
     "ScanResponse",
     "ScanListResponse",

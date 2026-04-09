@@ -85,14 +85,15 @@ DEFAULT_QUERY_PACKS: dict[str, str] = {
 }
 
 # Default query suites for each language
+# Focused on security vulnerabilities only - code quality suites removed
 DEFAULT_QUERY_SUITES: dict[str, list[str]] = {
-    "java": ["java-security-extended", "java-code-scanning"],
-    "python": ["python-security-extended", "python-code-scanning"],
-    "go": ["go-security-extended", "go-code-scanning"],
-    "javascript": ["javascript-security-extended", "javascript-code-scanning"],
-    "cpp": ["cpp-security-extended", "cpp-code-scanning"],
-    "csharp": ["csharp-security-extended", "csharp-code-scanning"],
-    "ruby": ["ruby-security-extended", "ruby-code-scanning"],
+    "java": ["java-security-extended"],
+    "python": ["python-security-extended"],
+    "go": ["go-security-extended"],
+    "javascript": ["javascript-security-extended"],
+    "cpp": ["cpp-security-extended"],
+    "csharp": ["csharp-security-extended"],
+    "ruby": ["ruby-security-extended"],
 }
 
 # Security query directory name within packs

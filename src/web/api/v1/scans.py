@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -30,7 +30,6 @@ from src.web.models.schemas import (
     FindingResponse,
 )
 from src.web.repositories.scan import ScanRepository
-from src.web.repositories.project import ProjectRepository
 from src.web.repositories.finding import FindingRepository
 from src.web.repositories.event import ScanPhaseRepository, ScanEventRepository
 
@@ -47,28 +46,79 @@ async def create_scan(
     Create a new scan.
 
     Args:
-        scan: Scan creation data
+        scan: Scan creation data (includes name, source_type, source_path, etc.)
         db: Database session
 
     Returns:
         Created scan with generated ID and timestamps
-
-    Raises:
-        HTTPException 404: If project not found
     """
-    project_repo = ProjectRepository()
     scan_repo = ScanRepository()
 
-    # Verify project exists
-    project = await project_repo.get(db, id=scan.project_id)
-    if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project {scan.project_id} not found"
-        )
-
-    # Create scan
+    # Create scan directly with source info
     created = await scan_repo.create(db, obj_in=scan)
+    return ScanResponse.model_validate(created)
+
+
+@router.post("/scans/upload-zip", response_model=ScanResponse, status_code=status.HTTP_201_CREATED)
+async def create_scan_from_zip(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(optional_api_key)] = None,
+    file: UploadFile = ...,
+    name: str = Form(...),
+    description: str = Form(""),
+    scan_type: str = Form("full"),
+    config: str = Form("{}"),
+) -> ScanResponse:
+    """
+    Create a new scan from uploaded ZIP file.
+
+    Args:
+        file: Uploaded ZIP file
+        name: Scan task name
+        description: Optional description
+        scan_type: Type of scan (full/base/incremental)
+        config: Scan configuration JSON
+        db: Database session
+
+    Returns:
+        Created scan with generated ID and timestamps
+    """
+    import os
+    import shutil
+    import uuid
+    from pathlib import Path
+
+    from src.web.core.config import get_web_settings
+
+    # Save uploaded file
+    upload_dir = Path(get_web_settings().upload_dir) / "scans"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    file_id = str(uuid.uuid4())
+    file_path = upload_dir / f"{file_id}.zip"
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Create scan with ZIP file reference
+    scan_repo = ScanRepository()
+
+    # Parse config JSON
+    import json as json_lib
+    try:
+        config_dict = json_lib.loads(config) if config else {"engines": ["semgrep", "codeql", "agent"]}
+    except:
+        config_dict = {"engines": ["semgrep", "codeql", "agent"]}
+
+    scan_data = ScanCreate(
+        name=name,
+        source_type="zip",
+        source_path=str(file_path),
+        scan_type=scan_type,
+        config=config_dict,
+    )
+
+    created = await scan_repo.create(db, obj_in=scan_data)
     return ScanResponse.model_validate(created)
 
 

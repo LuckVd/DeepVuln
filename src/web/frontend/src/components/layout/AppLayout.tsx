@@ -1,117 +1,121 @@
-import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Menu, theme } from 'antd'
-import { ProjectOutlined, ScanOutlined, HomeOutlined } from '@ant-design/icons'
-import type { MenuProps } from 'antd'
-
-const { Header, Sider, Content } = Layout
-
-type MenuItem = Required<MenuProps>['items'][number]
-
-function getItem(
-  label: string,
-  key: string,
-  icon?: React.ReactNode,
-  children?: MenuItem[],
-): MenuItem {
-  return {
-    key,
-    icon,
-    children,
-    label,
-  } as MenuItem
-}
-
-const items: MenuItem[] = [
-  getItem('首页', '/', <HomeOutlined />),
-  getItem('项目管理', '/projects', <ProjectOutlined />),
-  getItem('扫描管理', '/scans', <ScanOutlined />),
-]
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import {
+  LayoutDashboard,
+  Scan as ScanIcon,
+  ShieldAlert,
+  FileText,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
+import { cn } from '@/shared/utils/cn';
+import { useState } from 'react';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function AppLayout() {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const {
-    token: { colorBgContainer, borderRadiusLG },
-  } = theme.useToken()
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const { t } = useLanguage();
 
-  const handleMenuClick: MenuProps['onClick'] = (e) => {
-    if (e.key !== '/') {
-      navigate(e.key)
-    }
-  }
+  const menuItems = [
+    { path: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
+    { path: '/scans', label: t('nav.scans'), icon: ScanIcon },
+    { path: '/vulnerabilities', label: t('nav.vulnerabilities'), icon: ShieldAlert },
+    { path: '/reports', label: t('nav.reports'), icon: FileText },
+    { path: '/settings', label: t('nav.settings'), icon: Settings },
+  ];
 
-  // 根据当前路径确定选中的菜单项
-  const getSelectedKey = () => {
-    if (location.pathname.startsWith('/projects')) {
-      return '/projects'
-    }
-    if (location.pathname.startsWith('/scans')) {
-      return '/scans'
-    }
-    return '/'
-  }
+  const isActive = (path: string) => {
+    return location.pathname.startsWith(path);
+  };
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider
-        breakpoint="lg"
-        collapsedWidth="0"
-        style={{
-          overflow: 'auto',
-          height: '100vh',
-          position: 'fixed',
-          left: 0,
-          top: 0,
-          bottom: 0,
-        }}
+    <div className="flex min-h-screen bg-background-primary">
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          'fixed left-0 top-0 z-40 h-screen border-r border-border bg-background-secondary transition-all duration-300',
+          isCollapsed ? 'w-16' : 'w-64'
+        )}
       >
-        <div style={{
-          height: 32,
-          margin: 16,
-          color: 'white',
-          fontSize: 20,
-          fontWeight: 'bold',
-          textAlign: 'center',
-        }}>
-          DeepVuln
-        </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[getSelectedKey()]}
-          items={items}
-          onClick={handleMenuClick}
-        />
-      </Sider>
-      <Layout style={{ marginLeft: 200 }}>
-        <Header style={{
-          padding: 0,
-          background: colorBgContainer,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingRight: 24,
-        }}>
-          <div style={{ paddingLeft: 24, fontSize: 18, fontWeight: 500 }}>
-            智能漏洞挖掘系统
-          </div>
-        </Header>
-        <Content style={{
-          margin: '24px 16px 0',
-          overflow: 'initial',
-        }}>
-          <div
-            style={{
-              padding: 24,
-              minHeight: 360,
-              background: colorBgContainer,
-              borderRadius: borderRadiusLG,
-            }}
+        {/* Header */}
+        <div className="flex h-16 items-center justify-between border-b border-border px-4">
+          {!isCollapsed && (
+            <h1 className="text-xl font-bold text-cyan font-mono tracking-wider drop-shadow-[0_0_10px_rgba(0,240,255,0.5)]">
+              &lt;DEEPVULN/&gt;
+            </h1>
+          )}
+          <button
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="p-1 rounded hover:bg-cyan/10 text-cyan transition-colors"
           >
-            <Outlet />
+            {isCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
+          </button>
+        </div>
+
+        {/* Navigation */}
+        <nav className="space-y-1 p-3">
+          {menuItems.map((item) => (
+            <button
+              key={item.path}
+              onClick={() => navigate(item.path)}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-md px-3 py-3 transition-all duration-200',
+                'font-mono text-sm font-medium',
+                isActive(item.path)
+                  ? 'bg-cyan/20 text-cyan border border-cyan/30 shadow-glow-cyan'
+                  : 'text-text-secondary hover:bg-cyan/10 hover:text-cyan',
+                isCollapsed && 'justify-center px-3'
+              )}
+            >
+              <item.icon className="h-5 w-5 flex-shrink-0" />
+              {!isCollapsed && <span>{item.label}</span>}
+            </button>
+          ))}
+        </nav>
+
+        {/* Footer */}
+        {!isCollapsed && (
+          <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-border">
+            <div className="rounded bg-background-tertiary p-3 font-mono text-xs">
+              <div className="flex items-center gap-2 text-success mb-1">
+                <span className="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+                <span>SYSTEM READY</span>
+              </div>
+              <div className="text-text-tertiary">
+                v2.0.4 | UPTIME: <span id="uptime" className="text-cyan">--:--:--</span>
+              </div>
+            </div>
           </div>
-        </Content>
-      </Layout>
-    </Layout>
-  )
+        )}
+      </aside>
+
+      {/* Main Content */}
+      <main
+        className={cn(
+          'flex-1 transition-all duration-300',
+          isCollapsed ? 'ml-16' : 'ml-64'
+        )}
+      >
+        <Outlet />
+      </main>
+
+      {/* Uptime script */}
+      <script dangerouslySetInnerHTML={{
+        __html: `
+          function updateUptime() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            const el = document.getElementById('uptime');
+            if (el) el.textContent = \`\${hours}:\${minutes}:\${seconds}\`;
+          }
+          setInterval(updateUptime, 1000);
+          updateUptime();
+        `
+      }} />
+    </div>
+  );
 }

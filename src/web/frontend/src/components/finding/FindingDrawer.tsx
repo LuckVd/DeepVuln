@@ -1,40 +1,44 @@
-import { Drawer, Descriptions, Tag, Space, Button, Alert, Tabs, Typography } from 'antd'
+import { Badge, Button, Alert, Tabs, Descriptions, Sheet, Progress } from '@/components/ui';
 import {
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  QuestionCircleOutlined,
-  CopyOutlined,
-} from '@ant-design/icons'
-import type { Finding, FindingStatus } from '@/types/models'
-import CodeHighlight from './CodeHighlight'
-
-const { Title, Paragraph, Text } = Typography
+  Check,
+  X,
+  HelpCircle,
+  Copy,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+} from 'lucide-react';
+import type { Finding, FindingStatus } from '@/types/models';
+import CodeHighlight from './CodeHighlight';
 
 interface FindingDrawerProps {
-  finding: Finding | null
-  open: boolean
-  onClose: () => void
-  onStatusChange?: (findingId: number, status: FindingStatus) => void
-  isUpdating?: boolean
+  finding: Finding | null;
+  open: boolean;
+  onClose: () => void;
+  onStatusChange?: (findingId: number, status: FindingStatus) => void;
+  isUpdating?: boolean;
 }
 
-const STATUS_MAP: Record<FindingStatus, { text: string; color: string; icon: React.ReactNode }> = {
-  pending: { text: '待处理', color: 'default', icon: <QuestionCircleOutlined /> },
-  confirmed: { text: '已确认', color: 'success', icon: <CheckCircleOutlined /> },
-  false_positive: { text: '误报', color: 'error', icon: <CloseCircleOutlined /> },
-  conditional: { text: '有条件', color: 'warning', icon: <QuestionCircleOutlined /> },
-}
+const STATUS_MAP: Record<
+  FindingStatus,
+  { text: string; variant: 'pending' | 'completed' | 'failed' | 'medium'; icon: React.ReactNode }
+> = {
+  pending: { text: 'PENDING', variant: 'pending', icon: <HelpCircle className="h-4 w-4" /> },
+  confirmed: { text: 'CONFIRMED', variant: 'completed', icon: <CheckCircle className="h-4 w-4" /> },
+  false_positive: { text: 'FALSE POSITIVE', variant: 'failed', icon: <XCircle className="h-4 w-4" /> },
+  conditional: { text: 'CONDITIONAL', variant: 'medium', icon: <AlertTriangle className="h-4 w-4" /> },
+};
 
-const SEVERITY_MAP: Record<string, { text: string; color: string }> = {
-  critical: { text: '严重', color: 'error' },
-  high: { text: '高危', color: 'red' },
-  medium: { text: '中危', color: 'orange' },
-  low: { text: '低危', color: 'green' },
-  info: { text: '信息', color: 'blue' },
-}
+const SEVERITY_MAP: Record<string, { text: string; variant: 'critical' | 'high' | 'medium' | 'low' | 'info' }> = {
+  critical: { text: 'CRITICAL', variant: 'critical' },
+  high: { text: 'HIGH', variant: 'high' },
+  medium: { text: 'MEDIUM', variant: 'medium' },
+  low: { text: 'LOW', variant: 'low' },
+  info: { text: 'INFO', variant: 'info' },
+};
 
 /**
- * 漏洞详情抽屉组件
+ * Finding details drawer component with cyberpunk theme
  */
 export default function FindingDrawer({
   finding,
@@ -43,13 +47,13 @@ export default function FindingDrawer({
   onStatusChange,
   isUpdating = false,
 }: FindingDrawerProps) {
-  if (!finding) return null
+  if (!finding) return null;
 
-  const statusConfig = STATUS_MAP[finding.status] || STATUS_MAP.pending
-  const severityConfig = SEVERITY_MAP[finding.severity] || { text: finding.severity, color: 'default' }
+  const statusConfig = STATUS_MAP[finding.status] || STATUS_MAP.pending;
+  const severityConfig = SEVERITY_MAP[finding.severity] || { text: finding.severity, variant: 'info' as const };
 
-  // 从文件路径推断语言
-  const fileExt = finding.file_path.split('.').pop()?.toLowerCase() || ''
+  // Infer language from file path
+  const fileExt = finding.file_path.split('.').pop()?.toLowerCase() || '';
   const languageMap: Record<string, string> = {
     py: 'python',
     js: 'javascript',
@@ -64,69 +68,68 @@ export default function FindingDrawer({
     php: 'php',
     rb: 'ruby',
     rs: 'rust',
-  }
+  };
 
   const handleStatusChange = (newStatus: FindingStatus) => {
     if (onStatusChange && !isUpdating) {
-      onStatusChange(finding.id, newStatus)
+      onStatusChange(finding.id, newStatus);
     }
-  }
+  };
 
   const copyEvidence = () => {
     if (finding.evidence) {
-      navigator.clipboard.writeText(finding.evidence)
+      navigator.clipboard.writeText(finding.evidence);
     }
-  }
+  };
 
   return (
-    <Drawer
-      title={
-        <Space>
-          <span>漏洞 #{finding.id}</span>
-          <Tag color={severityConfig.color}>{severityConfig.text}</Tag>
-          <Tag color={statusConfig.color} icon={statusConfig.icon}>
-            {statusConfig.text}
-          </Tag>
-        </Space>
-      }
-      placement="right"
-      width={720}
+    <Sheet
       open={open}
       onClose={onClose}
+      title={
+        <div className="flex items-center gap-3">
+          <span className="text-cyan font-mono">VULN #{String(finding.id).padStart(4, '0')}</span>
+          <Badge variant={severityConfig.variant}>{severityConfig.text}</Badge>
+          <Badge variant={statusConfig.variant} className="flex items-center gap-2">
+            {statusConfig.icon}
+            {statusConfig.text}
+          </Badge>
+        </div>
+      }
+      width={720}
     >
-      {/* 状态操作区 */}
-      <div style={{ marginBottom: 16 }}>
-        <Space>
-          <span>标记为:</span>
+      {/* Status Actions */}
+      <div className="mb-6">
+        <div className="text-text-secondary font-mono text-sm mb-3">MARK AS:</div>
+        <div className="flex gap-3">
           <Button
-            size="small"
-            type={finding.status === 'confirmed' ? 'primary' : 'default'}
-            icon={<CheckCircleOutlined />}
+            size="sm"
+            variant={finding.status === 'confirmed' ? 'success' : 'outline'}
             onClick={() => handleStatusChange('confirmed')}
             disabled={isUpdating}
           >
-            已确认
+            <Check className="mr-2 h-4 w-4" />
+            CONFIRMED
           </Button>
           <Button
-            size="small"
-            type={finding.status === 'false_positive' ? 'primary' : 'default'}
-            danger
-            icon={<CloseCircleOutlined />}
+            size="sm"
+            variant={finding.status === 'false_positive' ? 'destructive' : 'outline'}
             onClick={() => handleStatusChange('false_positive')}
             disabled={isUpdating}
           >
-            误报
+            <X className="mr-2 h-4 w-4" />
+            FALSE POSITIVE
           </Button>
           <Button
-            size="small"
-            type={finding.status === 'conditional' ? 'primary' : 'default'}
-            icon={<QuestionCircleOutlined />}
+            size="sm"
+            variant={finding.status === 'conditional' ? 'secondary' : 'outline'}
             onClick={() => handleStatusChange('conditional')}
             disabled={isUpdating}
           >
-            有条件
+            <HelpCircle className="mr-2 h-4 w-4" />
+            CONDITIONAL
           </Button>
-        </Space>
+        </div>
       </div>
 
       <Tabs
@@ -134,54 +137,71 @@ export default function FindingDrawer({
         items={[
           {
             key: 'overview',
-            label: '概览',
+            label: 'OVERVIEW',
             children: (
               <>
-                {/* 基本信息 */}
-                <Descriptions size="small" column={2} bordered>
-                  <Descriptions.Item label="漏洞类型" span={2}>
-                    {finding.vuln_type}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="严重程度" span={2}>
-                    <Tag color={severityConfig.color}>{severityConfig.text}</Tag>
-                    <span style={{ marginLeft: 8 }}>
-                      置信度: {(finding.confidence * 100).toFixed(0)}%
-                    </span>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="文件位置" span={2}>
-                    <Text code>{finding.file_path}</Text>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="行号" span={2}>
-                    {finding.line_start && finding.line_end
-                      ? `${finding.line_start} - ${finding.line_end}`
-                      : finding.line_start || '-'}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="函数" span={2}>
-                    {finding.function_name || '-'}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="检测引擎" span={2}>
-                    {finding.engine}
-                  </Descriptions.Item>
-                </Descriptions>
+                {/* Basic Info */}
+                <Descriptions
+                  items={[
+                    {
+                      label: 'VULNERABILITY TYPE',
+                      value: <span className="text-cyan font-mono">{finding.vuln_type}</span>,
+                      span: 2,
+                    },
+                    {
+                      label: 'SEVERITY',
+                      value: (
+                        <div className="flex items-center gap-3">
+                          <Badge variant={severityConfig.variant}>{severityConfig.text}</Badge>
+                          <span className="text-text-secondary">
+                            CONFIDENCE: {(finding.confidence * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      ),
+                      span: 2,
+                    },
+                    {
+                      label: 'FILE LOCATION',
+                      value: <code className="text-cyan font-mono text-sm bg-background-tertiary px-2 py-1 rounded">{finding.file_path}</code>,
+                      span: 2,
+                    },
+                    {
+                      label: 'LINE NUMBERS',
+                      value: finding.line_start && finding.line_end
+                        ? `${finding.line_start} - ${finding.line_end}`
+                        : finding.line_start || '-',
+                      span: 2,
+                    },
+                    {
+                      label: 'FUNCTION',
+                      value: finding.function_name || '-',
+                      span: 2,
+                    },
+                    {
+                      label: 'DETECTION ENGINE',
+                      value: finding.engine,
+                      span: 2,
+                    },
+                  ]}
+                  columns={2}
+                  bordered
+                />
 
-                {/* 描述 */}
+                {/* Description */}
                 {finding.description && (
-                  <div style={{ marginTop: 16 }}>
-                    <Title level={5}>描述</Title>
-                    <Paragraph>{finding.description}</Paragraph>
+                  <div className="mt-6">
+                    <h4 className="text-cyan font-mono font-bold mb-3">DESCRIPTION</h4>
+                    <p className="text-text-secondary leading-relaxed">{finding.description}</p>
                   </div>
                 )}
 
-                {/* 修复建议 */}
+                {/* Remediation */}
                 {finding.remediation && (
-                  <div style={{ marginTop: 16 }}>
-                    <Title level={5}>修复建议</Title>
-                    <Alert
-                      message="建议措施"
-                      description={finding.remediation}
-                      type="info"
-                      showIcon
-                    />
+                  <div className="mt-6">
+                    <h4 className="text-cyan font-mono font-bold mb-3">REMEDIATION</h4>
+                    <Alert variant="info" title="RECOMMENDED ACTIONS">
+                      {finding.remediation}
+                    </Alert>
                   </div>
                 )}
               </>
@@ -189,16 +209,15 @@ export default function FindingDrawer({
           },
           {
             key: 'code',
-            label: '代码',
+            label: 'CODE EVIDENCE',
             children: finding.evidence ? (
               <>
-                <div style={{ marginBottom: 8 }}>
-                  <Space>
-                    <Text type="secondary">问题代码片段</Text>
-                    <Button size="small" icon={<CopyOutlined />} onClick={copyEvidence}>
-                      复制
-                    </Button>
-                  </Space>
+                <div className="mb-4 flex items-center justify-between">
+                  <span className="text-text-secondary font-mono text-sm">AFFECTED CODE SNIPPET</span>
+                  <Button size="sm" variant="outline" onClick={copyEvidence}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    COPY
+                  </Button>
                 </div>
                 <CodeHighlight
                   code={finding.evidence}
@@ -208,31 +227,45 @@ export default function FindingDrawer({
                 />
               </>
             ) : (
-              <Alert message="无代码证据" type="warning" />
+              <Alert variant="warning" title="NO CODE EVIDENCE">
+                This finding does not include code evidence.
+              </Alert>
             ),
           },
           {
             key: 'metadata',
-            label: '元数据',
+            label: 'METADATA',
             children: (
-              <Descriptions size="small" column={1} bordered>
-                <Descriptions.Item label="漏洞 ID">{finding.id}</Descriptions.Item>
-                <Descriptions.Item label="扫描 ID">{finding.scan_id}</Descriptions.Item>
-                <Descriptions.Item label="创建时间">
-                  {new Date(finding.created_at).toLocaleString('zh-CN')}
-                </Descriptions.Item>
-                {finding.cpg_path && (
-                  <Descriptions.Item label="CPG 路径" span={2}>
-                    <pre style={{ margin: 0, fontSize: '12px' }}>
-                      {JSON.stringify(finding.cpg_path, null, 2)}
-                    </pre>
-                  </Descriptions.Item>
-                )}
-              </Descriptions>
+              <Descriptions
+                items={[
+                  { label: 'FINDING ID', value: String(finding.id), span: 1 },
+                  { label: 'SCAN ID', value: String(finding.scan_id), span: 1 },
+                  {
+                    label: 'CREATED AT',
+                    value: new Date(finding.created_at).toLocaleString('zh-CN'),
+                    span: 2,
+                  },
+                  ...(finding.cpg_path
+                    ? [
+                        {
+                          label: 'CPG PATH',
+                          value: (
+                            <pre className="text-xs font-mono bg-background-tertiary p-2 rounded overflow-x-auto">
+                              {JSON.stringify(finding.cpg_path, null, 2)}
+                            </pre>
+                          ),
+                          span: 2,
+                        },
+                      ]
+                    : []),
+                ]}
+                columns={2}
+                bordered
+              />
             ),
           },
         ]}
       />
-    </Drawer>
-  )
+    </Sheet>
+  );
 }

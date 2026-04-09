@@ -46,7 +46,12 @@ class Scan(Base):
 
     # Primary key
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+
+    # Task info (formerly from project)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)  # local, git, zip
+    source_path: Mapped[str] = mapped_column(Text, nullable=False)
+    branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Task info
     status: Mapped[str] = mapped_column(String(50), nullable=False, default=ScanStatus.PENDING)

@@ -1,15 +1,14 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { LanguageProvider } from './contexts/LanguageContext'
 import AppLayout from './components/layout/AppLayout'
-import ProjectsPage from './pages/Projects'
-import ProjectDetailPage from './pages/ProjectDetail'
 import ScansPage from './pages/Scans'
 import ScanDetailPage from './pages/ScanDetail'
 import FindingsPage from './pages/Findings'
-
-// 临时占位页面
-const ProjectFormPage = () => <div>使用项目列表的创建按钮</div>
-// ProjectDetailPage 已移动到独立文件
+import DashboardPage from './pages/Dashboard'
+import VulnerabilitiesPage from './pages/Vulnerabilities'
+import ReportsPage from './pages/Reports'
+import SettingsPage from './pages/Settings'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,21 +21,24 @@ const queryClient = new QueryClient({
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<AppLayout />}>
-            <Route index element={<Navigate to="/projects" replace />} />
-            <Route path="projects" element={<ProjectsPage />} />
-            <Route path="projects/new" element={<ProjectFormPage />} />
-            <Route path="projects/:id" element={<ProjectDetailPage />} />
-            <Route path="scans" element={<ScansPage />} />
-            <Route path="scans/:id" element={<ScanDetailPage />} />
-            <Route path="scans/:id/findings" element={<FindingsPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <LanguageProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<AppLayout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="scans" element={<ScansPage />} />
+              <Route path="scans/:id" element={<ScanDetailPage />} />
+              <Route path="scans/:id/findings" element={<FindingsPage />} />
+              <Route path="vulnerabilities" element={<VulnerabilitiesPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </LanguageProvider>
   )
 }
 

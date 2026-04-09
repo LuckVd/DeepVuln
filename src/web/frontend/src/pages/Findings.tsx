@@ -1,56 +1,51 @@
-import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card,
-  Row,
-  Col,
-  Statistic,
-  Select,
-  Space,
   Button,
+  Select,
+  CustomSelect,
   Input,
-  message,
-} from 'antd'
-import {
-  ArrowLeftOutlined,
-  ReloadOutlined,
-  SearchOutlined,
-} from '@ant-design/icons'
-import { useFindings } from '@/hooks/useFindings'
-import type { Finding, FindingStatus, SeverityLevel } from '@/types/models'
-import FindingList from '@/components/finding/FindingList'
-import FindingDrawer from '@/components/finding/FindingDrawer'
+  Statistic,
+  Badge,
+  LoadingInline,
+} from '@/components/ui';
+import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
+import { useFindings } from '@/hooks/useFindings';
+import type { Finding, FindingStatus, SeverityLevel } from '@/types/models';
+import FindingList from '@/components/finding/FindingList';
+import FindingDrawer from '@/components/finding/FindingDrawer';
 
 const STATUS_OPTIONS: { value: FindingStatus; label: string }[] = [
-  { value: 'pending', label: '待处理' },
-  { value: 'confirmed', label: '已确认' },
-  { value: 'false_positive', label: '误报' },
-  { value: 'conditional', label: '有条件' },
-]
+  { value: 'pending', label: 'PENDING' },
+  { value: 'confirmed', label: 'CONFIRMED' },
+  { value: 'false_positive', label: 'FALSE POSITIVE' },
+  { value: 'conditional', label: 'CONDITIONAL' },
+];
 
 const SEVERITY_OPTIONS: { value: SeverityLevel; label: string }[] = [
-  { value: 'critical', label: '严重' },
-  { value: 'high', label: '高危' },
-  { value: 'medium', label: '中危' },
-  { value: 'low', label: '低危' },
-  { value: 'info', label: '信息' },
-]
+  { value: 'critical', label: 'CRITICAL' },
+  { value: 'high', label: 'HIGH' },
+  { value: 'medium', label: 'MEDIUM' },
+  { value: 'low', label: 'LOW' },
+  { value: 'info', label: 'INFO' },
+];
 
 /**
- * 漏洞列表页面
+ * Findings list page with cyberpunk theme
  */
 export default function FindingsPage() {
-  const { id: scanId } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const id = parseInt(scanId || '0')
+  const { id: scanId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const id = parseInt(scanId || '0');
 
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
-  const [statusFilter, setStatusFilter] = useState<FindingStatus | undefined>()
-  const [severityFilter, setSeverityFilter] = useState<SeverityLevel | undefined>()
-  const [searchText, setSearchText] = useState('')
-  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(20);
+  const [statusFilter, setStatusFilter] = useState<FindingStatus | undefined>();
+  const [severityFilter, setSeverityFilter] = useState<SeverityLevel | undefined>();
+  const [searchText, setSearchText] = useState('');
+  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const {
     data,
@@ -65,137 +60,120 @@ export default function FindingsPage() {
     status: statusFilter,
     severity: severityFilter,
     enabled: !isNaN(id),
-  })
+  });
 
-  // 过滤结果（客户端搜索）
+  // Filter results (client-side search)
   const filteredFindings = data?.findings.filter((finding) => {
-    if (!searchText) return true
-    const searchLower = searchText.toLowerCase()
+    if (!searchText) return true;
+    const searchLower = searchText.toLowerCase();
     return (
       finding.vuln_type.toLowerCase().includes(searchLower) ||
       finding.file_path.toLowerCase().includes(searchLower) ||
       finding.title?.toLowerCase().includes(searchLower) ||
       finding.description?.toLowerCase().includes(searchLower)
-    )
-  }) || []
+    );
+  }) || [];
 
   const handlePageChange = (newPage: number, newPageSize?: number) => {
-    setPage(newPage)
-    if (newPageSize && newPageSize !== pageSize) {
-      setPageSize(newPageSize)
-    }
-  }
+    setPage(newPage);
+  };
 
   const handleViewDetail = (finding: Finding) => {
-    setSelectedFinding(finding)
-    setDrawerOpen(true)
-  }
+    setSelectedFinding(finding);
+    setDrawerOpen(true);
+  };
 
   const handleStatusChange = (findingId: number, newStatus: FindingStatus) => {
-    updateStatus(findingId, newStatus)
-    message.success('状态已更新')
-  }
+    updateStatus(findingId, newStatus);
+    // Brief success feedback could be added here
+  };
 
   if (isNaN(id)) {
-    navigate('/scans')
-    return null
+    navigate('/scans');
+    return null;
   }
 
   return (
-    <div>
-      {/* 头部 */}
-      <div style={{ marginBottom: 16 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/scans')}>
-          返回扫描列表
+    <div className="p-6">
+      {/* Header */}
+      <div className="mb-6">
+        <Button variant="outline" size="sm" onClick={() => navigate('/scans')}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          RETURN TO SCAN LIST
         </Button>
       </div>
 
-      {/* 统计卡片 */}
+      {/* Statistics Cards */}
       {data?.summary && (
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={4}>
-            <Card>
-              <Statistic title="总漏洞数" value={data.summary.total} />
-            </Card>
-          </Col>
-          <Col span={5}>
-            <Card>
-              <Statistic
-                title="已确认"
-                value={data.summary.verified}
-                valueStyle={{ color: '#52c41a' }}
-              />
-            </Card>
-          </Col>
-          <Col span={5}>
-            <Card>
-              <Statistic
-                title="误报"
-                value={data.summary.false_positive}
-                valueStyle={{ color: '#ff4d4f' }}
-              />
-            </Card>
-          </Col>
-          <Col span={5}>
-            <Card>
-              <Statistic
-                title="严重"
-                value={data.summary.by_severity.critical || 0}
-                valueStyle={{ color: '#cf1322' }}
-              />
-            </Card>
-          </Col>
-          <Col span={5}>
-            <Card>
-              <Statistic
-                title="高危"
-                value={data.summary.by_severity.high || 0}
-                valueStyle={{ color: '#ff4d4f' }}
-              />
-            </Card>
-          </Col>
-        </Row>
+        <div className="grid grid-cols-5 gap-4 mb-6">
+          <Statistic title="TOTAL FINDINGS" value={data.summary.total} />
+          <Statistic
+            title="VERIFIED"
+            value={data.summary.verified}
+            valueClassName="text-success"
+          />
+          <Statistic
+            title="FALSE POSITIVE"
+            value={data.summary.false_positive}
+            valueClassName="text-critical"
+          />
+          <Statistic
+            title="CRITICAL"
+            value={data.summary.by_severity.critical || 0}
+            valueClassName={data.summary.by_severity.critical ? 'text-critical' : ''}
+          />
+          <Statistic
+            title="HIGH"
+            value={data.summary.by_severity.high || 0}
+            valueClassName={data.summary.by_severity.high ? 'text-warning' : ''}
+          />
+        </div>
       )}
 
-      {/* 工具栏 */}
-      <Card style={{ marginBottom: 16 }}>
-        <Space wrap>
-          <Select
-            placeholder="筛选状态"
-            allowClear
-            style={{ width: 120 }}
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={STATUS_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
+      {/* Toolbar */}
+      <Card className="glass-panel mb-6">
+        <div className="flex items-center gap-4 flex-wrap">
+          <CustomSelect
+            label="STATUS"
+            value={statusFilter || ''}
+            onChange={(val) => setStatusFilter(val as FindingStatus | undefined)}
+            options={[
+              { value: '', label: 'ALL STATUS' },
+              ...STATUS_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label })),
+            ]}
+            className="w-40"
           />
-          <Select
-            placeholder="筛选严重程度"
-            allowClear
-            style={{ width: 120 }}
-            value={severityFilter}
-            onChange={setSeverityFilter}
-            options={SEVERITY_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
+          <CustomSelect
+            label="SEVERITY"
+            value={severityFilter || ''}
+            onChange={(val) => setSeverityFilter(val as SeverityLevel | undefined)}
+            options={[
+              { value: '', label: 'ALL SEVERITIES' },
+              ...SEVERITY_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label })),
+            ]}
+            className="w-40"
           />
-          <Input
-            placeholder="搜索漏洞类型、文件、描述..."
-            prefix={<SearchOutlined />}
-            style={{ width: 300 }}
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            allowClear
-          />
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
-            刷新
+          <div className="flex-1 min-w-[200px]">
+            <Input
+              placeholder="Search vuln type, file, description..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              className="font-mono"
+            />
+          </div>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            REFRESH
           </Button>
-        </Space>
+        </div>
       </Card>
 
-      {/* 漏洞列表 */}
-      <Card>
+      {/* Findings List */}
+      <Card className="glass-panel">
         <FindingList
           findings={filteredFindings}
           loading={isLoading}
-          total={searchText ? filteredFindings.length : (data?.total || 0)}
+          total={searchText ? filteredFindings.length : data?.total || 0}
           page={page}
           pageSize={pageSize}
           onPageChange={handlePageChange}
@@ -203,7 +181,7 @@ export default function FindingsPage() {
         />
       </Card>
 
-      {/* 详情抽屉 */}
+      {/* Details Drawer */}
       <FindingDrawer
         finding={selectedFinding}
         open={drawerOpen}
@@ -212,5 +190,5 @@ export default function FindingsPage() {
         isUpdating={isUpdating}
       />
     </div>
-  )
+  );
 }

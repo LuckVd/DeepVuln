@@ -1,94 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { projectsApi, scansApi } from '@/api'
+import { scansApi } from '@/api'
 import type {
-  Project,
-  ProjectCreate,
-  ProjectUpdate,
   Scan,
   ScanCreate,
 } from '@/types/models'
-
-// ==================== Projects ====================
-
-/**
- * 获取项目列表
- */
-export function useProjects(params?: {
-  page?: number
-  page_size?: number
-  source_type?: string
-}) {
-  return useQuery({
-    queryKey: ['projects', params],
-    queryFn: () => projectsApi.list(params),
-  })
-}
-
-/**
- * 获取项目详情
- */
-export function useProject(id: number) {
-  return useQuery({
-    queryKey: ['project', id],
-    queryFn: () => projectsApi.get(id),
-    enabled: !!id,
-  })
-}
-
-/**
- * 创建项目
- */
-export function useCreateProject() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (data: ProjectCreate) => projectsApi.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-    },
-  })
-}
-
-/**
- * 更新项目
- */
-export function useUpdateProject() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: ProjectUpdate }) =>
-      projectsApi.update(id, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['project', variables.id] })
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-    },
-  })
-}
-
-/**
- * 删除项目
- */
-export function useDeleteProject() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (id: number) => projectsApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-    },
-  })
-}
-
-/**
- * 获取项目扫描历史
- */
-export function useProjectScans(projectId: number, limit: number = 50) {
-  return useQuery({
-    queryKey: ['project', projectId, 'scans'],
-    queryFn: () => projectsApi.getScans(projectId, limit),
-    enabled: !!projectId,
-  })
-}
 
 // ==================== Scans ====================
 
@@ -99,7 +14,6 @@ export function useScans(params?: {
   page?: number
   page_size?: number
   status?: string
-  project_id?: number
 }) {
   return useQuery({
     queryKey: ['scans', params],

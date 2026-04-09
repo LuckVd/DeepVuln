@@ -55,53 +55,6 @@ class PhaseName(str):
 
 
 # ============================================================================
-# Project Schemas
-# ============================================================================
-
-class ProjectBase(BaseModel):
-    """Base project schema."""
-    name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    source_type: str = Field(..., pattern="^(local|git|zip)$")
-    source_path: str
-    branch: Optional[str] = None
-    commit_hash: Optional[str] = None
-    extra_metadata: Optional[dict] = None
-
-
-class ProjectCreate(ProjectBase):
-    """Schema for creating a project."""
-    pass
-
-
-class ProjectUpdate(BaseModel):
-    """Schema for updating a project."""
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = None
-    branch: Optional[str] = None
-    commit_hash: Optional[str] = None
-    extra_metadata: Optional[dict] = None
-
-
-class ProjectResponse(ProjectBase):
-    """Schema for project response."""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    created_at: datetime
-    updated_at: datetime
-    last_scan_id: Optional[int] = None
-
-
-class ProjectListResponse(BaseModel):
-    """Schema for paginated project list."""
-    items: list[ProjectResponse]
-    total: int
-    page: int
-    page_size: int
-
-
-# ============================================================================
 # Scan Schemas
 # ============================================================================
 
@@ -292,7 +245,10 @@ class CurrentFileResponse(BaseModel):
 
 class ScanBase(BaseModel):
     """Base scan schema."""
-    project_id: int
+    name: str = Field(..., min_length=1, max_length=255, description="Scan task name")
+    source_type: str = Field(..., pattern="^(local|git|zip)$", description="Source type")
+    source_path: str = Field(..., description="Source path or URL")
+    branch: Optional[str] = Field(None, description="Git branch (for git sources)")
     scan_type: str = Field(..., pattern="^(full|base|incremental)$")
     config: ScanConfig = Field(
         default_factory=ScanConfig,
@@ -310,7 +266,10 @@ class ScanResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    project_id: int
+    name: str
+    source_type: str
+    source_path: str
+    branch: Optional[str] = None
     status: str
     scan_type: str
     current_phase: Optional[str] = None

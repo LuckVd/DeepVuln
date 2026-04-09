@@ -1,6 +1,6 @@
 // 模型类型定义
 
-// 项目来源类型
+// 来源类型
 export type SourceType = 'local' | 'git' | 'zip'
 
 // 扫描状态
@@ -21,39 +21,13 @@ export type SeverityLevel = 'critical' | 'high' | 'medium' | 'low' | 'info'
 // 漏洞状态
 export type FindingStatus = 'pending' | 'confirmed' | 'false_positive' | 'conditional'
 
-// 项目模型
-export interface Project {
+// 扫描模型（已移除项目维度）
+export interface Scan {
   id: number
   name: string
-  description: string | null
   source_type: SourceType
   source_path: string
   branch: string | null
-  created_at: string
-  updated_at: string
-}
-
-// 创建项目请求
-export interface ProjectCreate {
-  name: string
-  description?: string
-  source_type: SourceType
-  source_path: string
-  branch?: string
-}
-
-// 更新项目请求
-export interface ProjectUpdate {
-  name?: string
-  description?: string
-  source_path?: string
-  branch?: string
-}
-
-// 扫描模型
-export interface Scan {
-  id: number
-  project_id: number
   status: ScanStatus
   scan_type: ScanType
   progress_percent: number
@@ -81,9 +55,15 @@ export interface Scan {
 
 // 创建扫描请求
 export interface ScanCreate {
-  project_id: number
-  scan_type: ScanType
+  name: string
+  source_type: SourceType
+  source_path: string
   branch?: string
+  scan_type: ScanType
+  config?: {
+    engines?: string[]
+    [key: string]: unknown
+  }
 }
 
 // 扫描阶段信息

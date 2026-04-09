@@ -1,139 +1,208 @@
-# Current Goal: 代码质量改进
+# Current Goal: Web 前端重构 (UI/UX 升级)
 
-> **目标 ID**: P15-code-quality-improvement
-> **目标**: 修复跨层依赖、清理死代码、修复假测试
-> **阶段**: Phase 15 - completed
-> **状态**: 已完成 ✅
+> **目标 ID**: P16-web-frontend-refactor
+> **目标**: 参考 DeepAudit 设计，重构 Web 前端，提供赛博朋克风格的专业安全审计界面
+> **阶段**: Phase 16 - in-progress
+> **状态**: 进行中
 
 ---
 
 ## 问题概述
 
-基于项目全面审视，发现三个主要问题：
+当前前端存在的问题：
 
 | # | 问题 | 严重性 | 影响范围 |
 |---|------|--------|----------|
-| 1 | 跨层依赖 | 🔴 高 | L3/L1 循环依赖，违反架构原则 |
-| 2 | 假测试 | 🟡 中 | 2 个测试文件包含无意义断言 |
-| 3 | 死代码 | 🟢 低 | ~2000 行未使用代码 |
+| 1 | UI 设计普通 | 🟡 中 | 使用 Ant Design 默认样式，缺乏特色 |
+| 2 | 组件依赖大库 | 🟡 中 | Ant Design 体积大，定制困难 |
+| 3 | 无国际化 | 🟢 低 | 仅支持中文 |
+| 4 | 无主题切换 | 🟢 低 | 只有一种主题 |
+| 5 | 轮询更新 | 🟡 中 | 使用定时轮询而非流式更新 |
+| 6 | 页面简单 | 🟡 中 | 只有 3 个页面，功能单一 |
 
 ---
 
-## 实施计划
+## 参考设计：DeepAudit
 
-### 阶段 1: 死代码清理 (优先)
-
-**原因**: 降低维护负担，减少混淆
-
-**任务列表**:
-- P15-01: 删除 `src/web/services/cli_adapter.py` (672 行)
-- P15-02: 删除 `src/web/services/scan/` 子目录 (约 800 行)
-- P15-03: 删除 `src/web/api/v1/scans_v2.py`
-- P15-04: 更新 `src/web/services/__init__.py` 移除 CLIAdapter 导出
-
-**验收标准**:
-- ✅ 代码编译无错误
-- ✅ 所有测试通过
-- ✅ Web 服务正常启动
+DeepAudit 前端特点：
+- **赛博朋克终端风格**: 深色背景 + 霓虹光效 + 像素字体
+- **自建组件库**: 基于 Radix UI 无头组件
+- **国际化支持**: i18next 框架
+- **流式交互**: 实时展示 Agent 输出
+- **完善架构**: features/ 模块 + 自建 UI 组件库
 
 ---
 
-### 阶段 2: 修复假测试
+## 实施策略：最小原型迭代
 
-**任务列表**:
-- P15-05: 修复 `tests/unit/test_l3/test_scan_order.py:187`
-- P15-06: 修复 `tests/unit/test_l1/test_llm_detector.py:302`
-- P15-07: 确保每个测试都有实际断言
+### 迭代 1: 基础设施 + 一页可用 ✅
 
-**验收标准**:
-- ✅ 所有测试通过
-- ✅ 无 `assert True` 类型的假测试
+**目标**: 搭建基础，改造一个页面验证效果
+
+- 安装核心依赖 (Radix UI + 工具库)
+- 配置赛博朋克主题 (Tailwind)
+- 创建基础 UI 组件 (Button, Card, Badge)
+- 重构 **Scans 页面** 作为示例
+
+**验收**: 扫描列表页面使用新样式和组件
 
 ---
 
-### 阶段 3: 修复跨层依赖
+### 迭代 2: 完善布局 + 仪表盘
 
-**策略**: 将共享模型移动到 `src/core/models/`
+**目标**: 完善应用布局，新增仪表盘
 
-**任务列表**:
-- P15-08: 创建 `src/core/models/attack_surface.py`
-- P15-09: 移动 `EntryPoint`, `AttackSurfaceReport`, `EntryPointType` 等模型
-- P15-10: 更新 L1 层导入
-- P15-11: 更新 L3 层导入
-- P15-12: 移除 L1 对 L3 的依赖 (LLMClient)
-- P15-13: 验证无循环依赖
+- 创建主布局 (MainLayout + Sidebar + Header)
+- 创建仪表盘页面 (统计卡片 + 图表)
+- 主题切换功能
 
-**架构变化**:
+**验收**: 完整的应用布局，新的仪表盘页面
+
+---
+
+### 迭代 3: 流式交互 + 漏洞页面
+
+**目标**: 实现实时更新，完善核心页面
+
+- 流式 API 支持 (WebSocket / SSE)
+- 重构扫描详情页 (实时进度展示)
+- 重构漏洞页面 (新组件 + 代码高亮)
+
+**验收**: 实时更新的扫描详情，新风格的漏洞页面
+
+---
+
+### 迭代 4: 国际化 + 完善
+
+**目标**: 添加多语言支持，完善细节
+
+- i18next 配置
+- 中英文语言包
+- 语言切换器
+- 细节优化
+
+**验收**: 支持中英文切换
+
+---
+
+## 技术选型
+
+```diff
+# 保留
+- React 18.2.0
+- TypeScript 5.2.2
+- Vite 5.0.8
+- React Router 6.21.1
+- Axios 1.6.5
+- Tailwind CSS 3.4.1
+- React Query 5.17.0
+- react-syntax-highlighter 15.5.0
+
+# 移除
+- antd 5.12.8
+- @ant-design/icons 5.2.6
+- zustand 4.4.7 (用 Context API 替代)
+
+# 新增
++ @radix-ui/react-* (无头组件)
++ class-variance-authority (组件变体)
++ clsx + tailwind-merge (样式合并)
++ lucide-react (图标)
++ i18next + react-i18next (国际化)
++ next-themes (主题系统)
++ eventsource-parser (流式处理)
++ sonner (Toast 通知)
++ recharts (图表)
+```
+
+---
+
+## 目录结构 (新)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  修复前 (循环依赖):                                          │
-│  L3 → L1 → Core                                             │
-│  ↑         ↓                                                 │
-│  └─────────┘  ← L1 导入 L3 的 LLMClient                     │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│  修复后 (单向依赖):                                          │
-│  L3 → Core ← L1                                             │
-│         ↑       ↑                                            │
-│         └───────┘  共享模型从 Core 导入                      │
-└─────────────────────────────────────────────────────────────┘
+src/web/frontend/src/
+├── app/
+│   ├── providers.tsx       # 全局 Provider
+│   ├── routes.tsx          # 集中式路由
+│   └── App.tsx
+├── components/
+│   ├── ui/                 # 自建 UI 组件库
+│   │   ├── button.tsx
+│   │   ├── card.tsx
+│   │   ├── badge.tsx
+│   │   └── ...
+│   ├── layout/
+│   │   ├── MainLayout.tsx
+│   │   ├── Sidebar.tsx
+│   │   └── Header.tsx
+│   └── theme/
+│       └── ThemeToggle.tsx
+├── features/
+│   ├── scans/
+│   │   ├── api.ts
+│   │   └── hooks.ts
+│   └── findings/
+│       ├── api.ts
+│       └── hooks.ts
+├── pages/
+│   ├── Dashboard.tsx       # 新增
+│   ├── Scans.tsx
+│   ├── ScanDetail.tsx
+│   └── Findings.tsx
+└── shared/
+    ├── api/
+    │   └── client.ts
+    └── utils/
+        └── cn.ts
 ```
-
-**验收标准**:
-- ✅ 无跨层直接导入
-- ✅ 所有测试通过
-- ✅ 运行 `python -c "import src.layers"` 无循环导入错误
 
 ---
 
-### 阶段 4: 修复空 except 块
+## 赛博朋克主题配色
 
-**任务列表**:
-- P15-14: 修复 `src/web/api/v1/scans_v2.py` (如未删除)
-- P15-15: 确保所有异常处理都有明确的日志
-
-**验收标准**:
-- ✅ 无空 `except:` 块
-- ✅ 所有异常都有适当的日志记录
+```css
+/* 核心配色 */
+--bg-primary: #0a0e0a;      /* 主背景 */
+--bg-secondary: #111a11;    /* 次级背景 */
+--accent-cyan: #00ffea;     /* 青色霓虹 */
+--accent-orange: #ff6b00;   /* 橙色霓虹 */
+--text-primary: #e0e0e0;    /* 主文本 */
+--text-dim: #808080;        /* 暗文本 */
+--border-neon: #00ffea40;   /* 霓虹边框 */
+```
 
 ---
 
 ## 验收标准
 
-1. ✅ 死代码已清理 (~2000 行)
-2. ✅ 假测试已修复
-3. ✅ 跨层依赖已解决
-4. ✅ 所有测试通过
-5. ✅ Web 服务正常启动运行
+### 迭代 1
+- [x] 核心依赖安装完成
+- [ ] 赛博朋克主题配置完成
+- [ ] Button, Card, Badge 组件创建
+- [ ] Scans 页面使用新组件
+
+### 迭代 2
+- [ ] 主布局组件创建
+- [ ] 仪表盘页面创建
+- [ ] 主题切换功能
+
+### 迭代 3
+- [ ] 流式 API 支持
+- [ ] 扫描详情页重构
+- [ ] 漏洞页面重构
+
+### 迭代 4
+- [ ] i18next 配置
+- [ ] 中英文语言包
+- [ ] 语言切换器
 
 ---
 
-## 用户确认需求
+## 当前迭代：迭代 1 - 基础设施 + 一页可用
 
-### 实施顺序
-- ✅ 死代码清理优先
-- ✅ 共享模型放在 `src/core/models/`
+### 任务列表
 
-### 待确认问题
-- 是否需要创建专门的共享模块 `src/shared/`? → 用户选择 `src/core/models/`
-
----
-
-## 相关文件
-
-### 需要删除的文件
-- `src/web/services/cli_adapter.py`
-- `src/web/services/scan/` (整个目录)
-- `src/web/api/v1/scans_v2.py`
-
-### 需要创建的文件
-- `src/core/models/attack_surface.py`
-
-### 需要修改的文件
-- `src/layers/l1_intelligence/attack_surface/llm_detector.py`
-- `src/layers/l3_analysis/rounds/round_four.py`
-- `src/web/services/__init__.py`
-- `tests/unit/test_l3/test_scan_order.py`
-- `tests/unit/test_l1/test_llm_detector.py`
+- [ ] P16-01: 安装核心依赖
+- [ ] P16-02: 配置赛博朋克主题
+- [ ] P16-03a: 创建 Button, Card, Badge 组件
+- [ ] P16-04: 重构 Scans 页面

@@ -80,37 +80,6 @@ class ScanRepository(AsyncRepository[Scan, ScanCreate, dict]):
 
         return {"scan": scan, "events": events}
 
-    async def list_by_project(
-        self,
-        db: AsyncSession,
-        *,
-        project_id: int,
-        skip: int = 0,
-        limit: int = 100,
-        status: Optional[str] = None
-    ) -> list[Scan]:
-        """
-        List scans for a project.
-
-        Args:
-            db: Database session
-            project_id: Project ID
-            skip: Number of records to skip
-            limit: Maximum number of records to return
-            status: Optional status filter
-
-        Returns:
-            List of scans
-        """
-        query = select(Scan).where(Scan.project_id == project_id)
-
-        if status:
-            query = query.where(Scan.status == status)
-
-        query = query.order_by(Scan.created_at.desc()).offset(skip).limit(limit)
-        result = await db.execute(query)
-        return list(result.scalars().all())
-
     async def list_by_status(
         self,
         db: AsyncSession,

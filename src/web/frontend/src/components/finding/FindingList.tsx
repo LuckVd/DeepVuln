@@ -1,22 +1,21 @@
-import { Table, Tag, Space, Button, Select, Progress } from 'antd'
-import { EyeOutlined } from '@ant-design/icons'
-import type { ColumnsType } from 'antd/es/table'
-import type { Finding, SeverityLevel, FindingStatus } from '@/types/models'
+import { Badge, Progress, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Button } from '@/components/ui';
+import { Eye } from 'lucide-react';
+import type { Finding, SeverityLevel, FindingStatus } from '@/types/models';
 
-const STATUS_MAP: Record<FindingStatus, { text: string; color: string }> = {
-  pending: { text: '待处理', color: 'default' },
-  confirmed: { text: '已确认', color: 'success' },
-  false_positive: { text: '误报', color: 'error' },
-  conditional: { text: '有条件', color: 'warning' },
-}
+const STATUS_MAP: Record<FindingStatus, { text: string; variant: 'pending' | 'running' | 'completed' | 'failed' | 'high' | 'medium' | 'low' }> = {
+  pending: { text: 'PENDING', variant: 'pending' },
+  confirmed: { text: 'CONFIRMED', variant: 'completed' },
+  false_positive: { text: 'FALSE POSITIVE', variant: 'failed' },
+  conditional: { text: 'CONDITIONAL', variant: 'medium' },
+};
 
-const SEVERITY_MAP: Record<SeverityLevel, { text: string; color: string }> = {
-  critical: { text: '严重', color: 'error' },
-  high: { text: '高危', color: 'red' },
-  medium: { text: '中危', color: 'orange' },
-  low: { text: '低危', color: 'green' },
-  info: { text: '信息', color: 'blue' },
-}
+const SEVERITY_MAP: Record<SeverityLevel, { text: string; variant: 'critical' | 'high' | 'medium' | 'low' | 'info' }> = {
+  critical: { text: 'CRITICAL', variant: 'critical' },
+  high: { text: 'HIGH', variant: 'high' },
+  medium: { text: 'MEDIUM', variant: 'medium' },
+  low: { text: 'LOW', variant: 'low' },
+  info: { text: 'INFO', variant: 'info' },
+};
 
 interface FindingListProps {
   findings: Finding[]
@@ -29,7 +28,7 @@ interface FindingListProps {
 }
 
 /**
- * 漏洞列表组件
+ * Finding list component with cyberpunk theme
  */
 export default function FindingList({
   findings,
@@ -40,118 +39,135 @@ export default function FindingList({
   onPageChange,
   onViewDetail,
 }: FindingListProps) {
-  const columns: ColumnsType<Finding> = [
-    {
-      title: 'ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 60,
-    },
-    {
-      title: '漏洞类型',
-      dataIndex: 'vuln_type',
-      key: 'vuln_type',
-      ellipsis: true,
-      width: 150,
-    },
-    {
-      title: '严重程度',
-      dataIndex: 'severity',
-      key: 'severity',
-      width: 90,
-      render: (severity: SeverityLevel) => {
-        const config = SEVERITY_MAP[severity]
-        return <Tag color={config.color}>{config.text}</Tag>
-      },
-      sorter: (a, b) => {
-        const order = { critical: 5, high: 4, medium: 3, low: 2, info: 1 }
-        return order[a.severity] - order[b.severity]
-      },
-    },
-    {
-      title: '置信度',
-      dataIndex: 'confidence',
-      key: 'confidence',
-      width: 80,
-      render: (confidence: number) => (
-        <Progress
-          percent={Math.round(confidence * 100)}
-          size="small"
-          status={confidence > 0.8 ? 'exception' : 'normal'}
-        />
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 90,
-      render: (status: FindingStatus) => {
-        const config = STATUS_MAP[status]
-        return <Tag color={config.color}>{config.text}</Tag>
-      },
-    },
-    {
-      title: '文件位置',
-      key: 'location',
-      ellipsis: true,
-      render: (_, record) => (
-        <span style={{ fontSize: '12px' }}>
-          {record.file_path.split('/').slice(-2).join('/')}:{record.line_start}
-        </span>
-      ),
-    },
-    {
-      title: '函数',
-      dataIndex: 'function_name',
-      key: 'function_name',
-      ellipsis: true,
-      width: 120,
-      render: (name) => name || '-',
-    },
-    {
-      title: '引擎',
-      dataIndex: 'engine',
-      key: 'engine',
-      width: 80,
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 80,
-      fixed: 'right' as const,
-      render: (_, record) => (
-        <Button
-          type="link"
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={() => onViewDetail(record)}
-        >
-          详情
-        </Button>
-      ),
-    },
-  ]
+  // Sort findings by severity
+  const sortedFindings = [...findings].sort((a, b) => {
+    const order = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
+    return order[b.severity] - order[a.severity];
+  });
 
   return (
-    <Table
-      rowKey="id"
-      columns={columns}
-      dataSource={findings}
-      loading={loading}
-      pagination={{
-        current: page,
-        pageSize: pageSize,
-        total: total,
-        showSizeChanger: true,
-        showTotal: (total) => `共 ${total} 个漏洞`,
-        onChange: onPageChange,
-      }}
-      scroll={{ x: 800 }}
-      onRow={(record) => ({
-        onClick: () => onViewDetail(record),
-        style: { cursor: 'pointer' },
-      })}
-    />
-  )
+    <div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-20 text-cyan">ID</TableHead>
+            <TableHead>VULN TYPE</TableHead>
+            <TableHead className="w-28">SEVERITY</TableHead>
+            <TableHead className="w-32">CONFIDENCE</TableHead>
+            <TableHead className="w-28">STATUS</TableHead>
+            <TableHead>LOCATION</TableHead>
+            <TableHead className="w-28">FUNCTION</TableHead>
+            <TableHead className="w-20">ENGINE</TableHead>
+            <TableHead className="w-20 text-right">ACTION</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {loading ? (
+            <TableRow>
+              <TableCell colSpan={9} className="text-center text-text-secondary font-mono">
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-2 h-2 bg-cyan rounded-full animate-ping" />
+                  LOADING...
+                </span>
+              </TableCell>
+            </TableRow>
+          ) : sortedFindings.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={9} className="text-center text-text-tertiary font-mono py-8">
+                NO FINDINGS DETECTED
+              </TableCell>
+            </TableRow>
+          ) : (
+            sortedFindings.map((finding) => {
+              const statusConfig = STATUS_MAP[finding.status];
+              const severityConfig = SEVERITY_MAP[finding.severity];
+              const confidence = Math.round(finding.confidence * 100);
+              const filePath = finding.file_path.split('/').slice(-2).join('/');
+
+              return (
+                <TableRow
+                  key={finding.id}
+                  onClick={() => onViewDetail(finding)}
+                  className="cursor-pointer"
+                >
+                  <TableCell className="font-mono text-cyan">#{String(finding.id).padStart(4, '0')}</TableCell>
+                  <TableCell className="font-medium text-text-primary">{finding.vuln_type}</TableCell>
+                  <TableCell>
+                    <Badge variant={severityConfig.variant} className="min-w-[90px] justify-center">
+                      {severityConfig.text}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Progress
+                      value={confidence}
+                      variant={confidence > 80 ? 'critical' : 'cyan'}
+                      className="h-2"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={statusConfig.variant} className="min-w-[90px] justify-center">
+                      {statusConfig.text}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-text-secondary font-mono text-xs">
+                    {filePath}:{finding.line_start}
+                  </TableCell>
+                  <TableCell className="text-text-secondary font-mono text-xs">
+                    {finding.function_name || '-'}
+                  </TableCell>
+                  <TableCell className="text-text-tertiary font-mono text-xs">
+                    {finding.engine}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onViewDetail(finding);
+                      }}
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })
+          )}
+        </TableBody>
+      </Table>
+
+      {/* Pagination */}
+      {total > 0 && (
+        <div className="flex items-center justify-between border-t border-border p-4 mt-4">
+          <span className="text-sm text-text-secondary font-mono">
+            TOTAL: {String(total).padStart(3, '0')} FINDINGS
+          </span>
+          <div className="flex items-center gap-4">
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={page === 1}
+              onClick={() => onPageChange(page, pageSize)}
+              className="w-10 h-10"
+            >
+              &larr;
+            </Button>
+            <span className="font-mono text-cyan text-sm">
+              {String(page).padStart(2, '0')}
+            </span>
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={page * pageSize >= total}
+              onClick={() => onPageChange(page + 1, pageSize)}
+              className="w-10 h-10"
+            >
+              &rarr;
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

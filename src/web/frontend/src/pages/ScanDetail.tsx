@@ -1,50 +1,47 @@
-import { useParams, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import {
   Card,
-  Row,
-  Col,
-  Statistic,
-  Tag,
+  Badge,
   Button,
-  Space,
   Progress,
   Descriptions,
-  Timeline,
   Alert,
-  Spin,
-  Collapse,
-  List,
-  Typography,
-} from 'antd'
+  LoadingPage,
+  Statistic,
+  Timeline,
+} from '@/components/ui';
 import {
-  ArrowLeftOutlined,
-  PlayCircleOutlined,
-  PauseCircleOutlined,
-  StopOutlined,
-  BugOutlined,
-  MessageOutlined,
-} from '@ant-design/icons'
-import { useScan, useScanFindings } from '@/hooks/useApi'
-import { useScanProgress } from '@/hooks/useScanProgress'
-import { ScanProgress } from '@/components/scan'
-import type { ScanStatus } from '@/types/models'
+  ArrowLeft,
+  Play,
+  Pause,
+  Square,
+  MessageSquare,
+  Check,
+  Loader2,
+  Clock,
+  X,
+} from 'lucide-react';
+import { useScan, useScanFindings } from '@/hooks/useApi';
+import { useScanProgress } from '@/hooks/useScanProgress';
+import { ScanProgress } from '@/components/scan';
+import type { ScanStatus } from '@/types/models';
 
-const STATUS_MAP: Record<ScanStatus, { text: string; color: string }> = {
-  pending: { text: '等待中', color: 'default' },
-  running: { text: '扫描中', color: 'processing' },
-  paused: { text: '已暂停', color: 'warning' },
-  completed: { text: '已完成', color: 'success' },
-  failed: { text: '失败', color: 'error' },
-  cancelled: { text: '已取消', color: 'default' },
-}
+const STATUS_MAP: Record<string, { text: string; variant: 'pending' | 'running' | 'completed' | 'failed' }> = {
+  pending: { text: 'WAITING', variant: 'pending' },
+  running: { text: 'SCANNING', variant: 'running' },
+  paused: { text: 'PAUSED', variant: 'pending' },
+  completed: { text: 'COMPLETE', variant: 'completed' },
+  failed: { text: 'FAILED', variant: 'failed' },
+  cancelled: { text: 'CANCELLED', variant: 'failed' },
+};
 
 export default function ScanDetailPage() {
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const scanId = parseInt(id || '0')
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const scanId = parseInt(id || '0');
 
-  const { data: scan, isLoading, error } = useScan(scanId)
+  const { data: scan, isLoading, error } = useScan(scanId);
   const {
     progress,
     status: progressStatus,
@@ -55,397 +52,351 @@ export default function ScanDetailPage() {
     cancel,
   } = useScanProgress(isNaN(scanId) ? null : scanId, {
     enabled: !isNaN(scanId),
-  })
+  });
 
-  // 获取事件流
-  const [events, setEvents] = useState<any[]>([])
-  const [eventsLoading, setEventsLoading] = useState(false)
+  // Get events stream
+  const [events, setEvents] = useState<any[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
 
-  // 加载事件流
+  // Load events
   useEffect(() => {
     if (scanId && !isNaN(scanId)) {
       const loadEvents = async () => {
-        setEventsLoading(true)
+        setEventsLoading(true);
         try {
-          const { scansApi } = await import('@/api')
-          const data = await scansApi.getEvents(scanId, { page: 1, page_size: 50 })
-          setEvents(data.events || [])
+          const { scansApi } = await import('@/api');
+          const data = await scansApi.getEvents(scanId, { page: 1, page_size: 50 });
+          setEvents(data.events || []);
         } catch (err) {
-          console.error('Failed to load events:', err)
+          console.error('Failed to load events:', err);
         } finally {
-          setEventsLoading(false)
+          setEventsLoading(false);
         }
-      }
-      loadEvents()
+      };
+      loadEvents();
     }
-  }, [scanId])
+  }, [scanId]);
 
-  // 使用 progress 或 scan 的状态（优先使用 progress）
-  const currentStatus = (progress?.status || scan?.status || 'pending') as ScanStatus
-  const statusConfig = STATUS_MAP[currentStatus] || { text: currentStatus, color: 'default' }
+  // Use progress or scan status (prefer progress)
+  const currentStatus = (progress?.status || scan?.status || 'pending') as ScanStatus;
+  const statusConfig = STATUS_MAP[currentStatus] || { text: currentStatus, variant: 'pending' as const };
 
-  // 计算控制按钮的可用状态
-  const canPause = currentStatus === 'running'
-  const canResume = currentStatus === 'paused'
-  const canCancel = ['pending', 'running', 'paused'].includes(currentStatus)
+  // Calculate control button availability
+  const canPause = currentStatus === 'running';
+  const canResume = currentStatus === 'paused';
+  const canCancel = ['pending', 'running', 'paused'].includes(currentStatus);
 
   const handlePause = async () => {
     try {
-      await pause()
+      await pause();
     } catch (err) {
-      console.error('Failed to pause:', err)
+      console.error('Failed to pause:', err);
     }
-  }
+  };
 
   const handleResume = async () => {
     try {
-      await resume()
+      await resume();
     } catch (err) {
-      console.error('Failed to resume:', err)
+      console.error('Failed to resume:', err);
     }
-  }
+  };
 
   const handleCancel = async () => {
     try {
-      await cancel()
+      await cancel();
     } catch (err) {
-      console.error('Failed to cancel:', err)
+      console.error('Failed to cancel:', err);
     }
-  }
+  };
 
   if (isNaN(scanId)) {
     return (
-      <Alert
-        message="无效的扫描 ID"
-        type="error"
-        showIcon
-        action={
-          <Button size="small" onClick={() => navigate('/scans')}>
-            返回列表
-          </Button>
-        }
-      />
-    )
+      <div className="p-6">
+        <Alert variant="critical" title="INVALID SCAN ID">
+          <div className="mt-4">
+            <Button variant="outline" onClick={() => navigate('/scans')}>
+              RETURN TO SCAN LIST
+            </Button>
+          </div>
+        </Alert>
+      </div>
+    );
   }
 
   if (isLoading) {
-    return (
-      <div style={{ textAlign: 'center', padding: '100px 0' }}>
-        <Spin size="large" />
-      </div>
-    )
+    return <LoadingPage message="INITIALIZING..." />;
   }
 
   if (error || !scan) {
     return (
-      <Alert
-        message="加载失败"
-        description="无法加载扫描详情，请稍后重试。"
-        type="error"
-        showIcon
-        action={
-          <Button size="small" onClick={() => navigate('/scans')}>
-            返回列表
-          </Button>
-        }
-      />
-    )
+      <div className="p-6">
+        <Alert variant="critical" title="LOADING FAILED">
+          Unable to load scan details. Please try again later.
+          <div className="mt-4">
+            <Button variant="outline" onClick={() => navigate('/scans')}>
+              RETURN TO SCAN LIST
+            </Button>
+          </div>
+        </Alert>
+      </div>
+    );
   }
 
   return (
-    <div>
-      {/* 头部 */}
-      <div style={{ marginBottom: 16 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/scans')}>
-          返回扫描列表
+    <div className="p-6">
+      {/* Header */}
+      <div className="mb-6">
+        <Button variant="outline" size="sm" onClick={() => navigate('/scans')}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          RETURN TO SCAN LIST
         </Button>
       </div>
 
-      {/* 状态卡片 */}
-      <Card
-        title={
-          <Space>
-            <span>扫描 #{scan.id}</span>
-            <Tag color={statusConfig.color}>{statusConfig.text}</Tag>
-            {usingPolling && <Tag color="orange">轮询模式</Tag>}
-            {wsState === 'connected' && <Tag color="green">实时连接</Tag>}
-          </Space>
-        }
-        extra={
-          <Space>
+      {/* Status Card */}
+      <Card className="glass-panel mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-cyan font-bold text-lg">SCAN #{String(scan.id).padStart(4, '0')}</span>
+            <Badge variant={statusConfig.variant}>{statusConfig.text}</Badge>
+            {usingPolling && <Badge variant="high">POLLING MODE</Badge>}
+            {wsState === 'connected' && <Badge variant="running">LIVE</Badge>}
+          </div>
+          <div className="flex gap-2">
             {canPause && (
-              <Button icon={<PauseCircleOutlined />} onClick={handlePause}>
-                暂停
+              <Button variant="outline" size="sm" onClick={handlePause}>
+                <Pause className="mr-2 h-4 w-4" />
+                PAUSE
               </Button>
             )}
             {canResume && (
-              <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleResume}>
-                继续
+              <Button size="sm" onClick={handleResume}>
+                <Play className="mr-2 h-4 w-4" />
+                RESUME
               </Button>
             )}
             {canCancel && (
-              <Button danger icon={<StopOutlined />} onClick={handleCancel}>
-                取消
+              <Button variant="destructive" size="sm" onClick={handleCancel}>
+                <Square className="mr-2 h-4 w-4" />
+                CANCEL
               </Button>
             )}
-          </Space>
-        }
-        style={{ marginBottom: 16 }}
-      >
-        <Descriptions size="small" column={3}>
-          <Descriptions.Item label="项目 ID">{scan.project_id}</Descriptions.Item>
-          <Descriptions.Item label="扫描类型">
-            {scan.scan_type === 'full' ? '完整扫描' : scan.scan_type === 'base' ? '基础扫描' : '增量扫描'}
-          </Descriptions.Item>
-          <Descriptions.Item label="创建时间">
-            {new Date(scan.created_at).toLocaleString('zh-CN')}
-          </Descriptions.Item>
-        </Descriptions>
+          </div>
+        </div>
 
-        {/* 进度条 */}
+        <Descriptions
+          items={[
+            {
+              label: 'SCAN ID',
+              value: <span className="text-cyan font-mono">#{String(scan.id).padStart(4, '0')}</span>,
+            },
+            {
+              label: 'SCAN TYPE',
+              value: scan.scan_type === 'full' ? 'FULL SCAN' : scan.scan_type === 'base' ? 'BASE SCAN' : 'INCREMENTAL',
+            },
+            {
+              label: 'CREATED',
+              value: new Date(scan.created_at).toLocaleString('zh-CN'),
+            },
+          ]}
+          columns={3}
+        />
+
+        {/* Progress Bar */}
         {currentStatus !== 'failed' && currentStatus !== 'cancelled' && (
-          <div style={{ marginTop: 16 }}>
+          <div className="mt-6">
             <Progress
-              percent={progress?.progress_percent || scan.progress_percent || 0}
-              status={currentStatus === 'running' ? 'active' : currentStatus === 'completed' ? 'success' : 'normal'}
+              value={progress?.progress_percent || scan.progress_percent || 0}
+              variant={currentStatus === 'running' ? 'cyan' : currentStatus === 'completed' ? 'green' : 'default'}
+              className="h-3"
             />
             {scan.current_phase && (
-              <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
-                当前阶段: {scan.current_phase}
-                {scan.current_step && ` - ${scan.current_step}`}
+              <div className="mt-3 text-text-secondary font-mono text-sm flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-cyan" />
+                <span>PHASE: {scan.current_phase}</span>
+                {scan.current_step && <span className="text-text-tertiary">// {scan.current_step}</span>}
               </div>
             )}
           </div>
         )}
       </Card>
 
-      {/* 统计信息 */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
-          <Card>
-            <Statistic title="总文件数" value={scan.total_files || 0} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic title="已索引" value={scan.indexed_files || 0} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic title="已分析" value={scan.analyzed_files || 0} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic
-              title="发现漏洞"
-              value={scan.findings_count || 0}
-              valueStyle={{ color: (scan.findings_count || 0) > 0 ? '#cf1322' : undefined }}
-            />
-          </Card>
-        </Col>
-      </Row>
+      {/* Statistics Grid */}
+      <div className="grid grid-cols-4 gap-4 mb-6">
+        <Statistic title="TOTAL FILES" value={scan.total_files || 0} />
+        <Statistic title="INDEXED" value={scan.indexed_files || 0} />
+        <Statistic title="ANALYZED" value={scan.analyzed_files || 0} />
+        <Statistic
+          title="FINDINGS"
+          value={scan.findings_count || 0}
+          valueClassName={(scan.findings_count || 0) > 0 ? 'text-critical' : ''}
+        />
+      </div>
 
-      {/* Token 使用情况 */}
+      {/* Token Usage */}
       {(scan.tokens_used !== null || scan.tokens_budget !== null) && (
-        <Card title="Token 使用情况" style={{ marginBottom: 16 }}>
-          <Row gutter={16}>
-            <Col span={8}>
-              <Statistic title="已使用" value={scan.tokens_used || 0} />
-            </Col>
-            <Col span={8}>
-              <Statistic title="预算" value={scan.tokens_budget || 0} />
-            </Col>
-            <Col span={8}>
-              <Statistic
-                title="剩余"
-                value={(scan.tokens_budget || 0) - (scan.tokens_used || 0)}
-                valueStyle={{
-                  color:
-                    (scan.tokens_budget || 0) - (scan.tokens_used || 0) <
-                    (scan.tokens_budget || 0) * 0.2
-                      ? '#cf1322'
-                      : undefined,
-                }}
-              />
-            </Col>
-          </Row>
+        <Card className="glass-panel mb-6">
+          <h3 className="text-cyan font-mono font-bold mb-4">TOKEN USAGE</h3>
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <Statistic title="USED" value={scan.tokens_used || 0} />
+            <Statistic title="BUDGET" value={scan.tokens_budget || 0} />
+            <Statistic
+              title="REMAINING"
+              value={(scan.tokens_budget || 0) - (scan.tokens_used || 0)}
+              valueClassName={
+                (scan.tokens_budget || 0) - (scan.tokens_used || 0) < (scan.tokens_budget || 0) * 0.2
+                  ? 'text-critical'
+                  : ''
+              }
+            />
+          </div>
           {scan.tokens_budget && scan.tokens_used && (
-            <div style={{ marginTop: 16 }}>
-              <Progress
-                percent={Math.round((scan.tokens_used / scan.tokens_budget) * 100)}
-                status={
-                  (scan.tokens_used / scan.tokens_budget) > 0.9 ? 'exception' : 'normal'
-                }
-              />
-            </div>
+            <Progress
+              value={Math.round((scan.tokens_used / scan.tokens_budget) * 100)}
+              variant={scan.tokens_used / scan.tokens_budget > 0.9 ? 'critical' : 'cyan'}
+              className="h-2"
+            />
           )}
         </Card>
       )}
 
-      {/* 漏洞统计 */}
-      <Card
-        title="漏洞分布"
-        style={{ marginBottom: 16 }}
-        extra={
-          scan.findings_count && scan.findings_count > 0 ? (
-            <Button type="primary" size="small" onClick={() => navigate(`/scans/${scan.id}/findings`)}>
-              查看漏洞列表
+      {/* Vulnerability Distribution */}
+      <Card className="glass-panel mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-cyan font-mono font-bold">VULNERABILITY DISTRIBUTION</h3>
+          {scan.findings_count && scan.findings_count > 0 && (
+            <Button size="sm" onClick={() => navigate(`/scans/${scan.id}/findings`)}>
+              VIEW ALL FINDINGS
             </Button>
-          ) : null
-        }
-      >
-        <Row gutter={16}>
-          <Col span={4}>
-            <Statistic
-              title="严重"
-              value={scan.critical_count || 0}
-              valueStyle={{ color: '#cf1322' }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="高危"
-              value={scan.high_count || 0}
-              valueStyle={{ color: '#ff4d4f' }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="中危"
-              value={scan.medium_count || 0}
-              valueStyle={{ color: '#faad14' }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="低危"
-              value={scan.low_count || 0}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="信息"
-              value={scan.info_count || 0}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="已验证"
-              value={scan.verified_count || 0}
-              valueStyle={{ color: '#722ed1' }}
-            />
-          </Col>
-        </Row>
+          )}
+        </div>
+        <div className="grid grid-cols-6 gap-4">
+          <Statistic
+            title="CRITICAL"
+            value={scan.critical_count || 0}
+            valueClassName={scan.critical_count ? 'text-critical' : ''}
+          />
+          <Statistic
+            title="HIGH"
+            value={scan.high_count || 0}
+            valueClassName={scan.high_count ? 'text-warning' : ''}
+          />
+          <Statistic
+            title="MEDIUM"
+            value={scan.medium_count || 0}
+            valueClassName={scan.medium_count ? 'text-yellow-500' : ''}
+          />
+          <Statistic
+            title="LOW"
+            value={scan.low_count || 0}
+            valueClassName={scan.low_count ? 'text-success' : ''}
+          />
+          <Statistic
+            title="INFO"
+            value={scan.info_count || 0}
+            valueClassName={scan.info_count ? 'text-text-secondary' : ''}
+          />
+          <Statistic
+            title="VERIFIED"
+            value={scan.verified_count || 0}
+            valueClassName={scan.verified_count ? 'text-purple-400' : ''}
+          />
+        </div>
       </Card>
 
-      {/* 阶段时间线 */}
+      {/* Phase Timeline */}
       {progress?.phases && progress.phases.length > 0 && (
-        <Card title="扫描阶段">
-          <Timeline>
-            {progress.phases.map((phase, index) => {
-              const isRunning = phase.status === 'running'
-              const isCompleted = phase.status === 'completed'
-              const isPending = phase.status === 'pending'
+        <Card className="glass-panel mb-6">
+          <h3 className="text-cyan font-mono font-bold mb-4">SCAN TIMELINE</h3>
+          <Timeline
+            items={progress.phases.map((phase) => {
+              const statusMap: Record<string, 'completed' | 'running' | 'pending' | 'failed'> = {
+                completed: 'completed',
+                running: 'running',
+                pending: 'pending',
+                failed: 'failed',
+              };
 
-              return (
-                <Timeline.Item
-                  key={index}
-                  color={isCompleted ? 'green' : isRunning ? 'blue' : isPending ? 'gray' : 'red'}
-                >
-                  <div>
-                    <strong>{phase.name}</strong>
-                    <Tag
-                      color={
-                        isCompleted
-                          ? 'success'
-                          : isRunning
-                          ? 'processing'
-                          : isPending
-                          ? 'default'
-                          : 'error'
-                      }
-                      style={{ marginLeft: 8 }}
-                    >
-                      {phase.status}
-                    </Tag>
+              return {
+                status: statusMap[phase.status] || 'pending',
+                title: (
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono">{phase.name}</span>
+                    <Badge variant={STATUS_MAP[phase.status]?.variant || 'pending'}>
+                      {phase.status.toUpperCase()}
+                    </Badge>
                   </div>
-                  {isRunning && (
-                    <Progress
-                      percent={phase.progress_percent}
-                      size="small"
-                      style={{ marginTop: 8 }}
-                    />
-                  )}
-                  <div style={{ marginTop: 4, fontSize: 12, color: '#666' }}>
-                    {phase.duration_seconds && `耗时: ${phase.duration_seconds.toFixed(1)}秒`}
-                    {phase.findings > 0 && ` | 发现: ${phase.findings} 个漏洞`}
-                    {phase.tokens_used > 0 && ` | Tokens: ${phase.tokens_used}`}
+                ),
+                description: phase.status === 'completed' ? (
+                  <div className="text-xs text-text-secondary font-mono mt-2 space-y-1">
+                    <span>DURATION: {phase.duration_seconds?.toFixed(1)}s</span>
+                    {phase.findings > 0 && <span> | FINDINGS: {phase.findings}</span>}
+                    {phase.tokens_used > 0 && <span> | TOKENS: {phase.tokens_used}</span>}
                   </div>
-                </Timeline.Item>
-              )
+                ) : undefined,
+                progress: phase.progress_percent,
+              };
             })}
-          </Timeline>
+          />
         </Card>
       )}
 
-      {/* 使用 ScanProgress 组件显示详细进度 */}
+      {/* Real-time Progress */}
       {currentStatus === 'running' && progress && (
-        <Card title="实时进度" style={{ marginBottom: 16 }}>
+        <Card className="glass-panel mb-6">
+          <h3 className="text-cyan font-mono font-bold mb-4">REAL-TIME PROGRESS</h3>
           <ScanProgress progress={progress} />
         </Card>
       )}
 
-      {/* 事件流 */}
-      <Card
-        title={
-          <Space>
-            <MessageOutlined />
-            <span>事件流</span>
-          </Space>
-        }
-      >
-        <List
-          size="small"
-          loading={eventsLoading}
-          dataSource={events}
-          renderItem={(item: any) => (
-            <List.Item>
-              <List.Item.Meta
-                avatar={
-                  <Tag color={
-                    item.event_level === 'error' ? 'red' :
-                    item.event_level === 'warning' ? 'orange' :
-                    item.event_level === 'info' ? 'blue' : 'default'
-                  }>
-                    {item.event_type}
-                  </Tag>
-                }
-                title={
-                  <span style={{ fontSize: 12 }}>
-                    {item.message}
-                    {item.file_path && (
-                      <code style={{ marginLeft: 8, color: '#666' }}>{item.file_path}</code>
-                    )}
-                  </span>
-                }
-                description={
-                  <span style={{ fontSize: 11, color: '#999' }}>
-                    {new Date(item.created_at).toLocaleTimeString('zh-CN')}
-                  </span>
-                }
-              />
-            </List.Item>
+      {/* Events Log */}
+      <Card className="glass-panel">
+        <div className="flex items-center gap-2 mb-4">
+          <MessageSquare className="h-5 w-5 text-cyan" />
+          <h3 className="text-cyan font-mono font-bold">EVENT LOG</h3>
+        </div>
+        <div className="space-y-2 font-mono text-sm max-h-96 overflow-y-auto">
+          {eventsLoading ? (
+            <div className="text-center text-text-secondary py-8">
+              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+              LOADING EVENTS...
+            </div>
+          ) : events.length === 0 ? (
+            <div className="text-center text-text-tertiary py-8">NO EVENTS RECORDED</div>
+          ) : (
+            events.map((event: any, index: number) => (
+              <div
+                key={index}
+                className="flex items-start gap-3 p-3 rounded bg-background-tertiary border border-border hover:border-cyan/50 transition-colors"
+              >
+                <Badge
+                  variant={
+                    event.event_level === 'error'
+                      ? 'critical'
+                      : event.event_level === 'warning'
+                      ? 'high'
+                      : event.event_level === 'info'
+                      ? 'info'
+                      : 'pending'
+                  }
+                  className="shrink-0"
+                >
+                  {event.event_type}
+                </Badge>
+                <div className="flex-1 min-w-0">
+                  <div className="text-text-primary">{event.message}</div>
+                  {event.file_path && (
+                    <div className="text-text-tertiary text-xs mt-1">{event.file_path}</div>
+                  )}
+                </div>
+                <div className="text-text-tertiary text-xs whitespace-nowrap">
+                  {new Date(event.created_at).toLocaleTimeString('zh-CN')}
+                </div>
+              </div>
+            ))
           )}
-          pagination={{
-            pageSize: 20,
-            showSizeChanger: false,
-          }}
-        />
+        </div>
       </Card>
     </div>
-  )
+  );
 }

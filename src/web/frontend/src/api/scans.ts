@@ -20,7 +20,6 @@ export const scansApi = {
     page?: number
     page_size?: number
     status?: string
-    project_id?: number
   }): Promise<PaginatedResponse<Scan>> {
     const response = await client.get('/scans', { params })
     return response.data

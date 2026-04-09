@@ -1,141 +1,138 @@
-import React from 'react'
-import { Card, Progress, Tag, Space, Row, Col, Statistic, Timeline, Descriptions, Button } from 'antd'
-import {
-  CheckCircleOutlined,
-  SyncOutlined,
-  ClockCircleOutlined,
-  CloseCircleOutlined,
-  PauseCircleOutlined,
-} from '@ant-design/icons'
-import type { ScanProgressResponse, PhaseInfo } from '@/types/models'
+import React from 'react';
+import { Card, Badge, Progress, Statistic, Timeline } from '@/components/ui';
+import { Check, Loader2, Clock, X, Pause } from 'lucide-react';
+import type { ScanProgressResponse, PhaseInfo } from '@/types/models';
+import { cn } from '@/shared/utils/cn';
 
 interface ScanProgressProps {
-  progress: ScanProgressResponse | null
-  loading?: boolean
+  progress: ScanProgressResponse | null;
+  loading?: boolean;
 }
 
 const PHASE_LABELS: Record<string, string> = {
-  'L1_preparation': 'L1 准备阶段',
-  'L1_attack_surface': 'L1 攻击面分析',
-  'L2_semgrep': 'L2 Semgrep 扫描',
-  'L2_codeql': 'L2 CodeQL 扫描',
-  'L3_agent': 'L3 Agent 深度审计',
-  'L3_adjudication': 'L3 裁决融合',
-  'report_generation': '报告生成',
-}
+  'L1_preparation': 'L1 PREPARATION',
+  'L1_attack_surface': 'L1 ATTACK SURFACE',
+  'L2_semgrep': 'L2 SEMGREP',
+  'L2_codeql': 'L2 CODEQL',
+  'L3_agent': 'L3 AGENT AUDIT',
+  'L3_adjudication': 'L3 ADJUDICATION',
+  'report_generation': 'REPORT GENERATION',
+};
 
 const STATUS_ICONS: Record<string, React.ReactNode> = {
-  completed: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
-  running: <SyncOutlined spin style={{ color: '#1890ff' }} />,
-  pending: <ClockCircleOutlined style={{ color: '#bfbfbf' }} />,
-  failed: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
-  skipped: <PauseCircleOutlined style={{ color: '#bfbfbf' }} />,
-}
+  completed: <Check className="h-4 w-4" />,
+  running: <Loader2 className="h-4 w-4 animate-spin" />,
+  pending: <Clock className="h-4 w-4" />,
+  failed: <X className="h-4 w-4" />,
+  skipped: <Pause className="h-4 w-4" />,
+};
 
 export function ScanProgress({ progress, loading }: ScanProgressProps) {
   if (loading || !progress) {
     return (
-      <Card title="扫描进度" loading={loading}>
-        <div className="text-center text-gray-400 py-8">等待扫描数据...</div>
+      <Card className="glass-panel">
+        <div className="text-center text-text-secondary font-mono py-8">
+          <span className="inline-flex items-center gap-2">
+            <Loader2 className="h-5 w-5 animate-spin text-cyan" />
+            AWAITING SCAN DATA...
+          </span>
+        </div>
       </Card>
-    )
+    );
   }
 
-  const getStatusTag = (status: string) => {
-    const statusMap: Record<string, { text: string; color: string }> = {
-      pending: { text: '等待中', color: 'default' },
-      running: { text: '扫描中', color: 'processing' },
-      paused: { text: '已暂停', color: 'warning' },
-      completed: { text: '已完成', color: 'success' },
-      failed: { text: '失败', color: 'error' },
-      cancelled: { text: '已取消', color: 'default' },
-    }
-    const config = statusMap[status] || { text: status, color: 'default' }
-    return <Tag color={config.color}>{config.text}</Tag>
-  }
+  const getStatusBadge = (status: string) => {
+    const statusMap: Record<string, 'pending' | 'running' | 'completed' | 'failed'> = {
+      pending: 'pending',
+      running: 'running',
+      paused: 'pending',
+      completed: 'completed',
+      failed: 'failed',
+      cancelled: 'failed',
+    };
+    return statusMap[status] || 'pending';
+  };
 
-  const getPhaseStatusIcon = (phase: PhaseInfo) => {
-    return STATUS_ICONS[phase.status] || STATUS_ICONS.pending
-  }
-
-  const getPhaseColor = (status: string) => {
-    const colorMap: Record<string, string> = {
-      completed: 'green',
-      running: 'blue',
-      pending: 'gray',
-      failed: 'red',
-      skipped: 'default',
-    }
-    return colorMap[status] || 'default'
-  }
+  const getPhaseStatus = (phase: PhaseInfo) => {
+    const statusMap: Record<string, 'completed' | 'running' | 'pending' | 'failed'> = {
+      completed: 'completed',
+      running: 'running',
+      pending: 'pending',
+      failed: 'failed',
+      skipped: 'pending',
+    };
+    return statusMap[phase.status] || 'pending';
+  };
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="large">
-      {/* 总体进度 */}
-      <Card title="扫描状态" size="small">
-        <Row gutter={16} align="middle">
-          <Col span={16}>
-            <div className="mb-2">
-              <span className="text-gray-600">总体进度: </span>
-              {getStatusTag(progress.status)}
+    <div className="space-y-4">
+      {/* Overall Progress */}
+      <Card className="glass-panel">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-cyan font-mono font-bold">SCAN STATUS</h3>
+          <Badge variant={getStatusBadge(progress.status)}>
+            {progress.status.toUpperCase()}
+          </Badge>
+        </div>
+        <Progress
+          value={progress.progress_percent}
+          variant={progress.status === 'failed' ? 'critical' : progress.status === 'completed' ? 'green' : 'cyan'}
+          className="h-3 mb-3"
+        />
+        {progress.current_step && (
+          <div className="text-sm text-text-secondary font-mono">{progress.current_step}</div>
+        )}
+
+        {/* Quick Stats */}
+        <div className="grid grid-cols-3 gap-4 mt-6">
+          <div className="text-center">
+            <div className="text-2xl font-bold font-mono text-cyan">
+              {progress.analyzed_files}/{progress.total_files}
             </div>
-            <Progress
-              percent={progress.progress_percent}
-              status={progress.status === 'failed' ? 'exception' :
-                     progress.status === 'completed' ? 'success' : 'active'}
-              strokeColor={{
-                '0%': '#108ee9',
-                '100%': '#87d068',
-              }}
-            />
-            {progress.current_step && (
-              <div className="text-sm text-gray-500 mt-2">{progress.current_step}</div>
-            )}
-          </Col>
-          <Col span={8}>
-            <Row gutter={8}>
-              <Col span={8}>
-                <Statistic title="文件" value={progress.analyzed_files} suffix={`/ ${progress.total_files}`} />
-              </Col>
-              <Col span={8}>
-                <Statistic title="漏洞" value={progress.findings.total} />
-              </Col>
-              <Col span={8}>
-                <Statistic title="Token" value={progress.tokens.used} suffix={`/ ${progress.tokens.budget}`} />
-              </Col>
-            </Row>
-          </Col>
-        </Row>
+            <div className="text-xs text-text-secondary font-mono mt-1">FILES</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold font-mono text-critical">
+              {progress.findings.total}
+            </div>
+            <div className="text-xs text-text-secondary font-mono mt-1">VULNS</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold font-mono text-warning">
+              {progress.tokens.used}
+            </div>
+            <div className="text-xs text-text-secondary font-mono mt-1">TOKENS</div>
+          </div>
+        </div>
       </Card>
 
-      {/* 阶段进度 */}
-      <Card title="扫描阶段" size="small">
+      {/* Phase Progress */}
+      <Card className="glass-panel">
+        <h3 className="text-cyan font-mono font-bold mb-4">SCAN PHASES</h3>
         <Timeline
           items={progress.phases.map((phase) => ({
-            color: getPhaseColor(phase.status),
-            dot: getPhaseStatusIcon(phase),
-            children: (
-              <div>
-                <div className="flex justify-between items-center">
-                  <span className="font-medium">
-                    {PHASE_LABELS[phase.name] || phase.name}
-                  </span>
-                  <Tag color={getPhaseColor(phase.status)}>{phase.status}</Tag>
-                </div>
+            status: getPhaseStatus(phase),
+            title: (
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-sm">
+                  {PHASE_LABELS[phase.name] || phase.name}
+                </span>
+                <Badge variant={getStatusBadge(phase.status)} className="min-w-[80px] justify-center">
+                  {phase.status.toUpperCase()}
+                </Badge>
+              </div>
+            ),
+            description: (
+              <div className="space-y-2 mt-2">
                 {phase.status === 'running' && (
-                  <Progress
-                    percent={phase.progress_percent}
-                    size="small"
-                    showInfo={false}
-                    className="mt-1"
-                  />
+                  <Progress value={phase.progress_percent} variant="cyan" className="h-1" />
                 )}
                 {phase.status === 'completed' && (
-                  <Descriptions size="small" column={3} className="mt-1">
-                    <Descriptions.Item label="耗时">{phase.duration_seconds?.toFixed(1)}s</Descriptions.Item>
-                    <Descriptions.Item label="漏洞">{phase.findings}</Descriptions.Item>
-                    <Descriptions.Item label="Token">{phase.tokens_used}</Descriptions.Item>
-                  </Descriptions>
+                  <div className="flex gap-4 text-xs font-mono text-text-secondary">
+                    <span>TIME: {phase.duration_seconds?.toFixed(1)}s</span>
+                    {phase.findings > 0 && <span>VULNS: {phase.findings}</span>}
+                    {phase.tokens_used > 0 && <span>TOKENS: {phase.tokens_used}</span>}
+                  </div>
                 )}
               </div>
             ),
@@ -143,86 +140,71 @@ export function ScanProgress({ progress, loading }: ScanProgressProps) {
         />
       </Card>
 
-      {/* 引擎状态 */}
-      <Card title="引擎状态" size="small">
-        <Descriptions size="small" column={3} bordered>
-          <Descriptions.Item label="已完成">
-            <Space>
+      {/* Engine Status */}
+      <Card className="glass-panel">
+        <h3 className="text-cyan font-mono font-bold mb-4">ENGINE STATUS</h3>
+        <div className="space-y-3 font-mono text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-text-secondary">COMPLETED:</span>
+            <div className="flex gap-2">
               {progress.engines.completed.map((engine) => (
-                <Tag key={engine} color="green">{engine}</Tag>
+                <Badge key={engine} variant="completed">{engine}</Badge>
               ))}
-              {progress.engines.completed.length === 0 && <span className="text-gray-400">-</span>}
-            </Space>
-          </Descriptions.Item>
-          <Descriptions.Item label="运行中">
-            <Space>
+              {progress.engines.completed.length === 0 && <span className="text-text-tertiary">--</span>}
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-text-secondary">RUNNING:</span>
+            <div className="flex gap-2">
               {progress.engines.running ? (
-                <Tag color="blue" icon={<SyncOutlined spin />}>{progress.engines.running}</Tag>
+                <Badge variant="running">{progress.engines.running}</Badge>
               ) : (
-                <span className="text-gray-400">-</span>
+                <span className="text-text-tertiary">--</span>
               )}
-            </Space>
-          </Descriptions.Item>
-          <Descriptions.Item label="等待中">
-            <Space>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-text-secondary">PENDING:</span>
+            <div className="flex gap-2">
               {progress.engines.pending.map((engine) => (
-                <Tag key={engine} color="default">{engine}</Tag>
+                <Badge key={engine} variant="pending">{engine}</Badge>
               ))}
-              {progress.engines.pending.length === 0 && <span className="text-gray-400">-</span>}
-            </Space>
-          </Descriptions.Item>
-        </Descriptions>
+              {progress.engines.pending.length === 0 && <span className="text-text-tertiary">--</span>}
+            </div>
+          </div>
+        </div>
       </Card>
 
-      {/* 漏洞统计 */}
-      <Card title="漏洞统计" size="small">
-        <Row gutter={16}>
-          <Col span={4}>
-            <Statistic
-              title="总计"
-              value={progress.findings.total}
-              valueStyle={{ color: progress.findings.total > 0 ? '#cf1322' : undefined }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="已验证"
-              value={progress.findings.verified}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="误报"
-              value={progress.findings.false_positive}
-              valueStyle={{ color: '#bfbfbf' }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="严重"
-              value={progress.findings.by_severity.critical}
-              valueStyle={{ color: progress.findings.by_severity.critical > 0 ? '#cf1322' : undefined }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="高危"
-              value={progress.findings.by_severity.high}
-              valueStyle={{ color: progress.findings.by_severity.high > 0 ? '#fa8c16' : undefined }}
-            />
-          </Col>
-          <Col span={4}>
-            <Statistic
-              title="中危"
-              value={progress.findings.by_severity.medium}
-              valueStyle={{ color: progress.findings.by_severity.medium > 0 ? '#fadb14' : undefined }}
-            />
-          </Col>
-        </Row>
+      {/* Vulnerability Statistics */}
+      <Card className="glass-panel">
+        <h3 className="text-cyan font-mono font-bold mb-4">VULNERABILITY STATS</h3>
+        <div className="grid grid-cols-6 gap-4">
+          <Statistic title="TOTAL" value={progress.findings.total} valueClassName="text-critical" />
+          <Statistic title="VERIFIED" value={progress.findings.verified} valueClassName="text-success" />
+          <Statistic
+            title="FALSE POS"
+            value={progress.findings.false_positive}
+            valueClassName="text-text-tertiary"
+          />
+          <Statistic
+            title="CRITICAL"
+            value={progress.findings.by_severity.critical}
+            valueClassName={progress.findings.by_severity.critical > 0 ? 'text-critical' : ''}
+          />
+          <Statistic
+            title="HIGH"
+            value={progress.findings.by_severity.high}
+            valueClassName={progress.findings.by_severity.high > 0 ? 'text-warning' : ''}
+          />
+          <Statistic
+            title="MEDIUM"
+            value={progress.findings.by_severity.medium}
+            valueClassName={progress.findings.by_severity.medium > 0 ? 'text-yellow-500' : ''}
+          />
+        </div>
       </Card>
-    </Space>
-  )
+    </div>
+  );
 }
 
-export default ScanProgress
+export default ScanProgress;

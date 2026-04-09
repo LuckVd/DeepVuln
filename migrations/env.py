@@ -18,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.web.models.database import Base
 # Import all models so they're registered with Base
-from src.web.models.project import Project
 from src.web.models.scan import Scan, ScanPhase, ScanEvent
 from src.web.models.finding import Finding
 from src.web.models.checkpoint import ScanFile, ApiKey
