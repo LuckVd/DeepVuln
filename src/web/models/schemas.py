@@ -277,7 +277,7 @@ class ScanResponse(BaseModel):
 
     # Statistics
     total_files: int = 0
-    analyzed_files: int = 0
+    analyzed_files: Optional[int] = 0
     findings_count: int = 0
     tokens_used: int = 0
     token_usage: Optional[dict] = None  # P14-05: 详细词元使用统计
