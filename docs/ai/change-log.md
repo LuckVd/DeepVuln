@@ -1,5 +1,51 @@
 # Change Log
 
+## 2026-04-11
+
+### P18: 配置系统迁移 - 完成 ✅
+
+- **Goal ID**: P18-config-migration
+- **Summary**: 移除 config.local.toml 依赖，所有配置迁移到数据库和前端设置
+- **影响范围**: 配置系统、后端 API、前端 UI、扫描任务
+- **核心变更**:
+  1. **数据库模型** (P18-01):
+     - `system_settings` 表：扫描配置、威胁情报 API Key
+     - `llm_configs` 表：LLM 配置管理（支持按类型获取默认配置）
+     - Alembic 迁移：004~007
+  2. **后端 API** (P18-02):
+     - `/api/v1/system-settings`：系统配置 CRUD
+     - `/api/v1/llm-configs/type/{config_type}`：按类型获取默认配置
+     - LLM 配置验证服务：支持连接测试
+  3. **扫描任务集成** (P18-03):
+     - `scan_tasks.py`：从数据库获取 LLM 配置
+     - `opencode_agent.py`：支持传入 LLM 客户端
+     - `adjudication.py`：对抗性验证使用正确的配置类型
+  4. **前端 UI** (P18-04):
+     - LLM 配置管理组件：添加/编辑/删除/测试连接
+     - 系统设置页面：扫描参数、API Key 配置
+     - 高级配置：max_retries, max_concurrent_requests, batch_size
+  5. **清理旧代码** (P18-05):
+     - 移除 `get_llm_config()` 中的 config.local.toml 读取
+     - 配置完全从数据库加载
+- **新增文件** (11 个):
+  - `migrations/versions/004_add_task_id_to_scans.py`
+  - `migrations/versions/005_add_llm_configs.py`
+  - `migrations/versions/006_add_llm_advanced_fields.py`
+  - `migrations/versions/007_create_system_settings.py`
+  - `src/web/api/v1/llm_configs.py`
+  - `src/web/api/v1/system_settings.py`
+  - `src/web/models/llm_config.py`
+  - `src/web/models/system_setting.py`
+  - `src/web/repositories/llm_config.py`
+  - `src/web/repositories/system_setting.py`
+  - `src/web/services/llm_config_service.py`
+  - `src/web/services/llm_validation.py`
+- **测试结果**: passed ✅
+- **安全检查**: ✅ config.local.toml 密钥已清理，API Key 迁移到数据库/环境变量
+- **死代码检测**: Settings.from_yaml() 方法未使用；ConfigLoader 类仅用于废弃功能
+
+---
+
 ## 2026-04-09 (续 3)
 
 ### P15: 代码质量改进 - 完成 ✅

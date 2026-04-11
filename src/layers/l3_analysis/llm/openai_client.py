@@ -58,7 +58,7 @@ class OpenAIClient(LLMClient):
 
         Args:
             model: Model identifier (e.g., "gpt-4", "gpt-3.5-turbo", "glm-4.7").
-                   If None, will try to load from config file.
+                   If None, uses "gpt-4" as default (P18: config file removed).
             api_key: OpenAI API key. If not provided, uses OPENAI_API_KEY env var.
             base_url: API base URL. If not provided, uses default OpenAI URL.
             organization: OpenAI organization ID.
@@ -70,13 +70,9 @@ class OpenAIClient(LLMClient):
             azure_deployment: Azure deployment name (required for Azure).
             azure_api_version: Azure API version.
         """
-        # Try to get default model from config if not specified
+        # P18: Config file reading removed, use provided model or default
         if model is None:
-            try:
-                from src.core.config import get_llm_model
-                model = get_llm_model()
-            except Exception:
-                model = "gpt-4"  # Final fallback
+            model = "gpt-4"  # Default model
 
         super().__init__(
             model=model,

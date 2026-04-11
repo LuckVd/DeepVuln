@@ -20,7 +20,6 @@ from src.web.core.celery_app import get_celery_app
 from src.web.models.database import get_session_local
 from src.web.models.scan import Scan, ScanStatus
 from src.web.repositories.scan import ScanRepository
-from src.web.repositories.project import ProjectRepository
 from src.web.services.scan_orchestrator import ScanOrchestrator
 from src.web.services.progress_broadcaster import ProgressBroadcaster
 from src.layers.l3_analysis.llm import OpenAIClient
@@ -64,7 +63,6 @@ async def _execute_scan_async(
     )
 
     scan_repo = ScanRepository()
-    project_repo = ProjectRepository()
 
     try:
         # Get scan details from database
@@ -72,11 +70,6 @@ async def _execute_scan_async(
             scan = await scan_repo.get(db, id=scan_id)
             if scan is None:
                 raise ValueError(f"Scan {scan_id} not found")
-
-            # Verify project exists
-            project = await project_repo.get(db, id=scan.project_id)
-            if not project:
-                raise ValueError(f"Project {scan.project_id} not found")
 
             # Update scan status to running
             scan.status = ScanStatus.RUNNING
@@ -95,29 +88,26 @@ async def _execute_scan_async(
         # Create LLM client for LLM-based features (P14-01)
         llm_client = None
         try:
-            from src.core.config import get_llm_config
-            llm_config = get_llm_config()
-            openai_config = llm_config.get("openai", {})
-            # Always use model from config.local.toml, not from scan.config
-            # The scan.config might contain outdated model names from previous runs
-            model = llm_config.get("model", "gpt-4")
+            # Get LLM config from database (agent_scan type)
+            from src.web.services.llm_config_service import LLMConfigService
 
-            llm_client = OpenAIClient(
-                model=model,
-                api_key=openai_config.get("api_key"),
-                base_url=openai_config.get("base_url"),
-            )
-            logger.info(
-                f"Scan {scan_id}: LLM client initialized with model: {model}, "
-                f"base_url: {openai_config.get('base_url')}"
-            )
+            async with async_session_maker() as db:
+                llm_config = await LLMConfigService.get_agent_scan_config(db)
+                if llm_config:
+                    llm_client = LLMConfigService.create_llm_client(llm_config)
+                    logger.info(
+                        f"Scan {scan_id}: LLM client initialized from database with "
+                        f"config: {llm_config.name} ({llm_config.provider}/{llm_config.model})"
+                    )
+                else:
+                    logger.warning(f"Scan {scan_id}: No agent_scan LLM config found in database")
         except Exception as e:
-            logger.warning(f"Scan {scan_id}: Failed to initialize LLM client: {e}")
+            logger.warning(f"Scan {scan_id}: Failed to initialize LLM client from database: {e}")
 
         # Create scan orchestrator (replaces CLIAdapter)
         orchestrator = ScanOrchestrator(
             scan_id=scan_id,
-            project_id=scan.project_id,
+            source_path=scan.source_path,
             scan_config=scan.config,
             progress_callback=progress_broadcaster,
             db_session_factory=async_session_maker,

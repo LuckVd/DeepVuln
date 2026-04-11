@@ -1,208 +1,151 @@
-# Current Goal: Web 前端重构 (UI/UX 升级)
+# Current Goal: 配置系统迁移 - 从 config.local.toml 到数据库
 
-> **目标 ID**: P16-web-frontend-refactor
-> **目标**: 参考 DeepAudit 设计，重构 Web 前端，提供赛博朋克风格的专业安全审计界面
-> **阶段**: Phase 16 - in-progress
-> **状态**: 进行中
+> **目标 ID**: P18-config-migration
+> **目标**: 移除 config.local.toml，所有配置迁移到前端设置
+> **阶段**: Phase 18 - complete
+> **状态**: 已完成 ✅
+> **完成日期**: 2026-04-11
+
+---
+
+## 同步总结
+
+**实施步骤**: 全部完成 ✅
+- P18-01: 数据库模型创建 ✅
+- P18-02: 后端 API 开发 ✅
+- P18-03: 扫描任务集成 ✅
+- P18-04: 前端 UI 开发 ✅
+- P18-05: 清理旧代码 ✅
+
+**测试结果**: passed ✅
+
+**安全注意**: ⚠️ config.local.toml 文件仍需手动清理（包含硬编码密钥）
+
+**文档更新**: roadmap.md, change-log.md 已同步
+
+---
 
 ---
 
 ## 问题概述
 
-当前前端存在的问题：
+当前系统存在配置分散的问题：
 
-| # | 问题 | 严重性 | 影响范围 |
-|---|------|--------|----------|
-| 1 | UI 设计普通 | 🟡 中 | 使用 Ant Design 默认样式，缺乏特色 |
-| 2 | 组件依赖大库 | 🟡 中 | Ant Design 体积大，定制困难 |
-| 3 | 无国际化 | 🟢 低 | 仅支持中文 |
-| 4 | 无主题切换 | 🟢 低 | 只有一种主题 |
-| 5 | 轮询更新 | 🟡 中 | 使用定时轮询而非流式更新 |
-| 6 | 页面简单 | 🟡 中 | 只有 3 个页面，功能单一 |
+| 问题 | 严重性 | 影响 |
+|------|--------|------|
+| LLM 配置分离 | 🔴 高 | 前端配置不生效，扫描仍用 config.local.toml |
+| 配置来源混乱 | 🟡 中 | 配置文件、环境变量、数据库混用 |
+| 用户无法配置 | 🟡 中 | 扫描参数、API Key 等需要修改配置文件 |
 
 ---
 
-## 参考设计：DeepAudit
+## 功能需求
 
-DeepAudit 前端特点：
-- **赛博朋克终端风格**: 深色背景 + 霓虹光效 + 像素字体
-- **自建组件库**: 基于 Radix UI 无头组件
-- **国际化支持**: i18next 框架
-- **流式交互**: 实时展示 Agent 输出
-- **完善架构**: features/ 模块 + 自建 UI 组件库
+### 核心功能
 
----
+1. **LLM 配置从数据库读取**
+   - Agent 扫描使用 `agent_scan` 类型配置
+   - 对抗性验证使用 `verification` 类型配置
+   - 移除对 config.local.toml 的依赖
 
-## 实施策略：最小原型迭代
+2. **系统配置表 (system_settings)**
+   - 扫描配置：timeout, max_concurrent_files
+   - 威胁情报：github_token, nvd_api_key
+   - 支持前端 CRUD
 
-### 迭代 1: 基础设施 + 一页可用 ✅
+3. **前端设置页面扩展**
+   - 扫描配置卡片
+   - API Key 配置卡片
+   - 连接测试功能
 
-**目标**: 搭建基础，改造一个页面验证效果
+### 技术选型
 
-- 安装核心依赖 (Radix UI + 工具库)
-- 配置赛博朋克主题 (Tailwind)
-- 创建基础 UI 组件 (Button, Card, Badge)
-- 重构 **Scans 页面** 作为示例
-
-**验收**: 扫描列表页面使用新样式和组件
-
----
-
-### 迭代 2: 完善布局 + 仪表盘
-
-**目标**: 完善应用布局，新增仪表盘
-
-- 创建主布局 (MainLayout + Sidebar + Header)
-- 创建仪表盘页面 (统计卡片 + 图表)
-- 主题切换功能
-
-**验收**: 完整的应用布局，新的仪表盘页面
+| 组件 | 技术 |
+|------|------|
+| 存储 | PostgreSQL + 新表 |
+| 后端 | FastAPI + SQLAlchemy |
+| 前端 | React + TypeScript |
 
 ---
 
-### 迭代 3: 流式交互 + 漏洞页面
+## 实施步骤
 
-**目标**: 实现实时更新，完善核心页面
+### P18-01: 数据库模型创建
+- [ ] 创建 `system_settings` 表
+- [ ] `SystemSetting` 模型定义
+- [ ] `SystemSettingRepository` 仓储类
+- [ ] Alembic 迁移脚本
 
-- 流式 API 支持 (WebSocket / SSE)
-- 重构扫描详情页 (实时进度展示)
-- 重构漏洞页面 (新组件 + 代码高亮)
+### P18-02: 后端 API 开发
+- [ ] 系统配置 CRUD 端点 (`/api/v1/system-settings`)
+- [ ] LLM 配置获取服务（支持按类型获取）
+- [ ] 配置验证服务
 
-**验收**: 实时更新的扫描详情，新风格的漏洞页面
+### P18-03: 扫描任务集成
+- [ ] 修改 `scan_tasks.py` 从数据库获取 LLM 配置
+- [ ] 修改 `opencode_agent.py` 支持传入 LLM 客户端
+- [ ] 对抗性验证使用正确的配置类型
+
+### P18-04: 前端 UI 开发
+- [ ] 扫描配置卡片组件
+- [ ] API Key 配置卡片组件
+- [ ] 设置页面布局调整
+
+### P18-05: 清理旧代码
+- [ ] 移除 `get_llm_config()` 中的 config.local.toml 读取
+- [ ] 更新 CLI 命令使用数据库配置
+- [ ] 更新文档
 
 ---
 
-### 迭代 4: 国际化 + 完善
+## 数据模型
 
-**目标**: 添加多语言支持，完善细节
+### system_settings 表结构
 
-- i18next 配置
-- 中英文语言包
-- 语言切换器
-- 细节优化
-
-**验收**: 支持中英文切换
-
----
-
-## 技术选型
-
-```diff
-# 保留
-- React 18.2.0
-- TypeScript 5.2.2
-- Vite 5.0.8
-- React Router 6.21.1
-- Axios 1.6.5
-- Tailwind CSS 3.4.1
-- React Query 5.17.0
-- react-syntax-highlighter 15.5.0
-
-# 移除
-- antd 5.12.8
-- @ant-design/icons 5.2.6
-- zustand 4.4.7 (用 Context API 替代)
-
-# 新增
-+ @radix-ui/react-* (无头组件)
-+ class-variance-authority (组件变体)
-+ clsx + tailwind-merge (样式合并)
-+ lucide-react (图标)
-+ i18next + react-i18next (国际化)
-+ next-themes (主题系统)
-+ eventsource-parser (流式处理)
-+ sonner (Toast 通知)
-+ recharts (图表)
+```sql
+CREATE TABLE system_settings (
+    id SERIAL PRIMARY KEY,
+    key VARCHAR(255) UNIQUE NOT NULL,
+    value TEXT,
+    category VARCHAR(50),  -- scan, threat_intel, etc.
+    description TEXT,
+    updated_at TIMESTAMP DEFAULT NOW()
+);
 ```
 
----
+### 预设配置项
 
-## 目录结构 (新)
-
-```
-src/web/frontend/src/
-├── app/
-│   ├── providers.tsx       # 全局 Provider
-│   ├── routes.tsx          # 集中式路由
-│   └── App.tsx
-├── components/
-│   ├── ui/                 # 自建 UI 组件库
-│   │   ├── button.tsx
-│   │   ├── card.tsx
-│   │   ├── badge.tsx
-│   │   └── ...
-│   ├── layout/
-│   │   ├── MainLayout.tsx
-│   │   ├── Sidebar.tsx
-│   │   └── Header.tsx
-│   └── theme/
-│       └── ThemeToggle.tsx
-├── features/
-│   ├── scans/
-│   │   ├── api.ts
-│   │   └── hooks.ts
-│   └── findings/
-│       ├── api.ts
-│       └── hooks.ts
-├── pages/
-│   ├── Dashboard.tsx       # 新增
-│   ├── Scans.tsx
-│   ├── ScanDetail.tsx
-│   └── Findings.tsx
-└── shared/
-    ├── api/
-    │   └── client.ts
-    └── utils/
-        └── cn.ts
-```
+| key | category | 默认值 | 描述 |
+|-----|----------|--------|------|
+| scan.timeout | scan | 300 | 扫描超时时间（秒） |
+| scan.max_concurrent_files | scan | 10 | 最大并发扫描文件数 |
+| threat_intel.github_token | threat_intel | | GitHub Token |
+| threat_intel.nvd_api_key | threat_intel | | NVD API Key |
 
 ---
 
-## 赛博朋克主题配色
+## API 设计
 
-```css
-/* 核心配色 */
---bg-primary: #0a0e0a;      /* 主背景 */
---bg-secondary: #111a11;    /* 次级背景 */
---accent-cyan: #00ffea;     /* 青色霓虹 */
---accent-orange: #ff6b00;   /* 橙色霓虹 */
---text-primary: #e0e0e0;    /* 主文本 */
---text-dim: #808080;        /* 暗文本 */
---border-neon: #00ffea40;   /* 霓虹边框 */
-```
+### 系统配置端点
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | `/api/v1/system-settings` | 获取所有系统配置 |
+| PUT | `/api/v1/system-settings` | 批量更新系统配置 |
+
+### LLM 配置获取（新增）
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | `/api/v1/llm-configs/type/{config_type}` | 获取指定类型的默认配置 |
 
 ---
 
 ## 验收标准
 
-### 迭代 1
-- [x] 核心依赖安装完成
-- [ ] 赛博朋克主题配置完成
-- [ ] Button, Card, Badge 组件创建
-- [ ] Scans 页面使用新组件
-
-### 迭代 2
-- [ ] 主布局组件创建
-- [ ] 仪表盘页面创建
-- [ ] 主题切换功能
-
-### 迭代 3
-- [ ] 流式 API 支持
-- [ ] 扫描详情页重构
-- [ ] 漏洞页面重构
-
-### 迭代 4
-- [ ] i18next 配置
-- [ ] 中英文语言包
-- [ ] 语言切换器
-
----
-
-## 当前迭代：迭代 1 - 基础设施 + 一页可用
-
-### 任务列表
-
-- [ ] P16-01: 安装核心依赖
-- [ ] P16-02: 配置赛博朋克主题
-- [ ] P16-03a: 创建 Button, Card, Badge 组件
-- [ ] P16-04: 重构 Scans 页面
+- [ ] 扫描任务使用数据库中的 LLM 配置
+- [ ] Agent 扫描使用 agent_scan 类型配置
+- [ ] 对抗性验证使用 verification 类型配置
+- [ ] 前端可以修改扫描参数和 API Key
+- [ ] 移除 config.local.toml 依赖
+- [ ] API 配置支持连接测试

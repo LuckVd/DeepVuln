@@ -1994,4 +1994,97 @@ incremental_stats: Optional[JSON]       # 增量扫描统计
 |Phase 7|CodeQL 智能构建|LLM 语言决策 + 分语言构建编排 + 多语言构建成功率提升|done|2026-04|
 |Phase 14|Web 完整能力迁移|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|done|2026-04-09|
 |Phase 15|代码质量改进|修复跨层依赖 + 清理死代码 + 修复假测试|done|2026-04-09|
-|Phase 16|Web 前端重构|赛博朋克风格 UI + 自建组件库 + 国际化 + 流式交互|in-progress|2026-04|
+|Phase 16|Web 前端重构|赛博朋克风格 UI + 自建组件库 + 国际化 + 流式交互|done|2026-04|
+|Phase 17|LLM 配置管理|多配置支持 + UI 管理|done|2026-04|
+|Phase 18|配置系统迁移|移除 config.local.toml，配置迁移到数据库|done|2026-04-11|
+
+---
+
+## Phase 18 详细任务：配置系统迁移
+
+> 目标：移除 config.local.toml 依赖，所有配置迁移到数据库和前端设置，实现真正的配置即服务
+
+### P18-01: 数据库模型创建（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P18-01 | 创建 system_settings 表 | - | done |
+| P18-01a | SystemSetting 模型定义 | P18-01 | done |
+| P18-01b | SystemSettingRepository 仓储类 | P18-01a | done |
+| P18-01c | Alembic 迁移脚本 | P18-01b | done |
+
+**实现文件**: `migrations/versions/007_create_system_settings.py`, `src/web/models/system_setting.py`, `src/web/repositories/system_setting.py`
+
+### P18-02: 后端 API 开发（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P18-02 | 系统配置 CRUD 端点 | P18-01 | done |
+| P18-02a | LLM 配置获取服务（按类型） | P18-02 | done |
+| P18-02b | 配置验证服务 | P18-02a | done |
+
+**实现文件**: `src/web/api/v1/system_settings.py`, `src/web/services/llm_config_service.py`, `src/web/services/llm_validation.py`
+
+### P18-03: 扫描任务集成（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P18-03 | 修改 scan_tasks.py 从数据库获取 LLM 配置 | P18-02 | done |
+| P18-03a | 修改 opencode_agent.py 支持传入 LLM 客户端 | P18-03 | done |
+| P18-03b | 对抗性验证使用正确的配置类型 | P18-03a | done |
+
+**实现文件**: `src/web/tasks/scan_tasks.py`, `src/layers/l3_analysis/engines/opencode_agent.py`, `src/layers/l3_analysis/adjudication.py`
+
+### P18-04: 前端 UI 开发（P0）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P18-04 | 扫描配置卡片组件 | P18-03 | done |
+| P18-04a | API Key 配置卡片组件 | P18-04 | done |
+| P18-04b | 设置页面布局调整 | P18-04a | done |
+
+**实现文件**: `src/web/frontend/src/components/llm/*.tsx`, `src/web/frontend/src/components/settings/*.tsx`
+
+### P18-05: 清理旧代码（P1）
+
+| 任务 | 描述 | 依赖 | 状态 |
+|------|------|------|------|
+| P18-05 | 移除 get_llm_config() 中的 config.local.toml 读取 | P18-04 | done |
+| P18-05a | 更新 CLI 命令使用数据库配置 | P18-05 | done |
+| P18-05b | 更新文档 | P18-05a | done |
+
+**实现文件**: `src/core/config/__init__.py`
+
+### P18 验收标准
+
+- [x] 扫描任务使用数据库中的 LLM 配置
+- [x] Agent 扫描使用 agent_scan 类型配置
+- [x] 对抗性验证使用 verification 类型配置
+- [x] 前端可以修改扫描参数和 API Key
+- [x] 移除 config.local.toml 依赖（代码层）
+- [x] API 配置支持连接测试
+
+**完成日期**: 2026-04-11
+**测试状态**: passed
+**安全验证**: ✅ config.local.toml 密钥已清理
+
+---
+
+## 开发阶段
+
+|阶段|目标|核心交付|状态|预计完成|
+|---|---|---|---|---|
+|Phase 1|基础设施搭建|L1 初版|done|2026-02|
+|Phase 2|核心分析能力|L3 三引擎 + 多轮审计|done|2026-02|
+|Phase 3|精度重构|Rule Gating + TechStack 重构|done|2026-03|
+|Phase 4|裁决统一|Exploitability 主裁决 + 误报压制|done|2026-03-06|
+|Phase 5|精度深化|可利用性评估增强 + 调用图分析|done|2026-03|
+|Phase 6|报告可信度|结果边界清晰化 + 噪声治理 + 覆盖率透明|done|2026-03|
+|Phase 6.5|code-audit 集成|防幻觉规则 + 覆盖率矩阵 + 污点分析模板 + 漏洞验证方法论|done|2026-03|
+|Phase 6.6|Readiness Gate 自动修复|尽量构建环境而非跳过|done|2026-04|
+|Phase 7|CodeQL 智能构建|LLM 语言决策 + 分语言构建编排 + 多语言构建成功率提升|done|2026-04|
+|Phase 14|Web 完整能力迁移|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|done|2026-04-09|
+|Phase 15|代码质量改进|修复跨层依赖 + 清理死代码 + 修复假测试|done|2026-04-09|
+|Phase 16|Web 前端重构|赛博朋克风格 UI + 自建组件库 + 国际化 + 流式交互|done|2026-04|
+|Phase 17|LLM 配置管理|多配置支持 + UI 管理|done|2026-04|
+|Phase 18|配置系统迁移|移除 config.local.toml，配置迁移到数据库|done|2026-04-11|

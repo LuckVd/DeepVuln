@@ -432,6 +432,7 @@ def adjudicate_findings(
     validate: bool = True,
     strict_consistency: bool = True,
     enable_deduplication: bool = True,
+    llm_client: Any | None = None,  # P18: Optional LLM client for deduplication
 ) -> tuple[list[Any], AdjudicationSummary]:
     """
     Apply exploitability override to a batch of findings.
@@ -451,6 +452,8 @@ def adjudicate_findings(
         strict_consistency: If True, raise GlobalAdjudicationError on consistency
                            violations. If False, return result with conflicts listed.
         enable_deduplication: If True, perform semantic deduplication (default: True).
+        llm_client: Optional LLM client for cluster-based deduplication (P18).
+                    If not provided, will attempt to create one from config.
 
     Returns:
         Tuple of (adjudicated_findings, summary).
@@ -490,44 +493,47 @@ def adjudicate_findings(
         # P6-17: Use ClusterBasedDeduplicator instead of ASTDeduplicator
         # to solve cross-engine deduplication failure
 
-        # Create LLM client for cluster-based deduplication
-        llm_client = None
-        try:
-            from src.core.config import get_llm_model, get_llm_provider, get_openai_config, get_ollama_config
-            from src.layers.l3_analysis.llm.openai_client import OpenAIClient
-            from src.layers.l3_analysis.engines.opencode_agent import DEFAULT_MODELS, LLMProvider
+        # P18: Use provided llm_client or try to create one
+        dedup_llm_client = llm_client
+        if dedup_llm_client is None:
+            try:
+                from src.core.config import get_llm_model, get_llm_provider, get_openai_config, get_ollama_config
+                from src.layers.l3_analysis.llm.openai_client import OpenAIClient
+                from src.layers.l3_analysis.engines.opencode_agent import DEFAULT_MODELS, LLMProvider
 
-            provider = get_llm_provider()
-            model = get_llm_model()
+                provider = get_llm_provider()
+                model = get_llm_model()
 
-            if provider.lower() == "openai":
-                # Get OpenAI config with api_key and base_url
-                openai_config = get_openai_config()
-                llm_client = OpenAIClient(
-                    model=model or DEFAULT_MODELS[LLMProvider.OPENAI],
-                    api_key=openai_config.get("api_key"),
-                    base_url=openai_config.get("base_url"),
-                    max_tokens=1000,
-                    temperature=0.1,
-                    timeout=30,
-                )
-            elif provider.lower() == "ollama":
-                from src.layers.l3_analysis.llm.ollama_client import OllamaClient
-                # Get Ollama config with base_url
-                ollama_config = get_ollama_config()
-                llm_client = OllamaClient(
-                    model=model or DEFAULT_MODELS[LLMProvider.OLLAMA],
-                    base_url=ollama_config.get("base_url"),
-                    max_tokens=1000,
-                    temperature=0.1,
-                    timeout=30,
-                )
-        except Exception as e:
-            logger.warning(f"Failed to create LLM client for deduplication: {e}")
-            logger.info("Falling back to ASTDeduplicator (no LLM support)")
+                if provider.lower() == "openai":
+                    # Get OpenAI config with api_key and base_url
+                    openai_config = get_openai_config()
+                    dedup_llm_client = OpenAIClient(
+                        model=model or DEFAULT_MODELS[LLMProvider.OPENAI],
+                        api_key=openai_config.get("api_key"),
+                        base_url=openai_config.get("base_url"),
+                        max_tokens=1000,
+                        temperature=0.1,
+                        timeout=30,
+                    )
+                    logger.info("Created LLM client from config for deduplication")
+                elif provider.lower() == "ollama":
+                    from src.layers.l3_analysis.llm.ollama_client import OllamaClient
+                    # Get Ollama config with base_url
+                    ollama_config = get_ollama_config()
+                    dedup_llm_client = OllamaClient(
+                        model=model or DEFAULT_MODELS[LLMProvider.OLLAMA],
+                        base_url=ollama_config.get("base_url"),
+                        max_tokens=1000,
+                        temperature=0.1,
+                        timeout=30,
+                    )
+                    logger.info("Created Ollama client from config for deduplication")
+            except Exception as e:
+                logger.warning(f"Failed to create LLM client for deduplication: {e}")
+                logger.info("Falling back to ASTDeduplicator (no LLM support)")
 
         # Choose deduplicator based on LLM availability
-        if llm_client is None:
+        if dedup_llm_client is None:
             # Fallback to AST deduplicator when LLM is not available
             deduplicator = ASTDeduplicator()
             logger.info("Using ASTDeduplicator (LLM unavailable)")
@@ -535,7 +541,7 @@ def adjudicate_findings(
             # Use ClusterBasedDeduplicator with LLM support
             from src.layers.l3_analysis.deduplicator import ClusterBasedDeduplicator
             deduplicator = ClusterBasedDeduplicator(
-                llm_client=llm_client,
+                llm_client=dedup_llm_client,
                 config=ClusterDeduplicatorConfig(
                     line_tolerance=10,
                     enable_llm_dedup=True,

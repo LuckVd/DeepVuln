@@ -125,11 +125,16 @@ def get_default_config() -> dict[str, Any]:
 
 
 def get_github_token() -> str | None:
-    """Get GitHub token from config or environment.
+    """Get GitHub token from environment variable.
+
+    P18: Config file reading removed. Use environment variable or database.
 
     Priority:
     1. GITHUB_TOKEN environment variable
-    2. Config file
+    2. Database (via SystemSettingService for Web)
+
+    For CLI: Set GITHUB_TOKEN environment variable.
+    For Web: Configure via Settings page.
 
     Returns:
         GitHub token or None.
@@ -142,25 +147,29 @@ def get_github_token() -> str | None:
 
     import os
 
-    # Check environment first
+    # Check environment variable
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         _github_token_cache = token
         return token
 
-    # Check config file
-    config = load_config()
-    token = config.get("threat_intel", {}).get("github_token")
-    _github_token_cache = token or ""
-    return token
+    # No database access in this function (for CLI compatibility)
+    # Web services should use SystemSettingService instead
+    _github_token_cache = ""
+    return None
 
 
 def get_nvd_api_key() -> str | None:
-    """Get NVD API key from config or environment.
+    """Get NVD API key from environment variable.
+
+    P18: Config file reading removed. Use environment variable or database.
 
     Priority:
     1. NVD_API_KEY environment variable
-    2. Config file
+    2. Database (via SystemSettingService for Web)
+
+    For CLI: Set NVD_API_KEY environment variable.
+    For Web: Configure via Settings page.
 
     Returns:
         NVD API key or None.
@@ -173,41 +182,58 @@ def get_nvd_api_key() -> str | None:
 
     import os
 
-    # Check environment first
+    # Check environment variable
     key = os.environ.get("NVD_API_KEY")
     if key:
         _nvd_api_key_cache = key
         return key
 
-    # Check config file
-    config = load_config()
-    key = config.get("threat_intel", {}).get("nvd_api_key")
-    _nvd_api_key_cache = key or ""
-    return key
+    # No database access in this function (for CLI compatibility)
+    # Web services should use SystemSettingService instead
+    _nvd_api_key_cache = ""
+    return None
 
 
 def get_database_path() -> str:
-    """Get database path from config.
+    """Get database path from config or environment.
+
+    Internal config (not user-facing), still uses config file.
 
     Returns:
         Database path string.
     """
-    config = load_config()
-    return config.get("database", {}).get("path", "./data/threat_intel.db")
+    import os
+    return os.getenv("THREAT_INTEL_DB_PATH", "./data/threat_intel.db")
 
 
 def get_scan_timeout() -> int:
-    """Get scan timeout from config.
+    """Get scan timeout from environment variable.
+
+    P18: Moved to environment variable. For Web, use SystemSettingService.
 
     Returns:
         Timeout in seconds.
     """
-    config = load_config()
-    return config.get("scan", {}).get("timeout", 300)
+    import os
+    return int(os.getenv("SCAN_TIMEOUT", "300"))
+
+
+def get_max_concurrent_files() -> int:
+    """Get max concurrent files from environment variable.
+
+    P18: Moved to environment variable. For Web, use SystemSettingService.
+
+    Returns:
+        Maximum concurrent files.
+    """
+    import os
+    return int(os.getenv("SCAN_MAX_CONCURRENT_FILES", "10"))
 
 
 def get_auto_sync_days() -> int:
     """Get auto sync interval from config.
+
+    Internal config (not user-facing), still uses config file.
 
     Returns:
         Days between syncs.
@@ -225,12 +251,19 @@ _llm_config_cache: dict[str, Any] | None = None
 
 
 def get_llm_config(force_reload: bool = False) -> dict[str, Any]:
-    """Get LLM configuration with environment variable overrides.
+    """Get LLM configuration from environment variables only.
 
-    Priority:
-    1. Environment variables (highest)
-    2. Config file
-    3. Default values (lowest)
+    .. deprecated::
+        P18: This function is deprecated. Use database LLM configs instead.
+        See: src.web.services.llm_config_service.LLMConfigService
+
+        For CLI usage, set these environment variables:
+        - OPENAI_API_KEY or LLM_API_KEY
+        - OPENAI_BASE_URL or LLM_BASE_URL
+        - LLM_MODEL
+        - LLM_TIMEOUT
+        - LLM_MAX_RETRIES
+        - LLM_MAX_CONCURRENT_REQUESTS
 
     Args:
         force_reload: Force reload config even if cached.
@@ -245,42 +278,36 @@ def get_llm_config(force_reload: bool = False) -> dict[str, Any]:
 
     import os
 
-    config = load_config(force_reload=force_reload)
-    llm_config = config.get("llm", {})
-
-    # Build merged config with environment variable overrides
+    # Build config from environment variables only (P18: config file removed)
     result = {
-        "provider": llm_config.get("provider", "openai"),
-        "model": llm_config.get("model"),  # No default - must be configured
-        "timeout": llm_config.get("timeout", 120),
-        "max_retries": llm_config.get("max_retries", 3),
-        "max_tokens": llm_config.get("max_tokens", 4096),
-        "temperature": llm_config.get("temperature", 0.1),
-        "max_concurrent_requests": llm_config.get("max_concurrent_requests", 5),  # GLM-4.5 tested limit
+        "provider": os.getenv("LLM_PROVIDER", "openai"),
+        "model": os.getenv("LLM_MODEL"),
+        "timeout": int(os.getenv("LLM_TIMEOUT", "120")),
+        "max_retries": int(os.getenv("LLM_MAX_RETRIES", "3")),
+        "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "4096")),
+        "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")),
+        "max_concurrent_requests": int(os.getenv("LLM_MAX_CONCURRENT_REQUESTS", "5")),
     }
 
-    # OpenAI config with env overrides
-    openai_config = llm_config.get("openai", {})
+    # OpenAI config from environment variables
     result["openai"] = {
-        "api_key": os.getenv("OPENAI_API_KEY") or openai_config.get("api_key"),
-        "base_url": os.getenv("OPENAI_BASE_URL") or openai_config.get("base_url", "https://api.openai.com/v1"),
-        "organization": os.getenv("OPENAI_ORG_ID") or openai_config.get("organization"),
+        "api_key": os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY"),
+        "base_url": os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
+        "organization": os.getenv("OPENAI_ORG_ID"),
     }
 
-    # Azure config with env overrides
-    azure_config = llm_config.get("azure", {})
+    # Azure config from environment variables
     result["azure"] = {
-        "api_key": os.getenv("AZURE_OPENAI_API_KEY") or azure_config.get("api_key"),
-        "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT") or azure_config.get("endpoint"),
-        "deployment": azure_config.get("deployment"),
-        "api_version": azure_config.get("api_version", "2024-02-15-preview"),
+        "api_key": os.getenv("AZURE_OPENAI_API_KEY"),
+        "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
+        "deployment": os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+        "api_version": os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview"),
     }
 
-    # Ollama config with env overrides
-    ollama_config = llm_config.get("ollama", {})
+    # Ollama config from environment variables
     result["ollama"] = {
-        "base_url": os.getenv("OLLAMA_BASE_URL") or ollama_config.get("base_url", "http://localhost:11434"),
-        "model": ollama_config.get("model", "llama2"),
+        "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        "model": os.getenv("OLLAMA_MODEL", "llama2"),
     }
 
     _llm_config_cache = result
@@ -338,30 +365,34 @@ def get_ollama_config() -> dict[str, Any]:
 
 
 def get_llm_batch_size() -> int:
-    """Get LLM batch size from config.
+    """Get LLM batch size from environment variable.
 
     Used for batch analysis in entry point detection.
     Note: This is deprecated in favor of batch_max_chars.
 
+    P18: Reads from LLM_BATCH_SIZE environment variable.
+
     Returns:
         Number of files per batch (default: 20).
     """
-    config = load_config()
-    return config.get("llm", {}).get("batch_size", 20)
+    import os
+    return int(os.getenv("LLM_BATCH_SIZE", "20"))
 
 
 def get_llm_batch_max_chars() -> int:
-    """Get LLM batch max characters from config.
+    """Get LLM batch max characters from environment variable.
 
     Used for character-based batching in entry point detection.
     This ensures each batch doesn't exceed the character limit,
     preventing LLM response truncation.
 
+    P18: Reads from LLM_BATCH_MAX_CHARS environment variable.
+
     Returns:
-        Maximum characters per batch (default: 30000).
+        Maximum characters per batch (default: 12000).
     """
-    config = load_config()
-    return config.get("llm", {}).get("batch_max_chars", 30000)
+    import os
+    return int(os.getenv("LLM_BATCH_MAX_CHARS", "12000"))
 
 
 # =============================================================================

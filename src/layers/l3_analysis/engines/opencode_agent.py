@@ -120,16 +120,9 @@ class OpenCodeAgent(BaseEngine):
         # P9-01: Optional CPG path provider for attack path analysis
         self.cpg_provider = cpg_path_provider
 
-        # P5-05: Use global concurrency config if not specified
-        if max_concurrent is None:
-            try:
-                from src.core.config import get_llm_config
-                llm_config = get_llm_config()
-                self.max_concurrent = llm_config.get("max_concurrent_requests", 5)
-            except Exception:
-                self.max_concurrent = 5  # Fallback default (tested limit)
-        else:
-            self.max_concurrent = max_concurrent
+        # P18: Use provided max_concurrent or default
+        # Previously used config.local.toml, now expects explicit configuration
+        self.max_concurrent = max_concurrent if max_concurrent is not None else 5
 
         self.logger = logging.getLogger(__name__)
 
@@ -150,16 +143,15 @@ class OpenCodeAgent(BaseEngine):
         model: str | None,
         **options,
     ) -> LLMClient:
-        """Create an LLM client based on provider configuration."""
+        """Create an LLM client based on provider configuration.
+
+        P18: This method no longer reads from config.local.toml.
+        All configuration must be provided via parameters or llm_client.
+        """
         provider_lower = provider.lower()
 
-        # Try to get default model from config file if not specified
-        if model is None:
-            try:
-                from src.core.config import get_llm_model
-                model = get_llm_model()
-            except Exception:
-                model = None  # Fall back to DEFAULT_MODELS
+        # Use provided model or fall back to DEFAULT_MODELS
+        # Config file reading removed as part of P18 migration
 
         if provider_lower == "openai":
             return OpenAIClient(
