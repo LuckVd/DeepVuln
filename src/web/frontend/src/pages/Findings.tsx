@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card,
@@ -12,24 +12,10 @@ import {
 } from '@/components/ui';
 import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
 import { useFindings } from '@/hooks/useFindings';
+import { useLanguage } from '@/contexts/LanguageContext';
 import type { Finding, FindingStatus, SeverityLevel } from '@/types/models';
 import FindingList from '@/components/finding/FindingList';
 import FindingDrawer from '@/components/finding/FindingDrawer';
-
-const STATUS_OPTIONS: { value: FindingStatus; label: string }[] = [
-  { value: 'pending', label: 'PENDING' },
-  { value: 'confirmed', label: 'CONFIRMED' },
-  { value: 'false_positive', label: 'FALSE POSITIVE' },
-  { value: 'conditional', label: 'CONDITIONAL' },
-];
-
-const SEVERITY_OPTIONS: { value: SeverityLevel; label: string }[] = [
-  { value: 'critical', label: 'CRITICAL' },
-  { value: 'high', label: 'HIGH' },
-  { value: 'medium', label: 'MEDIUM' },
-  { value: 'low', label: 'LOW' },
-  { value: 'info', label: 'INFO' },
-];
 
 /**
  * Findings list page with cyberpunk theme
@@ -37,6 +23,7 @@ const SEVERITY_OPTIONS: { value: SeverityLevel; label: string }[] = [
 export default function FindingsPage() {
   const { id: scanId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const id = parseInt(scanId || '0');
 
   const [page, setPage] = useState(1);
@@ -46,6 +33,22 @@ export default function FindingsPage() {
   const [searchText, setSearchText] = useState('');
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Dynamic options with translations
+  const STATUS_OPTIONS = useMemo(() => [
+    { value: 'pending' as FindingStatus, label: t('status.waiting') },
+    { value: 'confirmed' as FindingStatus, label: t('status.complete') },
+    { value: 'false_positive' as FindingStatus, label: t('findings.falsePositive') },
+    { value: 'conditional' as FindingStatus, label: t('status.conditional') },
+  ], [t]);
+
+  const SEVERITY_OPTIONS = useMemo(() => [
+    { value: 'critical' as SeverityLevel, label: t('severity.critical') },
+    { value: 'high' as SeverityLevel, label: t('severity.high') },
+    { value: 'medium' as SeverityLevel, label: t('severity.medium') },
+    { value: 'low' as SeverityLevel, label: t('severity.low') },
+    { value: 'info' as SeverityLevel, label: t('severity.info') },
+  ], [t]);
 
   const {
     data,
@@ -99,31 +102,31 @@ export default function FindingsPage() {
       <div className="mb-6">
         <Button variant="outline" size="sm" onClick={() => navigate('/scans')}>
           <ArrowLeft className="mr-2 h-4 w-4" />
-          RETURN TO SCAN LIST
+          {t('findings.returnToList')}
         </Button>
       </div>
 
       {/* Statistics Cards */}
       {data?.summary && (
         <div className="grid grid-cols-5 gap-4 mb-6">
-          <Statistic title="TOTAL FINDINGS" value={data.summary.total} />
+          <Statistic title={t('findings.totalFindings')} value={data.summary.total} />
           <Statistic
-            title="VERIFIED"
+            title={t('findings.verified')}
             value={data.summary.verified}
             valueClassName="text-success"
           />
           <Statistic
-            title="FALSE POSITIVE"
+            title={t('findings.falsePositive')}
             value={data.summary.false_positive}
             valueClassName="text-critical"
           />
           <Statistic
-            title="CRITICAL"
+            title={t('findings.critical')}
             value={data.summary.by_severity.critical || 0}
             valueClassName={data.summary.by_severity.critical ? 'text-critical' : ''}
           />
           <Statistic
-            title="HIGH"
+            title={t('findings.high')}
             value={data.summary.by_severity.high || 0}
             valueClassName={data.summary.by_severity.high ? 'text-warning' : ''}
           />
@@ -134,28 +137,28 @@ export default function FindingsPage() {
       <Card className="glass-panel mb-6">
         <div className="flex items-center gap-4 flex-wrap">
           <CustomSelect
-            label="STATUS"
+            label={t('findings.status')}
             value={statusFilter || ''}
             onChange={(val) => setStatusFilter(val as FindingStatus | undefined)}
             options={[
-              { value: '', label: 'ALL STATUS' },
+              { value: '', label: t('findings.allStatus') },
               ...STATUS_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label })),
             ]}
             className="w-40"
           />
           <CustomSelect
-            label="SEVERITY"
+            label={t('findings.severity')}
             value={severityFilter || ''}
             onChange={(val) => setSeverityFilter(val as SeverityLevel | undefined)}
             options={[
-              { value: '', label: 'ALL SEVERITIES' },
+              { value: '', label: t('findings.allSeverities') },
               ...SEVERITY_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label })),
             ]}
             className="w-40"
           />
           <div className="flex-1 min-w-[200px]">
             <Input
-              placeholder="Search vuln type, file, description..."
+              placeholder={t('findings.searchPlaceholder')}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               className="font-mono"
@@ -163,7 +166,7 @@ export default function FindingsPage() {
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="mr-2 h-4 w-4" />
-            REFRESH
+            {t('common.refresh')}
           </Button>
         </div>
       </Card>

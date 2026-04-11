@@ -7,7 +7,6 @@ This project includes custom AI workflow commands. Use them by typing the comman
 | Command | Purpose | Read-only |
 |---------|---------|-----------|
 | `/ai-help` | Show this command table and current state | Yes |
-| `/ai-ask` | Ask questions about the repo/workflow in read-only mode | Yes |
 | `/ai-init` | Initialize or repair the workflow skeleton | No |
 | `/ai-scan` | Refresh repository summary | No |
 | `/ai-roadmap` | Manage the long-term roadmap | No |
@@ -18,6 +17,7 @@ This project includes custom AI workflow commands. Use them by typing the comman
 | `/ai-security` | Scan for secrets/security issues | Yes |
 | `/ai-adopt` | Adopt this workflow into an existing repo | No |
 | `/ai-notes` | Read or append to AI notes | No |
+| `/ai-bugfix` | Fix bugs with analysis, proposal, and verification | No |
 
 ## Current State
 

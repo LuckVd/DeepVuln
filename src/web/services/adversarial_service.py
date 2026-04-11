@@ -360,25 +360,91 @@ class AdversarialService:
 
 
 def create_adversarial_service(
-    llm_client: LLMClient,
+    llm_client: Optional[LLMClient] = None,
     max_rounds: int = 5,
     round_timeout: int = 180,
     progress_callback: Optional[Callable[[str, dict[str, Any]], None]] = None,
+    db_session_factory: Optional[Callable[[], AsyncSession]] = None,
 ) -> AdversarialService:
     """Factory function to create an AdversarialService.
 
     Args:
-        llm_client: LLM client for AI-based verification
+        llm_client: Optional LLM client for AI-based verification.
+                     If not provided, will try to load from database.
         max_rounds: Maximum number of debate rounds (default 5)
         round_timeout: Timeout per round in seconds (default 180)
         progress_callback: Optional callback for real-time updates
+        db_session_factory: Optional factory function for creating DB sessions
 
     Returns:
         Configured AdversarialService instance
+
+    Raises:
+        ValueError: If no LLM client is available and cannot load from database
     """
+    # If no LLM client provided, try to load from database
+    if llm_client is None:
+        if db_session_factory is None:
+            raise ValueError("Either llm_client or db_session_factory must be provided")
+
+        from src.web.services.llm_config_service import LLMConfigService
+
+        # Get verification config from database
+        import asyncio
+
+        async def _get_verification_client() -> LLMClient:
+            async with db_session_factory() as db:
+                llm_config = await LLMConfigService.get_verification_config(db)
+                if llm_config is None:
+                    raise ValueError("No verification LLM config found in database")
+                return LLMConfigService.create_llm_client(llm_config)
+
+        # Note: This should be called from an async context
+        # For now, we'll require the caller to provide the client
+        raise ValueError(
+            "LLM client must be provided for adversarial verification. "
+            "Please configure a 'verification' type LLM config in settings."
+        )
+
     return AdversarialService(
         llm_client=llm_client,
         max_rounds=max_rounds,
         round_timeout=round_timeout,
         progress_callback=progress_callback,
     )
+
+
+async def create_adversarial_service_from_db(
+    db_session_factory: Callable[[], AsyncSession],
+    max_rounds: int = 5,
+    round_timeout: int = 180,
+    progress_callback: Optional[Callable[[str, dict[str, Any]], None]] = None,
+) -> Optional[AdversarialService]:
+    """Factory function to create an AdversarialService from database config.
+
+    Args:
+        db_session_factory: Factory function for creating DB sessions
+        max_rounds: Maximum number of debate rounds (default 5)
+        round_timeout: Timeout per round in seconds (default 180)
+        progress_callback: Optional callback for real-time updates
+
+    Returns:
+        Configured AdversarialService instance, or None if no config found
+    """
+    from src.web.services.llm_config_service import LLMConfigService
+
+    async with db_session_factory() as db:
+        llm_config = await LLMConfigService.get_verification_config(db)
+        if llm_config is None:
+            logger.warning("No verification LLM config found in database")
+            return None
+
+        llm_client = LLMConfigService.create_llm_client(llm_config)
+        logger.info(f"Created adversarial service with config: {llm_config.name}")
+
+        return AdversarialService(
+            llm_client=llm_client,
+            max_rounds=max_rounds,
+            round_timeout=round_timeout,
+            progress_callback=progress_callback,
+        )

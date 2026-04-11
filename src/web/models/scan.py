@@ -108,6 +108,9 @@ class Scan(Base):
     # Checkpoint data (for pause/resume)
     checkpoint_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
+    # Celery task reference (for task control)
+    task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     # P14-01: 攻击面统计
     attack_surface: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 

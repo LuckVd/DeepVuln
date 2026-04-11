@@ -26,7 +26,6 @@ Output requirements:
 Commands to include:
 
 - `/ai-help`
-- `/ai-ask`
 - `/ai-init`
 - `/ai-scan`
 - `/ai-roadmap`

@@ -6,6 +6,8 @@ import type { ScanProgressResponse, ScanStatus } from '@/types/models'
 interface UseScanProgressOptions {
   enabled?: boolean
   pollInterval?: number // 轮询间隔（毫秒）
+  maxRetries?: number // 最大重试次数
+  retryDelay?: number // 失败后的重试延迟（毫秒）
   onProgressChange?: (progress: ScanProgressResponse) => void
   onComplete?: (result: ScanProgressResponse) => void
   onFailed?: (error: string) => void
@@ -18,6 +20,8 @@ export function useScanProgress(
   const {
     enabled = true,
     pollInterval = 5000,
+    maxRetries = 10,
+    retryDelay = 10000,
     onProgressChange,
     onComplete,
     onFailed,
@@ -26,29 +30,39 @@ export function useScanProgress(
   const [progress, setProgress] = useState<ScanProgressResponse | null>(null)
   const [status, setStatus] = useState<ScanStatus | null>(null)
   const [usingPolling, setUsingPolling] = useState(false)
-  const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const isCompleteRef = useRef(false)
+
+  // 使用 ref 存储可变状态，避免闭包问题
+  const stateRef = useRef({
+    pollTimeout: null as NodeJS.Timeout | null,
+    isComplete: false,
+    retryCount: 0,
+    isPollingActive: false,
+    wsState: 'disconnected' as 'connected' | 'disconnected' | 'error' | 'connecting',
+  })
 
   // 获取进度数据
   const fetchProgress = async () => {
-    if (!scanId || isCompleteRef.current) return
+    if (!scanId || stateRef.current.isComplete) return false
 
     try {
       const data = await scansApi.getProgress(scanId)
       setProgress(data)
       setStatus(data.status)
 
+      // 重置重试计数
+      stateRef.current.retryCount = 0
+
       onProgressChange?.(data)
 
       // 检查是否完成
       if (data.status === 'completed') {
-        isCompleteRef.current = true
+        stateRef.current.isComplete = true
         onComplete?.(data)
         return false // 停止轮询
       }
 
       if (data.status === 'failed') {
-        isCompleteRef.current = true
+        stateRef.current.isComplete = true
         onFailed?.('扫描失败')
         return false // 停止轮询
       }
@@ -56,32 +70,51 @@ export function useScanProgress(
       return true // 继续轮询
     } catch (err) {
       console.error('Failed to fetch progress:', err)
-      return true // 出错也继续轮询
-    }
-  }
+      stateRef.current.retryCount++
 
-  // 轮询逻辑
-  const startPolling = () => {
-    if (pollTimeoutRef.current) return
-
-    setUsingPolling(true)
-    const poll = async () => {
-      const shouldContinue = await fetchProgress()
-      if (shouldContinue && !isCompleteRef.current) {
-        pollTimeoutRef.current = setTimeout(poll, pollInterval)
-      } else {
-        pollTimeoutRef.current = null
+      // 超过最大重试次数则停止
+      if (stateRef.current.retryCount >= maxRetries) {
+        console.error(`Max retries (${maxRetries}) exceeded for scan progress`)
+        onFailed?.('无法获取扫描进度')
+        return false
       }
+
+      return true // 继续轮询
     }
-    poll()
   }
 
+  // 停止轮询
   const stopPolling = () => {
-    if (pollTimeoutRef.current) {
-      clearTimeout(pollTimeoutRef.current)
-      pollTimeoutRef.current = null
+    stateRef.current.isPollingActive = false
+    if (stateRef.current.pollTimeout) {
+      clearTimeout(stateRef.current.pollTimeout)
+      stateRef.current.pollTimeout = null
     }
     setUsingPolling(false)
+  }
+
+  // 启动轮询
+  const startPolling = () => {
+    if (stateRef.current.pollTimeout || stateRef.current.isPollingActive) return
+
+    stateRef.current.isPollingActive = true
+    setUsingPolling(true)
+
+    const poll = async () => {
+      if (!stateRef.current.isPollingActive) return
+
+      const shouldContinue = await fetchProgress()
+
+      if (!shouldContinue || stateRef.current.isComplete) {
+        stopPolling()
+        return
+      }
+
+      // 根据是否有错误决定使用哪个延迟
+      const delay = stateRef.current.retryCount > 0 ? retryDelay : pollInterval
+      stateRef.current.pollTimeout = setTimeout(poll, delay)
+    }
+    poll()
   }
 
   // WebSocket 连接状态处理
@@ -101,33 +134,51 @@ export function useScanProgress(
       fetchProgress()
     },
     onScanComplete: (data) => {
-      isCompleteRef.current = true
+      stateRef.current.isComplete = true
       fetchProgress().then(() => {
         onComplete?.(progress!)
       })
     },
     onScanFailed: (error) => {
-      isCompleteRef.current = true
+      stateRef.current.isComplete = true
       onFailed?.(error)
     },
   })
 
-  // 初始加载和状态变化时的处理
+  // 保存 WebSocket 状态到 ref
+  stateRef.current.wsState = wsState as 'connected' | 'disconnected' | 'error' | 'connecting'
+
+  // 统一处理轮询和 WebSocket 状态
   useEffect(() => {
     if (!enabled || !scanId) return
 
     // 初始加载
     fetchProgress()
 
-    // 如果 WebSocket 未连接，启动轮询
-    if (wsState === 'disconnected' || wsState === 'error') {
-      startPolling()
-    }
-
+    // 清理函数
     return () => {
       stopPolling()
     }
-  }, [scanId, enabled, wsState])
+  }, [scanId, enabled]) // 只依赖 scanId 和 enabled
+
+  // 单独处理 WebSocket 状态变化（使用 ref 避免依赖循环）
+  useEffect(() => {
+    if (!enabled || !scanId) return
+
+    const currentWsState = stateRef.current.wsState
+
+    // WebSocket 连接成功时停止轮询
+    if (currentWsState === 'connected') {
+      stopPolling()
+    }
+    // WebSocket 失败或断开时启动轮询
+    else if (currentWsState === 'disconnected' || currentWsState === 'error') {
+      // 检查是否已完成，避免完成后继续轮询
+      if (!stateRef.current.isComplete) {
+        startPolling()
+      }
+    }
+  }, [wsState]) // 只依赖 wsState，避免触发整个 effect 重跑
 
   // 控制操作
   const pause = async () => {
@@ -145,7 +196,7 @@ export function useScanProgress(
     try {
       await scansApi.resume(scanId)
       await fetchProgress()
-      isCompleteRef.current = false // 重置完成状态
+      stateRef.current.isComplete = false // 重置完成状态
     } catch (err) {
       console.error('Failed to resume scan:', err)
     }
@@ -156,7 +207,7 @@ export function useScanProgress(
     try {
       await scansApi.cancel(scanId)
       await fetchProgress()
-      isCompleteRef.current = true
+      stateRef.current.isComplete = true
     } catch (err) {
       console.error('Failed to cancel scan:', err)
     }

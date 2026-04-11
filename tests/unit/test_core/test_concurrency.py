@@ -193,7 +193,8 @@ class TestGlobalManager:
         """Test that get_global_concurrency_manager creates the configured default."""
         manager = get_global_concurrency_manager()
         assert manager is not None
-        assert manager.max_concurrent == get_llm_config()["max_concurrent"]
+        # P18: Default concurrency from environment variable (default: 5)
+        assert manager.max_concurrent == 5
 
     def test_set_global_manager(self):
         """Test setting global manager."""

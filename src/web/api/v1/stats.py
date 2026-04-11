@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 
 from src.web.api.deps import get_db
 from src.web.api.v1.scans import router as scans_router
@@ -173,4 +173,144 @@ async def get_vulnerability_trends(
         "start_date": start_date.isoformat(),
         "end_date": datetime.now().isoformat(),
         "data": trends,
+    }
+
+
+@router.get("/stats/vulnerabilities")
+async def get_vulnerabilities_list(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    severity: str | None = Query(None, description="Filter by severity"),
+    status: str | None = Query(None, description="Filter by status"),
+    search: str | None = Query(None, description="Search in vuln_type, file_path, description"),
+) -> dict:
+    """
+    Get global vulnerabilities list across all scans.
+
+    Returns:
+        Paginated list of findings with scan information
+    """
+    # Build base query
+    query = select(Finding).join(Scan).order_by(Finding.created_at.desc())
+
+    # Apply filters
+    conditions = []
+    if severity:
+        conditions.append(Finding.severity == severity)
+    if status:
+        conditions.append(Finding.status == status)
+    if search:
+        search_pattern = f"%{search}%"
+        conditions.append(
+            or_(
+                Finding.vuln_type.ilike(search_pattern),
+                Finding.file_path.ilike(search_pattern),
+                Finding.description.ilike(search_pattern),
+            )
+        )
+
+    if conditions:
+        query = query.where(and_(*conditions))
+
+    # Get total count
+    count_query = select(func.count()).select_from(Finding)
+    if conditions:
+        count_query = count_query.where(and_(*conditions))
+    count_result = await db.execute(count_query)
+    total = count_result.scalar_one() or 0
+
+    # Get paginated results
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+
+    result = await db.execute(query)
+    findings = result.scalars().all()
+
+    # Get scan names for each finding
+    scan_ids = [f.scan_id for f in findings]
+    scans_result = await db.execute(
+        select(Scan.id, Scan.name).where(Scan.id.in_(scan_ids))
+    )
+    scan_names = {scan_id: name for scan_id, name in scans_result.all()}
+
+    return {
+        "items": [
+            {
+                "id": f.id,
+                "scan_id": f.scan_id,
+                "scan_name": scan_names.get(f.scan_id, "Unknown"),
+                "vuln_type": f.vuln_type,
+                "severity": f.severity,
+                "confidence": f.confidence,
+                "file_path": f.file_path,
+                "line_start": f.line_start,
+                "line_end": f.line_end,
+                "function_name": f.function_name,
+                "title": f.title,
+                "description": f.description,
+                "engine": f.engine,
+                "status": f.status,
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+            }
+            for f in findings
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/stats/vulnerabilities/summary")
+async def get_vulnerabilities_summary(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """
+    Get global vulnerabilities summary statistics.
+
+    Returns:
+        Summary with total, verified, false positive counts by severity
+    """
+    # Total count
+    total_result = await db.execute(select(func.count()).select_from(Finding))
+    total = total_result.scalar_one() or 0
+
+    # By status
+    status_result = await db.execute(
+        select(Finding.status, func.count(Finding.id))
+        .group_by(Finding.status)
+    )
+    by_status = {status: count for status, count in status_result.all() or []}
+
+    # By severity
+    severity_result = await db.execute(
+        select(Finding.severity, func.count(Finding.id))
+        .group_by(Finding.severity)
+    )
+    by_severity = {severity: count for severity, count in severity_result.all() or []}
+
+    # Verified count
+    verified_result = await db.execute(
+        select(func.count()).select_from(Finding).where(Finding.status == "confirmed")
+    )
+    verified = verified_result.scalar_one() or 0
+
+    # False positive count
+    fp_result = await db.execute(
+        select(func.count()).select_from(Finding).where(Finding.status == "false_positive")
+    )
+    false_positive = fp_result.scalar_one() or 0
+
+    return {
+        "total": total,
+        "verified": verified,
+        "false_positive": false_positive,
+        "by_status": by_status,
+        "by_severity": {
+            "critical": by_severity.get("critical", 0),
+            "high": by_severity.get("high", 0),
+            "medium": by_severity.get("medium", 0),
+            "low": by_severity.get("low", 0),
+            "info": by_severity.get("info", 0),
+        },
     }

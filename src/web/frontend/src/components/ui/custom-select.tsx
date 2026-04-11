@@ -9,6 +9,7 @@ export interface CustomSelectProps {
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
   className?: string;
+  disabled?: boolean;
 }
 
 export function CustomSelect({
@@ -18,6 +19,7 @@ export function CustomSelect({
   onChange,
   options,
   className,
+  disabled = false,
 }: CustomSelectProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const selectRef = React.useRef<HTMLDivElement>(null);
@@ -50,12 +52,14 @@ export function CustomSelect({
       <div ref={selectRef} className="relative">
         <button
           type="button"
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => !disabled && setIsOpen(!isOpen)}
+          disabled={disabled}
           className={cn(
             'flex h-11 w-full items-center justify-between rounded-md border-2 border-border bg-background-secondary px-4 py-2',
             'text-text-primary font-mono text-sm text-left',
             'focus:outline-none focus:border-cyan focus:shadow-glow-cyan',
-            'transition-all duration-200 cursor-pointer',
+            'transition-all duration-200',
+            disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
             error && 'border-critical focus:border-critical focus:shadow-glow-critical'
           )}
         >

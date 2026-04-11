@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Card, Badge, Progress, Statistic, Timeline } from '@/components/ui';
 import { Check, Loader2, Clock, X, Pause } from 'lucide-react';
+import { useLanguage } from '@/contexts/LanguageContext';
 import type { ScanProgressResponse, PhaseInfo } from '@/types/models';
 import { cn } from '@/shared/utils/cn';
 
@@ -9,32 +10,42 @@ interface ScanProgressProps {
   loading?: boolean;
 }
 
-const PHASE_LABELS: Record<string, string> = {
-  'L1_preparation': 'L1 PREPARATION',
-  'L1_attack_surface': 'L1 ATTACK SURFACE',
-  'L2_semgrep': 'L2 SEMGREP',
-  'L2_codeql': 'L2 CODEQL',
-  'L3_agent': 'L3 AGENT AUDIT',
-  'L3_adjudication': 'L3 ADJUDICATION',
-  'report_generation': 'REPORT GENERATION',
-};
-
-const STATUS_ICONS: Record<string, React.ReactNode> = {
-  completed: <Check className="h-4 w-4" />,
-  running: <Loader2 className="h-4 w-4 animate-spin" />,
-  pending: <Clock className="h-4 w-4" />,
-  failed: <X className="h-4 w-4" />,
-  skipped: <Pause className="h-4 w-4" />,
-};
-
 export function ScanProgress({ progress, loading }: ScanProgressProps) {
+  const { t } = useLanguage();
+
+  // Dynamic phase labels with translations
+  const PHASE_LABELS = useMemo<Record<string, string>>(() => ({
+    'l1_preparation': t('phase.l1_preparation'),
+    'source_preparation': t('phase.source_preparation'),
+    'engine_selection': t('phase.engine_selection'),
+    'engine_execution': t('phase.engine_execution'),
+    'l1_attack_surface': 'L1 ATTACK SURFACE', // Fallback for unmapped phase
+    'L2_semgrep': 'L2 SEMGREP', // Fallback for unmapped phase
+    'L2_codeql': 'L2 CODEQL', // Fallback for unmapped phase
+    'L3_agent': 'L3 AGENT AUDIT', // Fallback for unmapped phase
+    'L3_adjudication': 'L3 ADJUDICATION', // Fallback for unmapped phase
+    'result_merging': t('phase.result_merging'),
+    'token_statistics': t('phase.token_statistics'),
+    'exploitability_verification': t('phase.exploitability_verification'),
+    'deduplication_adjudication': t('phase.deduplication_adjudication'),
+    'adversarial_verification': t('phase.adversarial_verification'),
+  }), [t]);
+
+  const STATUS_ICONS: Record<string, React.ReactNode> = {
+    completed: <Check className="h-4 w-4" />,
+    running: <Loader2 className="h-4 w-4 animate-spin" />,
+    pending: <Clock className="h-4 w-4" />,
+    failed: <X className="h-4 w-4" />,
+    skipped: <Pause className="h-4 w-4" />,
+  };
+
   if (loading || !progress) {
     return (
       <Card className="glass-panel">
         <div className="text-center text-text-secondary font-mono py-8">
           <span className="inline-flex items-center gap-2">
             <Loader2 className="h-5 w-5 animate-spin text-cyan" />
-            AWAITING SCAN DATA...
+            {t('common.waiting')}
           </span>
         </div>
       </Card>
@@ -69,7 +80,7 @@ export function ScanProgress({ progress, loading }: ScanProgressProps) {
       {/* Overall Progress */}
       <Card className="glass-panel">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-cyan font-mono font-bold">SCAN STATUS</h3>
+          <h3 className="text-cyan font-mono font-bold">{t('scanProgress.scanStatus')}</h3>
           <Badge variant={getStatusBadge(progress.status)}>
             {progress.status.toUpperCase()}
           </Badge>
@@ -115,10 +126,10 @@ export function ScanProgress({ progress, loading }: ScanProgressProps) {
             title: (
               <div className="flex items-center justify-between">
                 <span className="font-mono text-sm">
-                  {PHASE_LABELS[phase.name] || phase.name}
+                  {PHASE_LABELS[phase.name] || phase.name.toUpperCase()}
                 </span>
                 <Badge variant={getStatusBadge(phase.status)} className="min-w-[80px] justify-center">
-                  {phase.status.toUpperCase()}
+                  {t(`status.${phase.status}`)}
                 </Badge>
               </div>
             ),
@@ -142,10 +153,10 @@ export function ScanProgress({ progress, loading }: ScanProgressProps) {
 
       {/* Engine Status */}
       <Card className="glass-panel">
-        <h3 className="text-cyan font-mono font-bold mb-4">ENGINE STATUS</h3>
+        <h3 className="text-cyan font-mono font-bold mb-4">{t('scanProgress.engineStatus')}</h3>
         <div className="space-y-3 font-mono text-sm">
           <div className="flex items-center justify-between">
-            <span className="text-text-secondary">COMPLETED:</span>
+            <span className="text-text-secondary">{t('scanProgress.completed')}:</span>
             <div className="flex gap-2">
               {progress.engines.completed.map((engine) => (
                 <Badge key={engine} variant="completed">{engine}</Badge>
@@ -154,7 +165,7 @@ export function ScanProgress({ progress, loading }: ScanProgressProps) {
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-text-secondary">RUNNING:</span>
+            <span className="text-text-secondary">{t('scanProgress.running')}:</span>
             <div className="flex gap-2">
               {progress.engines.running ? (
                 <Badge variant="running">{progress.engines.running}</Badge>
@@ -164,7 +175,7 @@ export function ScanProgress({ progress, loading }: ScanProgressProps) {
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-text-secondary">PENDING:</span>
+            <span className="text-text-secondary">{t('scanProgress.pending')}:</span>
             <div className="flex gap-2">
               {progress.engines.pending.map((engine) => (
                 <Badge key={engine} variant="pending">{engine}</Badge>
@@ -172,35 +183,6 @@ export function ScanProgress({ progress, loading }: ScanProgressProps) {
               {progress.engines.pending.length === 0 && <span className="text-text-tertiary">--</span>}
             </div>
           </div>
-        </div>
-      </Card>
-
-      {/* Vulnerability Statistics */}
-      <Card className="glass-panel">
-        <h3 className="text-cyan font-mono font-bold mb-4">VULNERABILITY STATS</h3>
-        <div className="grid grid-cols-6 gap-4">
-          <Statistic title="TOTAL" value={progress.findings.total} valueClassName="text-critical" />
-          <Statistic title="VERIFIED" value={progress.findings.verified} valueClassName="text-success" />
-          <Statistic
-            title="FALSE POS"
-            value={progress.findings.false_positive}
-            valueClassName="text-text-tertiary"
-          />
-          <Statistic
-            title="CRITICAL"
-            value={progress.findings.by_severity.critical}
-            valueClassName={progress.findings.by_severity.critical > 0 ? 'text-critical' : ''}
-          />
-          <Statistic
-            title="HIGH"
-            value={progress.findings.by_severity.high}
-            valueClassName={progress.findings.by_severity.high > 0 ? 'text-warning' : ''}
-          />
-          <Statistic
-            title="MEDIUM"
-            value={progress.findings.by_severity.medium}
-            valueClassName={progress.findings.by_severity.medium > 0 ? 'text-yellow-500' : ''}
-          />
         </div>
       </Card>
     </div>

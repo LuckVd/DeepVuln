@@ -209,3 +209,31 @@ class ScanRepository(AsyncRepository[Scan, ScanCreate, dict]):
         await db.flush()
         await db.refresh(scan)
         return scan
+
+    async def update_task_id(
+        self,
+        db: AsyncSession,
+        *,
+        scan_id: int,
+        task_id: str
+    ) -> Optional[Scan]:
+        """
+        Update Celery task ID for a scan.
+
+        Args:
+            db: Database session
+            scan_id: Scan ID
+            task_id: Celery task ID
+
+        Returns:
+            Updated scan instance or None
+        """
+        scan = await self.get(db, id=scan_id)
+        if scan is None:
+            return None
+
+        scan.task_id = task_id
+        db.add(scan)
+        await db.flush()
+        await db.refresh(scan)
+        return scan

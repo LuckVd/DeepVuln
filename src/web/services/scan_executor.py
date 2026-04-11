@@ -26,7 +26,6 @@ from src.web.models.schemas import (
     AdversarialStatus,
     CurrentFileResponse,
 )
-from src.web.repositories.project import ProjectRepository
 from src.web.repositories.scan import ScanRepository
 from src.web.repositories.event import ScanEventRepository, ScanPhaseRepository
 from src.web.repositories.finding import FindingRepository
@@ -34,6 +33,9 @@ from src.web.repositories.finding import FindingRepository
 # Import checkpoint and phase services for pause/resume
 from src.web.services.checkpoint_service import CheckpointService, get_checkpoint_service
 from src.web.services.phase_manager import PhaseManager, get_phase_manager, PhaseStatus
+
+# Import Celery app for task control
+from src.web.core.celery_app import get_celery_app
 
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,6 @@ class ScanExecutor:
         self.phase_repo = ScanPhaseRepository()
         self.event_repo = ScanEventRepository()
         self.finding_repo = FindingRepository()
-        self.project_repo = ProjectRepository()
         self.checkpoint_service = get_checkpoint_service()
         self.phase_manager = get_phase_manager()
 
@@ -183,6 +184,11 @@ class ScanExecutor:
         )
 
         logger.info(f"Started scan {scan_id}, Celery task ID: {task.id}")
+
+        # Save task_id to database
+        async with session_maker() as db:
+            await self.scan_repo.update_task_id(db, scan_id=scan_id, task_id=task.id)
+            await db.commit()
 
         return {
             "scan_id": scan_id,
@@ -582,9 +588,6 @@ class ScanExecutor:
         Returns:
             True if cancelled successfully
         """
-        # TODO: Implement Celery task revocation when task_id is stored
-        # from src.web.tasks.scan_tasks import execute_scan_task
-
         session_maker = get_session_local()
         async with session_maker() as db:
             scan = await self.scan_repo.get(db, id=scan_id)
@@ -594,6 +597,18 @@ class ScanExecutor:
             if scan.status not in [ScanStatus.PENDING, ScanStatus.RUNNING]:
                 return False
 
+            # Revoke Celery task if task_id exists
+            if scan.task_id:
+                try:
+                    celery_app = get_celery_app()
+                    # Use Celery control to revoke the task
+                    # terminate=True will kill the task immediately
+                    celery_app.control.revoke(scan.task_id, terminate=True, signal='SIGKILL')
+                    logger.info(f"Revoked Celery task {scan.task_id} for scan {scan_id}")
+                except Exception as e:
+                    logger.error(f"Failed to revoke Celery task {scan.task_id}: {e}")
+                    # Continue to update status even if revocation fails
+
             # Update scan status
             await self.scan_repo.update_status(
                 db,
@@ -601,10 +616,6 @@ class ScanExecutor:
                 status=ScanStatus.CANCELLED,
             )
             await db.commit()
-
-            # Revoke Celery task if running
-            # Note: This requires storing task_id with the scan
-            # TODO: Add task_id to scan model
 
             logger.info(f"Cancelled scan {scan_id}")
             return True

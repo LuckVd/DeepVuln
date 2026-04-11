@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import client from '@/api/client'
 
 // Dashboard statistics types
 export interface DashboardStats {
@@ -33,11 +34,8 @@ export function useDashboardStats() {
   return useQuery<DashboardStats>({
     queryKey: ['dashboard', 'stats'],
     queryFn: async () => {
-      const response = await fetch('/stats/dashboard')
-      if (!response.ok) {
-        throw new Error('Failed to fetch dashboard stats')
-      }
-      return response.json()
+      const response = await client.get('/stats/dashboard')
+      return response.data
     },
     refetchInterval: 30000, // Refresh every 30 seconds
   })
@@ -48,11 +46,8 @@ export function useRecentActivity(limit: number = 10) {
   return useQuery<RecentActivity>({
     queryKey: ['dashboard', 'activity', limit],
     queryFn: async () => {
-      const response = await fetch(`/stats/recent-activity?limit=${limit}`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch recent activity')
-      }
-      return response.json()
+      const response = await client.get('/stats/recent-activity', { params: { limit } })
+      return response.data
     },
     refetchInterval: 15000, // Refresh every 15 seconds
   })

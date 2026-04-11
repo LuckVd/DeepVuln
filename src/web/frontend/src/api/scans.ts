@@ -145,3 +145,36 @@ export const scansApi = {
     return response.data
   },
 }
+
+/**
+ * 全局漏洞 API（跨所有扫描）
+ */
+export const globalVulnsApi = {
+  /**
+   * 获取全局漏洞列表
+   */
+  async list(params?: {
+    page?: number
+    page_size?: number
+    severity?: string
+    status?: string
+    search?: string
+  }): Promise<PaginatedResponse<Finding & { scan_name: string }>> {
+    const response = await client.get('/stats/vulnerabilities', { params })
+    return response.data
+  },
+
+  /**
+   * 获取全局漏洞摘要
+   */
+  async getSummary(): Promise<{
+    total: number
+    verified: number
+    false_positive: number
+    by_status: Record<string, number>
+    by_severity: Record<string, number>
+  }> {
+    const response = await client.get('/stats/vulnerabilities/summary')
+    return response.data
+  },
+}

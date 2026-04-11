@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Badge, Button, Alert, Tabs, Descriptions, Sheet, Progress } from '@/components/ui';
 import {
   Check,
@@ -8,6 +9,8 @@ import {
   XCircle,
   AlertTriangle,
 } from 'lucide-react';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { translateDescription, translateRemediation } from '@/utils/ruleTranslations';
 import type { Finding, FindingStatus } from '@/types/models';
 import CodeHighlight from './CodeHighlight';
 
@@ -19,24 +22,6 @@ interface FindingDrawerProps {
   isUpdating?: boolean;
 }
 
-const STATUS_MAP: Record<
-  FindingStatus,
-  { text: string; variant: 'pending' | 'completed' | 'failed' | 'medium'; icon: React.ReactNode }
-> = {
-  pending: { text: 'PENDING', variant: 'pending', icon: <HelpCircle className="h-4 w-4" /> },
-  confirmed: { text: 'CONFIRMED', variant: 'completed', icon: <CheckCircle className="h-4 w-4" /> },
-  false_positive: { text: 'FALSE POSITIVE', variant: 'failed', icon: <XCircle className="h-4 w-4" /> },
-  conditional: { text: 'CONDITIONAL', variant: 'medium', icon: <AlertTriangle className="h-4 w-4" /> },
-};
-
-const SEVERITY_MAP: Record<string, { text: string; variant: 'critical' | 'high' | 'medium' | 'low' | 'info' }> = {
-  critical: { text: 'CRITICAL', variant: 'critical' },
-  high: { text: 'HIGH', variant: 'high' },
-  medium: { text: 'MEDIUM', variant: 'medium' },
-  low: { text: 'LOW', variant: 'low' },
-  info: { text: 'INFO', variant: 'info' },
-};
-
 /**
  * Finding details drawer component with cyberpunk theme
  */
@@ -47,6 +32,24 @@ export default function FindingDrawer({
   onStatusChange,
   isUpdating = false,
 }: FindingDrawerProps) {
+  const { t } = useLanguage();
+
+  // Dynamic status and severity maps with translations
+  const STATUS_MAP = useMemo<Record<FindingStatus, { text: string; variant: 'pending' | 'completed' | 'failed' | 'medium'; icon: React.ReactNode }>>(() => ({
+    pending: { text: t('status.waiting'), variant: 'pending', icon: <HelpCircle className="h-4 w-4" /> },
+    confirmed: { text: t('findings.confirmed'), variant: 'completed', icon: <CheckCircle className="h-4 w-4" /> },
+    false_positive: { text: t('findings.falsePositive'), variant: 'failed', icon: <XCircle className="h-4 w-4" /> },
+    conditional: { text: t('findings.conditional'), variant: 'medium', icon: <AlertTriangle className="h-4 w-4" /> },
+  }), [t]);
+
+  const SEVERITY_MAP = useMemo<Record<string, { text: string; variant: 'critical' | 'high' | 'medium' | 'low' | 'info' }>>(() => ({
+    critical: { text: t('severity.critical'), variant: 'critical' },
+    high: { text: t('severity.high'), variant: 'high' },
+    medium: { text: t('severity.medium'), variant: 'medium' },
+    low: { text: t('severity.low'), variant: 'low' },
+    info: { text: t('severity.info'), variant: 'info' },
+  }), [t]);
+
   if (!finding) return null;
 
   const statusConfig = STATUS_MAP[finding.status] || STATUS_MAP.pending;
@@ -100,7 +103,7 @@ export default function FindingDrawer({
     >
       {/* Status Actions */}
       <div className="mb-6">
-        <div className="text-text-secondary font-mono text-sm mb-3">MARK AS:</div>
+        <div className="text-text-secondary font-mono text-sm mb-3">{t('findings.markAs')}</div>
         <div className="flex gap-3">
           <Button
             size="sm"
@@ -109,7 +112,7 @@ export default function FindingDrawer({
             disabled={isUpdating}
           >
             <Check className="mr-2 h-4 w-4" />
-            CONFIRMED
+            {t('findings.confirmed')}
           </Button>
           <Button
             size="sm"
@@ -118,7 +121,7 @@ export default function FindingDrawer({
             disabled={isUpdating}
           >
             <X className="mr-2 h-4 w-4" />
-            FALSE POSITIVE
+            {t('findings.falsePositive')}
           </Button>
           <Button
             size="sm"
@@ -127,7 +130,7 @@ export default function FindingDrawer({
             disabled={isUpdating}
           >
             <HelpCircle className="mr-2 h-4 w-4" />
-            CONDITIONAL
+            {t('findings.conditional')}
           </Button>
         </div>
       </div>
@@ -137,48 +140,48 @@ export default function FindingDrawer({
         items={[
           {
             key: 'overview',
-            label: 'OVERVIEW',
+            label: t('findings.overview'),
             children: (
               <>
                 {/* Basic Info */}
                 <Descriptions
                   items={[
                     {
-                      label: 'VULNERABILITY TYPE',
+                      label: t('findings.vulnType'),
                       value: <span className="text-cyan font-mono">{finding.vuln_type}</span>,
                       span: 2,
                     },
                     {
-                      label: 'SEVERITY',
+                      label: t('severity.severity').toUpperCase(),
                       value: (
                         <div className="flex items-center gap-3">
                           <Badge variant={severityConfig.variant}>{severityConfig.text}</Badge>
                           <span className="text-text-secondary">
-                            CONFIDENCE: {(finding.confidence * 100).toFixed(0)}%
+                            {t('findings.confidence').toUpperCase()}: {(finding.confidence * 100).toFixed(0)}%
                           </span>
                         </div>
                       ),
                       span: 2,
                     },
                     {
-                      label: 'FILE LOCATION',
+                      label: t('findings.fileLocation'),
                       value: <code className="text-cyan font-mono text-sm bg-background-tertiary px-2 py-1 rounded">{finding.file_path}</code>,
                       span: 2,
                     },
                     {
-                      label: 'LINE NUMBERS',
+                      label: t('findings.lineNumbers'),
                       value: finding.line_start && finding.line_end
                         ? `${finding.line_start} - ${finding.line_end}`
                         : finding.line_start || '-',
                       span: 2,
                     },
                     {
-                      label: 'FUNCTION',
+                      label: t('table.function'),
                       value: finding.function_name || '-',
                       span: 2,
                     },
                     {
-                      label: 'DETECTION ENGINE',
+                      label: t('findings.detectionEngine'),
                       value: finding.engine,
                       span: 2,
                     },
@@ -190,17 +193,19 @@ export default function FindingDrawer({
                 {/* Description */}
                 {finding.description && (
                   <div className="mt-6">
-                    <h4 className="text-cyan font-mono font-bold mb-3">DESCRIPTION</h4>
-                    <p className="text-text-secondary leading-relaxed">{finding.description}</p>
+                    <h4 className="text-cyan font-mono font-bold mb-3">{t('findings.description')}</h4>
+                    <p className="text-text-secondary leading-relaxed">
+                      {translateDescription(finding.vuln_type, finding.description)}
+                    </p>
                   </div>
                 )}
 
                 {/* Remediation */}
-                {finding.remediation && (
+                {(finding.remediation || translateRemediation(finding.vuln_type, null)) && (
                   <div className="mt-6">
-                    <h4 className="text-cyan font-mono font-bold mb-3">REMEDIATION</h4>
-                    <Alert variant="info" title="RECOMMENDED ACTIONS">
-                      {finding.remediation}
+                    <h4 className="text-cyan font-mono font-bold mb-3">{t('findings.remediation')}</h4>
+                    <Alert variant="info" title={t('findings.recommendedActions')}>
+                      {translateRemediation(finding.vuln_type, finding.remediation) || finding.remediation}
                     </Alert>
                   </div>
                 )}
@@ -209,14 +214,14 @@ export default function FindingDrawer({
           },
           {
             key: 'code',
-            label: 'CODE EVIDENCE',
+            label: t('findings.codeEvidence'),
             children: finding.evidence ? (
               <>
                 <div className="mb-4 flex items-center justify-between">
-                  <span className="text-text-secondary font-mono text-sm">AFFECTED CODE SNIPPET</span>
+                  <span className="text-text-secondary font-mono text-sm">{t('findings.affectedCode')}</span>
                   <Button size="sm" variant="outline" onClick={copyEvidence}>
                     <Copy className="mr-2 h-4 w-4" />
-                    COPY
+                    {t('findings.copy')}
                   </Button>
                 </div>
                 <CodeHighlight
@@ -227,28 +232,28 @@ export default function FindingDrawer({
                 />
               </>
             ) : (
-              <Alert variant="warning" title="NO CODE EVIDENCE">
-                This finding does not include code evidence.
+              <Alert variant="warning" title={t('findings.noCodeEvidence')}>
+                {t('findings.noCodeEvidenceDesc')}
               </Alert>
             ),
           },
           {
             key: 'metadata',
-            label: 'METADATA',
+            label: t('findings.metadata'),
             children: (
               <Descriptions
                 items={[
-                  { label: 'FINDING ID', value: String(finding.id), span: 1 },
-                  { label: 'SCAN ID', value: String(finding.scan_id), span: 1 },
+                  { label: t('findings.findingId'), value: String(finding.id), span: 1 },
+                  { label: t('findings.scanId'), value: String(finding.scan_id), span: 1 },
                   {
-                    label: 'CREATED AT',
+                    label: t('findings.createdAt'),
                     value: new Date(finding.created_at).toLocaleString('zh-CN'),
                     span: 2,
                   },
                   ...(finding.cpg_path
                     ? [
                         {
-                          label: 'CPG PATH',
+                          label: t('findings.cpgPath'),
                           value: (
                             <pre className="text-xs font-mono bg-background-tertiary p-2 rounded overflow-x-auto">
                               {JSON.stringify(finding.cpg_path, null, 2)}

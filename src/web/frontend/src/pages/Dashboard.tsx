@@ -3,14 +3,16 @@ import { Activity, ShieldAlert, TrendingUp, AlertTriangle, Clock } from 'lucide-
 import { useDashboardStats, useRecentActivity } from '@/hooks/useDashboard';
 import { LoadingPage } from '@/components/ui';
 import { useNavigate } from 'react-router-dom';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const { data: stats, isLoading: statsLoading, error: statsError } = useDashboardStats();
   const { data: activity, isLoading: activityLoading } = useRecentActivity(5);
 
   if (statsLoading) {
-    return <LoadingPage message="INITIALIZING DASHBOARD..." />;
+    return <LoadingPage message={t('dashboard.initializing')} />;
   }
 
   if (statsError || !stats) {
@@ -18,7 +20,7 @@ export default function DashboardPage() {
       <div className="p-6">
         <div className="text-center text-critical font-mono py-16">
           <AlertTriangle className="h-12 w-12 mx-auto mb-4" />
-          <p>FAILED TO LOAD DASHBOARD DATA</p>
+          <p>{t('dashboard.loadFailed')}</p>
         </div>
       </div>
     );
@@ -30,37 +32,37 @@ export default function DashboardPage() {
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
           <h1 className="text-2xl font-bold text-text-primary font-mono tracking-wider">
-            DASHBOARD
+            {t('dashboard.title')}
           </h1>
           <span className="text-cyan">//</span>
-          <span className="text-cyan font-mono">OVERVIEW</span>
+          <span className="text-cyan font-mono">{t('dashboard.overview')}</span>
         </div>
-        <p className="text-text-secondary font-sans">Security scan overview and statistics</p>
+        <p className="text-text-secondary font-sans">{t('dashboard.subtitle')}</p>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         <StatisticCard
-          title="TOTAL SCANS"
+          title={t('dashboard.totalScans')}
           value={stats.total_scans}
           icon={<Activity className="h-10 w-10" />}
           color="cyan"
-          trend={`+${stats.recent_scans} this week`}
+          trend={t('dashboard.trend.week').replace('{}', String(stats.recent_scans))}
         />
         <StatisticCard
-          title="ACTIVE SCANS"
+          title={t('dashboard.activeScans')}
           value={stats.active_scans}
           icon={<TrendingUp className="h-10 w-10" />}
           color="warning"
         />
         <StatisticCard
-          title="TOTAL VULNS"
+          title={t('dashboard.totalVulns')}
           value={stats.total_vulns}
           icon={<ShieldAlert className="h-10 w-10" />}
           color="critical"
         />
         <StatisticCard
-          title="CRITICAL"
+          title={t('dashboard.criticalVulns')}
           value={stats.critical_vulns}
           icon={<AlertTriangle className="h-10 w-10" />}
           color="critical"
@@ -69,23 +71,23 @@ export default function DashboardPage() {
 
       {/* Severity Breakdown */}
       <Card className="glass-panel mb-6">
-        <h3 className="text-cyan font-mono font-bold mb-4">VULNERABILITY BREAKDOWN</h3>
+        <h3 className="text-cyan font-mono font-bold mb-4">{t('dashboard.vulnBreakdown')}</h3>
         <div className="grid grid-cols-5 gap-4">
-          <SeverityStat label="CRITICAL" count={stats.severity_breakdown.critical} color="critical" />
-          <SeverityStat label="HIGH" count={stats.severity_breakdown.high} color="high" />
-          <SeverityStat label="MEDIUM" count={stats.severity_breakdown.medium} color="medium" />
-          <SeverityStat label="LOW" count={stats.severity_breakdown.low} color="low" />
-          <SeverityStat label="INFO" count={stats.severity_breakdown.info} color="info" />
+          <SeverityStat label={t('severity.critical')} count={stats.severity_breakdown.critical} color="critical" />
+          <SeverityStat label={t('severity.high')} count={stats.severity_breakdown.high} color="high" />
+          <SeverityStat label={t('severity.medium')} count={stats.severity_breakdown.medium} color="medium" />
+          <SeverityStat label={t('severity.low')} count={stats.severity_breakdown.low} color="low" />
+          <SeverityStat label={t('severity.info')} count={stats.severity_breakdown.info} color="info" />
         </div>
       </Card>
 
       {/* Recent Activity */}
       <div className="grid grid-cols-2 gap-6">
         <Card className="glass-panel">
-          <h3 className="text-cyan font-mono font-bold mb-4">RECENT SCANS</h3>
+          <h3 className="text-cyan font-mono font-bold mb-4">{t('dashboard.recentScans')}</h3>
           {activityLoading ? (
             <div className="text-center text-text-secondary font-mono py-8">
-              LOADING...
+              {t('common.loading')}
             </div>
           ) : activity && activity.items.length > 0 ? (
             <div className="space-y-2">
@@ -107,7 +109,11 @@ export default function DashboardPage() {
                     }
                     className="min-w-[90px] justify-center"
                   >
-                    {item.status.toUpperCase()}
+                    {item.status === 'running' ? t('status.scanning').toUpperCase() :
+                     item.status === 'completed' ? t('status.complete').toUpperCase() :
+                     item.status === 'failed' ? t('status.failed').toUpperCase() :
+                     item.status === 'paused' ? t('status.paused').toUpperCase() :
+                     t('status.waiting').toUpperCase()}
                   </Badge>
                   {item.findings_count > 0 && (
                     <span className="text-critical font-mono text-sm ml-2">{item.findings_count}</span>
@@ -117,32 +123,32 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="text-center text-text-tertiary font-mono py-8">
-              NO SCANS YET
+              {t('dashboard.noScans')}
             </div>
           )}
         </Card>
 
         <Card className="glass-panel">
-          <h3 className="text-cyan font-mono font-bold mb-4">QUICK ACTIONS</h3>
+          <h3 className="text-cyan font-mono font-bold mb-4">{t('dashboard.quickActions')}</h3>
           <div className="space-y-3">
             <QuickAction
-              title="NEW SCAN"
-              description="Start a new security scan"
+              title={t('dashboard.quickAction.newScan')}
+              description={t('dashboard.quickAction.newScanDesc')}
               onClick={() => navigate('/scans')}
             />
             <QuickAction
-              title="VIEW ALL SCANS"
-              description="Browse all scan tasks"
+              title={t('dashboard.quickAction.viewScans')}
+              description={t('dashboard.quickAction.viewScansDesc')}
               onClick={() => navigate('/scans')}
             />
             <QuickAction
-              title="VULNERABILITIES"
-              description="View all detected vulnerabilities"
+              title={t('dashboard.quickAction.vulns')}
+              description={t('dashboard.quickAction.vulnsDesc')}
               onClick={() => navigate('/vulnerabilities')}
             />
             <QuickAction
-              title="REPORTS"
-              description="Generate and download reports"
+              title={t('dashboard.quickAction.reports')}
+              description={t('dashboard.quickAction.reportsDesc')}
               onClick={() => navigate('/reports')}
             />
           </div>

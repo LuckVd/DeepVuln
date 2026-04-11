@@ -1,21 +1,9 @@
+import { useMemo } from 'react';
 import { Badge, Progress, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Button } from '@/components/ui';
 import { Eye } from 'lucide-react';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { getVulnTypeName } from '@/utils/ruleTranslations';
 import type { Finding, SeverityLevel, FindingStatus } from '@/types/models';
-
-const STATUS_MAP: Record<FindingStatus, { text: string; variant: 'pending' | 'running' | 'completed' | 'failed' | 'high' | 'medium' | 'low' }> = {
-  pending: { text: 'PENDING', variant: 'pending' },
-  confirmed: { text: 'CONFIRMED', variant: 'completed' },
-  false_positive: { text: 'FALSE POSITIVE', variant: 'failed' },
-  conditional: { text: 'CONDITIONAL', variant: 'medium' },
-};
-
-const SEVERITY_MAP: Record<SeverityLevel, { text: string; variant: 'critical' | 'high' | 'medium' | 'low' | 'info' }> = {
-  critical: { text: 'CRITICAL', variant: 'critical' },
-  high: { text: 'HIGH', variant: 'high' },
-  medium: { text: 'MEDIUM', variant: 'medium' },
-  low: { text: 'LOW', variant: 'low' },
-  info: { text: 'INFO', variant: 'info' },
-};
 
 interface FindingListProps {
   findings: Finding[]
@@ -39,6 +27,24 @@ export default function FindingList({
   onPageChange,
   onViewDetail,
 }: FindingListProps) {
+  const { t } = useLanguage();
+
+  // Dynamic status and severity maps with translations
+  const STATUS_MAP = useMemo<Record<FindingStatus, { text: string; variant: 'pending' | 'running' | 'completed' | 'failed' | 'high' | 'medium' | 'low' }>>(() => ({
+    pending: { text: t('status.waiting'), variant: 'pending' },
+    confirmed: { text: t('status.complete'), variant: 'completed' },
+    false_positive: { text: t('findings.falsePositive'), variant: 'failed' },
+    conditional: { text: t('status.conditional'), variant: 'medium' },
+  }), [t]);
+
+  const SEVERITY_MAP = useMemo<Record<SeverityLevel, { text: string; variant: 'critical' | 'high' | 'medium' | 'low' | 'info' }>>(() => ({
+    critical: { text: t('severity.critical'), variant: 'critical' },
+    high: { text: t('severity.high'), variant: 'high' },
+    medium: { text: t('severity.medium'), variant: 'medium' },
+    low: { text: t('severity.low'), variant: 'low' },
+    info: { text: t('severity.info'), variant: 'info' },
+  }), [t]);
+
   // Sort findings by severity
   const sortedFindings = [...findings].sort((a, b) => {
     const order = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
@@ -50,15 +56,15 @@ export default function FindingList({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-20 text-cyan">ID</TableHead>
-            <TableHead>VULN TYPE</TableHead>
-            <TableHead className="w-28">SEVERITY</TableHead>
-            <TableHead className="w-32">CONFIDENCE</TableHead>
-            <TableHead className="w-28">STATUS</TableHead>
-            <TableHead>LOCATION</TableHead>
-            <TableHead className="w-28">FUNCTION</TableHead>
-            <TableHead className="w-20">ENGINE</TableHead>
-            <TableHead className="w-20 text-right">ACTION</TableHead>
+            <TableHead className="w-20 text-cyan">{t('table.id')}</TableHead>
+            <TableHead>{t('table.vulnType')}</TableHead>
+            <TableHead className="w-28">{t('table.severity')}</TableHead>
+            <TableHead className="w-32">{t('table.confidence')}</TableHead>
+            <TableHead className="w-28">{t('findings.status')}</TableHead>
+            <TableHead>{t('table.location')}</TableHead>
+            <TableHead className="w-28">{t('table.function')}</TableHead>
+            <TableHead className="w-20">{t('table.engine')}</TableHead>
+            <TableHead className="w-20 text-right">{t('table.action')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -67,14 +73,14 @@ export default function FindingList({
               <TableCell colSpan={9} className="text-center text-text-secondary font-mono">
                 <span className="inline-flex items-center gap-2">
                   <span className="w-2 h-2 bg-cyan rounded-full animate-ping" />
-                  LOADING...
+                  {t('common.loading')}
                 </span>
               </TableCell>
             </TableRow>
           ) : sortedFindings.length === 0 ? (
             <TableRow>
               <TableCell colSpan={9} className="text-center text-text-tertiary font-mono py-8">
-                NO FINDINGS DETECTED
+                {t('findings.noCodeEvidence')}
               </TableCell>
             </TableRow>
           ) : (
@@ -91,7 +97,7 @@ export default function FindingList({
                   className="cursor-pointer"
                 >
                   <TableCell className="font-mono text-cyan">#{String(finding.id).padStart(4, '0')}</TableCell>
-                  <TableCell className="font-medium text-text-primary">{finding.vuln_type}</TableCell>
+                  <TableCell className="font-medium text-text-primary">{getVulnTypeName(finding.vuln_type)}</TableCell>
                   <TableCell>
                     <Badge variant={severityConfig.variant} className="min-w-[90px] justify-center">
                       {severityConfig.text}
@@ -141,7 +147,7 @@ export default function FindingList({
       {total > 0 && (
         <div className="flex items-center justify-between border-t border-border p-4 mt-4">
           <span className="text-sm text-text-secondary font-mono">
-            TOTAL: {String(total).padStart(3, '0')} FINDINGS
+            {t('common.total')}: {String(total).padStart(3, '0')}
           </span>
           <div className="flex items-center gap-4">
             <Button

@@ -216,6 +216,16 @@ class ProgressBroadcaster:
 
         self._completed_phases.add(phase_name)
 
+        # Prepare scan update data (collect all phase data before DB update)
+        scan_update_data = {}
+
+        # Update total_files from source_preparation phase
+        if phase_name == "source_preparation" and "total_files" in result:
+            scan_update_data["total_files"] = result["total_files"]
+            logger.info(f"Scan {self.scan_id}: Total files set to {result['total_files']} from source_preparation phase")
+        elif phase_name == "source_preparation":
+            logger.warning(f"Scan {self.scan_id}: source_preparation phase completed but 'total_files' not in result. Result keys: {list(result.keys())}")
+
         async with self._get_db_session() as db:
             # Find and update the phase record
             from sqlalchemy import select, update
@@ -256,6 +266,10 @@ class ProgressBroadcaster:
                         )
                 await db.commit()
 
+        # Update scan record with collected data
+        if scan_update_data:
+            await self._update_scan(scan_update_data)
+
         # Broadcast to WebSocket
         await self.event_broadcaster.broadcast_phase_complete(
             self.scan_id,
@@ -291,7 +305,34 @@ class ProgressBroadcaster:
     async def on_engine_complete(
         self, engine_name: str, findings_count: int, duration_seconds: float = 0
     ) -> None:
-        """Handle engine complete event."""
+        """Handle engine complete event.
+
+        Updates real-time statistics including findings count and tokens used.
+        """
+        # Get current total tokens used from all completed phases
+        tokens_used = await self._get_total_tokens_used()
+
+        # Get total findings from all completed phases
+        total_findings = await self._get_total_findings_from_phases()
+
+        # Calculate severity statistics from findings in database
+        severity_stats = await self._calculate_severity_stats()
+
+        # Real-time update of scan statistics
+        await self._update_scan(
+            {
+                "findings_count": total_findings,
+                "tokens_used": tokens_used,
+                "critical_count": severity_stats["critical"],
+                "high_count": severity_stats["high"],
+                "medium_count": severity_stats["medium"],
+                "low_count": severity_stats["low"],
+                "info_count": severity_stats["info"],
+                "verified_count": severity_stats["verified"],
+                "false_positive_count": severity_stats["false_positive"],
+            }
+        )
+
         # Create event in database
         await self._create_event(
             event_type="engine_complete",
@@ -300,6 +341,8 @@ class ProgressBroadcaster:
             details={
                 "findings_count": findings_count,
                 "duration_seconds": duration_seconds,
+                "total_findings": total_findings,
+                "tokens_used": tokens_used,
             },
         )
 
@@ -310,9 +353,9 @@ class ProgressBroadcaster:
             message=f"{engine_name} analysis complete: {findings_count} findings",
         )
 
-        logger.debug(
+        logger.info(
             f"Engine '{engine_name}' completed for scan {self.scan_id}: "
-            f"{findings_count} findings"
+            f"{findings_count} findings (total: {total_findings}), {tokens_used} tokens"
         )
 
     async def on_engine_failed(self, engine_name: str, error: str) -> None:
@@ -388,18 +431,42 @@ class ProgressBroadcaster:
         self, findings_count: int, duration_seconds: float
     ) -> None:
         """Handle scan complete event."""
-        # Update scan record
-        await self._update_scan(
-            {
-                "status": ScanStatus.COMPLETED,
-                "progress_percent": 100,
-                "findings_count": findings_count,
-                "completed_at": _utc_now_naive(),
-            }
-        )
+        # Calculate severity statistics
+        severity_stats = await self._calculate_severity_stats()
 
         # Get total tokens used from events
         tokens_used = await self._get_total_tokens_used()
+
+        # Get current scan to access total_files
+        async with self._get_db_session() as db:
+            scan = await self.scan_repo.get(db, id=self.scan_id)
+            if scan:
+                total_files = scan.total_files or 0
+            else:
+                total_files = 0
+
+        # Update scan record with all statistics
+        update_data = {
+            "status": ScanStatus.COMPLETED,
+            "progress_percent": 100,
+            "findings_count": findings_count,
+            "completed_at": _utc_now_naive(),
+            "critical_count": severity_stats["critical"],
+            "high_count": severity_stats["high"],
+            "medium_count": severity_stats["medium"],
+            "low_count": severity_stats["low"],
+            "info_count": severity_stats["info"],
+            "verified_count": severity_stats["verified"],
+            "false_positive_count": severity_stats["false_positive"],
+            "current_phase": None,  # Clear current phase on completion
+            "current_step": None,   # Clear current step on completion
+        }
+
+        # Set analyzed_files equal to total_files (all code files were analyzed)
+        if total_files > 0:
+            update_data["analyzed_files"] = total_files
+
+        await self._update_scan(update_data)
 
         # Broadcast to WebSocket
         await self.event_broadcaster.broadcast_scan_complete(
@@ -414,6 +481,7 @@ class ProgressBroadcaster:
                 "findings_count": findings_count,
                 "duration_seconds": duration_seconds,
                 "tokens_used": tokens_used,
+                "severity_breakdown": severity_stats,
             },
         )
 
@@ -552,6 +620,68 @@ class ProgressBroadcaster:
                 )
             )
             return result.scalar_one() or 0
+
+    async def _get_total_findings_from_phases(self) -> int:
+        """Get total findings from all completed phases.
+
+        Returns:
+            Total findings found across all phases
+        """
+        async with self._get_db_session() as db:
+            from sqlalchemy import select, func
+
+            result = await db.execute(
+                select(func.sum(ScanPhase.findings_found)).where(
+                    ScanPhase.scan_id == self.scan_id
+                )
+            )
+            return result.scalar_one() or 0
+
+    async def _calculate_severity_stats(self) -> Dict[str, int]:
+        """Calculate severity statistics from findings.
+
+        Returns:
+            Dictionary with severity counts
+        """
+        async with self._get_db_session() as db:
+            from sqlalchemy import select, func
+
+            # Count findings by severity and status
+            result = await db.execute(
+                select(
+                    Finding.severity,
+                    Finding.status,
+                    func.count(Finding.id)
+                ).where(
+                    Finding.scan_id == self.scan_id
+                ).group_by(Finding.severity, Finding.status)
+            )
+
+            # Initialize counters
+            stats = {
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "info": 0,
+                "verified": 0,
+                "false_positive": 0,
+            }
+
+            # Aggregate counts
+            for severity, status, count in result.all():
+                severity_lower = (severity or "").lower()
+                if severity_lower in stats:
+                    stats[severity_lower] += count
+
+                # Count by status
+                status_lower = (status or "").lower()
+                if status_lower == "verified":
+                    stats["verified"] += count
+                elif status_lower == "false_positive":
+                    stats["false_positive"] += count
+
+            return stats
 
 
 # ============================================================================

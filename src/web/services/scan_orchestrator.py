@@ -24,7 +24,6 @@ from src.layers.l3_analysis.llm.client import LLMClient
 from src.web.models.database import get_session_local
 from src.web.models.scan import ScanStatus
 from src.web.models.finding import Finding as FindingModel
-from src.web.repositories.project import ProjectRepository
 from src.web.services.progress_broadcaster import (
     ProgressCallback,
     ProgressBroadcaster,
@@ -46,6 +45,7 @@ from src.web.services.adjudication_service import (
 from src.web.services.adversarial_service import (
     AdversarialService,
     create_adversarial_service,
+    create_adversarial_service_from_db,
 )
 from src.web.services.incremental_scan import (
     IncrementalScanService,
@@ -76,7 +76,7 @@ class ScanOrchestrator:
     def __init__(
         self,
         scan_id: int,
-        project_id: int,
+        source_path: str,
         scan_config: Dict[str, Any],
         progress_callback: Optional[ProgressCallback] = None,
         db_session_factory: Optional[Callable[[], AsyncSession]] = None,
@@ -86,14 +86,14 @@ class ScanOrchestrator:
 
         Args:
             scan_id: ID of the scan in the database
-            project_id: ID of the project being scanned
+            source_path: Path to the source code to scan
             scan_config: Scan configuration dictionary
             progress_callback: Optional progress callback for events
             db_session_factory: Factory function for creating DB sessions
             llm_client: Optional LLM client for LLM-based features
         """
         self.scan_id = scan_id
-        self.project_id = project_id
+        self.source_path = source_path
         self.config = scan_config
         self.progress_callback = progress_callback or ProgressBroadcaster(
             scan_id, db_session_factory
@@ -102,7 +102,6 @@ class ScanOrchestrator:
         self.llm_client = llm_client
 
         # Runtime state
-        self.source_path: Optional[Path] = None
         self.temp_dir: Optional[Path] = None
         self.tech_stack: Optional[Dict[str, Any]] = None
         self.attack_surface_report_obj: Optional[AttackSurfaceReport] = None  # Original AttackSurfaceReport object
@@ -116,8 +115,8 @@ class ScanOrchestrator:
         self.total_tokens = 0
         self.start_time: Optional[datetime] = None
 
-        # Repository
-        self.project_repo = ProjectRepository()
+        # Token tracking for separation
+        self._adversarial_tokens_used: int = 0  # Track tokens used by adversarial verification
 
         # Services (lazy initialization)
         self._attack_surface_service: Optional[AttackSurfaceService] = None
@@ -779,6 +778,12 @@ class ScanOrchestrator:
             options["max_files"] = self.config.get("agent_max_files", 50)
             options["tech_stack"] = self.tech_stack
 
+            # IMPORTANT: Pass orchestrator's LLM client to agent engine
+            # This ensures token usage is tracked consistently
+            if self.llm_client:
+                options["llm_client"] = self.llm_client
+                logger.info(f"Scan {self.scan_id}: Passing LLM client to agent engine")
+
             # Add database context for more informed analysis
             databases = self.tech_stack.get("databases", [])
             if databases:
@@ -867,9 +872,12 @@ class ScanOrchestrator:
         )
 
         # Verify findings in batch
+        # P18: Use concurrency manager with config from database
+        from src.core.llm import get_agent_scan_concurrency_manager_from_db
+        concurrency_manager = await get_agent_scan_concurrency_manager_from_db(self.db_session_factory)
         verification_results = await verification_service.verify_findings_batch(
             findings=all_findings,
-            max_concurrent=3,  # Limit concurrent LLM calls
+            max_concurrent=concurrency_manager.max_concurrent,
         )
 
         # Apply verification results to findings
@@ -996,13 +1004,17 @@ class ScanOrchestrator:
 
         logger.info(f"Starting adversarial verification for {len(all_findings)} findings")
 
-        # Create adversarial service with progress callback
-        adversarial_service = create_adversarial_service(
-            llm_client=self.llm_client,
+        # Create adversarial service from database (verification type config)
+        adversarial_service = await create_adversarial_service_from_db(
+            db_session_factory=self.db_session_factory,
             max_rounds=max_rounds,
             round_timeout=round_timeout,
             progress_callback=self._adversarial_progress_callback,
         )
+
+        if adversarial_service is None:
+            logger.warning("No verification LLM config found, skipping adversarial verification")
+            return {"verified_count": 0, "confirmed": 0, "rejected": 0, "skipped": True}
 
         # Filter findings that should be verified
         findings_to_verify = [
@@ -1016,12 +1028,27 @@ class ScanOrchestrator:
 
         logger.info(f"Verifying {len(findings_to_verify)} findings adversarially (filtered from {len(all_findings)})")
 
+        # Track token usage before adversarial verification
+        tokens_before = 0
+        if self.llm_client:
+            tokens_before = self.llm_client.get_total_usage().total_tokens
+
         # Verify findings in batch
+        # P18: Use concurrency manager with config from database
+        from src.core.llm import get_verification_concurrency_manager_from_db
+        verification_manager = await get_verification_concurrency_manager_from_db(self.db_session_factory)
         verification_results = await adversarial_service.verify_findings_batch(
             findings=findings_to_verify,
             source_path=self.source_path,
-            max_concurrent=2,  # Limit concurrent LLM calls
+            max_concurrent=verification_manager.max_concurrent,
         )
+
+        # Track token usage after adversarial verification
+        tokens_after = 0
+        if self.llm_client:
+            tokens_after = self.llm_client.get_total_usage().total_tokens
+            self._adversarial_tokens_used = max(0, tokens_after - tokens_before)
+            logger.info(f"Adversarial verification used {self._adversarial_tokens_used} tokens")
 
         # Apply results to findings
         confirmed = 0
@@ -1200,13 +1227,7 @@ class ScanOrchestrator:
         about the project's attack surface, which can be used to optimize
         downstream scanning phases.
         """
-        # Get project source path first (needed before source preparation)
-        async with self.db_session_factory() as db:
-            project = await self.project_repo.get(db, id=self.project_id)
-            if not project:
-                raise ValueError(f"Project {self.project_id} not found")
-
-        source_path = Path(project.source_path)
+        source_path = Path(self.source_path)
 
         # Handle ZIP files for path resolution
         if source_path.suffix == ".zip":
@@ -1345,25 +1366,55 @@ class ScanOrchestrator:
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
+            "agent_scan_tokens": 0,  # P14-05: Agent 扫描词元
+            "adversarial_tokens": 0,  # P14-05: LLM 辩论词元
             "estimated_cost": 0.0,
         }
 
         logger.info(f"Token statistics check: llm_client={self.llm_client is not None}")
+
+        # Collect tokens from orchestrator's LLM client
         if self.llm_client is not None:
-            # Get total usage from LLM client
             usage = self.llm_client.get_total_usage()
             logger.info(f"LLM client total tokens: {usage.total_tokens}")
             token_stats["prompt_tokens"] = usage.prompt_tokens
             token_stats["completion_tokens"] = usage.completion_tokens
             token_stats["total_tokens"] = usage.total_tokens
 
-            # Calculate estimated cost (using simple rate: $0.002 per 1K tokens)
-            # This is a rough estimate; actual rates vary by provider
-            token_stats["estimated_cost"] = round(
-                usage.total_tokens * 0.002 / 1000, 4
+        # Collect tokens from engine raw_output (e.g., agent engine)
+        # These are Agent 扫描词元
+        agent_scan_tokens = 0
+        for engine_name, scan_result in self.scan_results.items():
+            if scan_result.raw_output and isinstance(scan_result.raw_output, dict):
+                engine_tokens = scan_result.raw_output.get("total_tokens", 0)
+                if engine_tokens:
+                    logger.info(f"Engine {engine_name} tokens: {engine_tokens}")
+                    agent_scan_tokens += engine_tokens
+
+        # Use tracked adversarial tokens if available
+        adversarial_tokens = self._adversarial_tokens_used
+
+        # If we have engine tokens, use them; otherwise calculate
+        if agent_scan_tokens > 0:
+            token_stats["agent_scan_tokens"] = agent_scan_tokens
+        else:
+            # Fallback: total - adversarial = agent scan
+            token_stats["agent_scan_tokens"] = max(
+                0, token_stats["total_tokens"] - adversarial_tokens
             )
 
-            # Update scan record with token usage
+        # Use tracked adversarial tokens
+        token_stats["adversarial_tokens"] = adversarial_tokens
+
+        # Calculate estimated cost (using simple rate: $0.002 per 1K tokens)
+        token_stats["estimated_cost"] = round(
+            token_stats["total_tokens"] * 0.002 / 1000, 4
+        )
+
+        logger.info(f"Total token statistics: {token_stats}")
+
+        # Update scan record with token usage
+        if token_stats["total_tokens"] > 0:
             async with self.db_session_factory() as db:
                 from src.web.repositories.scan import ScanRepository
 
@@ -1371,16 +1422,23 @@ class ScanOrchestrator:
                 scan = await scan_repo.get(db, id=self.scan_id)
                 if scan:
                     # Update simple tokens_used field and token_usage JSON
+                    logger.info(f"Scan {self.scan_id}: Updating token_usage: agent_scan_tokens={token_stats['agent_scan_tokens']}, adversarial_tokens={token_stats['adversarial_tokens']}")
                     await scan_repo.update(db, db_obj=scan, obj_in={
                         "tokens_used": token_stats["total_tokens"],
                         "token_usage": {
                             "prompt_tokens": token_stats["prompt_tokens"],
                             "completion_tokens": token_stats["completion_tokens"],
                             "total_tokens": token_stats["total_tokens"],
+                            "agent_scan_tokens": token_stats["agent_scan_tokens"],
+                            "adversarial_tokens": token_stats["adversarial_tokens"],
                             "estimated_cost": token_stats["estimated_cost"],
-                            "tokens_budget": scan.tokens_budget,
                         },
                     })
+                    # Ensure the update is committed immediately
+                    await db.commit()
+                    logger.info(f"Scan {self.scan_id}: token_usage updated and committed")
+                else:
+                    logger.warning(f"Scan {self.scan_id}: Not found in database, cannot update token_usage")
 
         return token_stats
 

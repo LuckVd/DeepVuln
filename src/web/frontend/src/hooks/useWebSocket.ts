@@ -16,12 +16,19 @@ interface UseWebSocketOptions {
 export function useWebSocket(scanId: number | null, options: UseWebSocketOptions = {}) {
   const [state, setState] = useState<ConnectionState>('disconnected')
   const clientRef = useRef(getWebSocketClient())
+  const connectingRef = useRef(false)  // 防止重复连接
 
   useEffect(() => {
     const client = clientRef.current
 
     // 订阅状态变化
-    const unsubscribeState = client.onStateChange(setState)
+    const unsubscribeState = client.onStateChange((newState) => {
+      setState(newState)
+      // 连接成功或失败后重置标志
+      if (newState === 'connected' || newState === 'error') {
+        connectingRef.current = false
+      }
+    })
 
     // 订阅各种事件
     const unsubscribers: (() => void)[] = []
@@ -103,12 +110,14 @@ export function useWebSocket(scanId: number | null, options: UseWebSocketOptions
   useEffect(() => {
     const client = clientRef.current
 
-    if (scanId && state !== 'connected') {
+    // 只在 scanId 变化时处理连接，避免 state 触发循环
+    if (scanId && !connectingRef.current && state !== 'connected') {
+      connectingRef.current = true
       client.connect(scanId)
     } else if (!scanId && state === 'connected') {
       client.disconnect()
     }
-  }, [scanId, state])
+  }, [scanId])
 
   return {
     state,

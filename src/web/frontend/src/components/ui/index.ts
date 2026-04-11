@@ -43,3 +43,4 @@ export { Tabs } from './tabs';
 export { Descriptions } from './descriptions';
 export { Timeline } from './timeline';
 export { LanguageSwitcher } from './LanguageSwitcher';
+export { Switch } from './switch';

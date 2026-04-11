@@ -47,7 +47,20 @@ export interface Scan {
   low_count: number | null
   info_count: number | null
   tokens_used: number | null
+  token_usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    agent_scan_tokens?: number
+    adversarial_tokens?: number
+    estimated_cost?: number
+  } | null
   tokens_budget: number | null
+  task_id: string | null  // Celery task ID for task control
+  config?: {
+    engines?: string[]
+    [key: string]: unknown
+  }
   created_at: string
   started_at: string | null
   completed_at: string | null

@@ -9,14 +9,30 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/shared/utils/cn';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [uptime, setUptime] = useState('--:--:--');
   const { t } = useLanguage();
+
+  // Update uptime every second
+  useEffect(() => {
+    const updateUptime = () => {
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      setUptime(`${hours}:${minutes}:${seconds}`);
+    };
+
+    updateUptime();
+    const interval = setInterval(updateUptime, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const menuItems = [
     { path: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
@@ -81,10 +97,10 @@ export default function AppLayout() {
             <div className="rounded bg-background-tertiary p-3 font-mono text-xs">
               <div className="flex items-center gap-2 text-success mb-1">
                 <span className="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-                <span>SYSTEM READY</span>
+                <span>{t('layout.systemReady')}</span>
               </div>
               <div className="text-text-tertiary">
-                v2.0.4 | UPTIME: <span id="uptime" className="text-cyan">--:--:--</span>
+                v2.0.4 | {t('layout.uptime')}: <span className="text-cyan">{uptime}</span>
               </div>
             </div>
           </div>
@@ -100,22 +116,6 @@ export default function AppLayout() {
       >
         <Outlet />
       </main>
-
-      {/* Uptime script */}
-      <script dangerouslySetInnerHTML={{
-        __html: `
-          function updateUptime() {
-            const now = new Date();
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const seconds = String(now.getSeconds()).padStart(2, '0');
-            const el = document.getElementById('uptime');
-            if (el) el.textContent = \`\${hours}:\${minutes}:\${seconds}\`;
-          }
-          setInterval(updateUptime, 1000);
-          updateUptime();
-        `
-      }} />
     </div>
   );
 }

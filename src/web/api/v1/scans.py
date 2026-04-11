@@ -1,10 +1,13 @@
 """Scan management API endpoints."""
 
 import json
+import csv
 from datetime import datetime
 from typing import Annotated
+from io import StringIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, Form
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -191,42 +194,36 @@ async def list_scans(
     Returns:
         Paginated list of scans with total count
     """
+    from src.web.models.scan import Scan
+
     scan_repo = ScanRepository()
     skip = (page - 1) * page_size
 
+    # Build base query with ordering
+    query = select(Scan).order_by(Scan.created_at.desc())
+
     # Apply filters
+    filters = []
+    if status:
+        filters.append(Scan.status == status)
     if project_id is not None:
-        items = await scan_repo.list_by_project(
-            db, project_id=project_id, skip=skip, limit=page_size, status=status
-        )
-        # Count total for this project
-        from src.web.models.scan import Scan
-        if status:
-            count_result = await db.execute(
-                select(func.count()).select_from(Scan).where(
-                    Scan.project_id == project_id,
-                    Scan.status == status
-                )
-            )
-        else:
-            count_result = await db.execute(
-                select(func.count()).select_from(Scan).where(Scan.project_id == project_id)
-            )
-        total = count_result.scalar_one() or 0
-    else:
-        if status:
-            items = await scan_repo.list_by_status(
-                db, status=[status], skip=skip, limit=page_size
-            )
-            # Count total for this status
-            from src.web.models.scan import Scan
-            count_result = await db.execute(
-                select(func.count()).select_from(Scan).where(Scan.status == status)
-            )
-            total = count_result.scalar_one() or 0
-        else:
-            items = await scan_repo.get_multi(db, skip=skip, limit=page_size)
-            total = await scan_repo.count(db)
+        filters.append(Scan.project_id == project_id)
+
+    # Apply filters to query
+    for filter_expr in filters:
+        query = query.where(filter_expr)
+
+    # Get paginated items
+    query = query.offset(skip).limit(page_size)
+    result = await db.execute(query)
+    items = list(result.scalars().all())
+
+    # Count total
+    count_query = select(func.count()).select_from(Scan)
+    for filter_expr in filters:
+        count_query = count_query.where(filter_expr)
+    count_result = await db.execute(count_query)
+    total = count_result.scalar_one() or 0
 
     return ScanListResponse(
         items=[ScanResponse.model_validate(item) for item in items],
@@ -867,6 +864,184 @@ async def get_scan_report(
         "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
         "report_path": scan.report_path,
     }
+
+
+@router.get("/scans/{scan_id}/report/csv")
+async def export_scan_report_csv(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(optional_api_key)] = None,
+) -> StreamingResponse:
+    """
+    Export scan report as CSV.
+
+    Args:
+        scan_id: Scan ID
+        db: Database session
+
+    Returns:
+        CSV file
+
+    Raises:
+        HTTPException 404: If scan not found
+    """
+    scan_repo = ScanRepository()
+    finding_repo = FindingRepository()
+
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Get findings
+    findings_result = await db.execute(
+        select(Finding)
+        .where(Finding.scan_id == scan_id)
+        .order_by(Finding.severity.desc(), Finding.id)
+    )
+    findings = findings_result.scalars().all()
+
+    # Create CSV
+    output = StringIO()
+    writer = csv.writer(output)
+
+    # Header
+    writer.writerow([
+        "ID", "Severity", "Confidence", "Vulnerability Type",
+        "File Path", "Line Start", "Line End", "Function",
+        "Engine", "Status", "Description", "Created At"
+    ])
+
+    # Rows
+    for finding in findings:
+        writer.writerow([
+            finding.id,
+            finding.severity,
+            f"{finding.confidence:.2f}",
+            finding.vuln_type,
+            finding.file_path,
+            finding.line_start or "",
+            finding.line_end or "",
+            finding.function_name or "",
+            finding.engine,
+            finding.status,
+            (finding.description or "")[:200],  # Truncate long descriptions
+            finding.created_at.isoformat() if finding.created_at else "",
+        ])
+
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"deepvuln_scan_{scan_id}_{timestamp}.csv"
+
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue().encode('utf-8')]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
+
+
+@router.get("/scans/{scan_id}/report/pdf")
+async def export_scan_report_pdf(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(optional_api_key)] = None,
+) -> Response:
+    """
+    Export scan report as PDF (placeholder).
+
+    Note: This is a placeholder implementation. For production use,
+    consider using libraries like reportlab, weasyprint, or
+    a dedicated PDF generation service.
+
+    Args:
+        scan_id: Scan ID
+        db: Database session
+
+    Returns:
+        PDF file (placeholder)
+
+    Raises:
+        HTTPException 404: If scan not found
+    """
+    scan_repo = ScanRepository()
+
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    # Get findings
+    finding_repo = FindingRepository()
+    findings_result = await db.execute(
+        select(Finding)
+        .where(Finding.scan_id == scan_id)
+        .order_by(Finding.severity.desc(), Finding.id)
+    )
+    findings = findings_result.scalars().all()
+
+    # Create a simple text-based report as PDF placeholder
+    # In production, use a proper PDF library
+    lines = [
+        f"DeepVuln Security Scan Report",
+        f"=" * 50,
+        f"",
+        f"Scan ID: {scan_id}",
+        f"Scan Name: {scan.name}",
+        f"Status: {scan.status}",
+        f"Created: {scan.created_at.isoformat() if scan.created_at else 'N/A'}",
+        f"",
+        f"Findings Summary",
+        f"-" * 50,
+        f"Total Findings: {len(findings)}",
+        f"",
+    ]
+
+    # Group by severity
+    severity_counts = {}
+    for finding in findings:
+        severity_counts[finding.severity] = severity_counts.get(finding.severity, 0) + 1
+
+    for severity, count in sorted(severity_counts.items(), reverse=True):
+        lines.append(f"{severity.upper()}: {count}")
+
+    lines.append("")
+    lines.append("Detailed Findings")
+    lines.append("-" * 50)
+
+    for i, finding in enumerate(findings[:50], 1):  # Limit to 50 findings
+        lines.extend([
+            f"",
+            f"#{i}. {finding.vuln_type}",
+            f"   Severity: {finding.severity}",
+            f"   Location: {finding.file_path}:{finding.line_start}",
+            f"   Engine: {finding.engine}",
+            f"   Status: {finding.status}",
+        ])
+        if finding.description:
+            lines.append(f"   Description: {finding.description[:100]}")
+
+    report_text = "\n".join(lines)
+
+    # Generate filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"deepvuln_scan_{scan_id}_{timestamp}.txt"
+
+    # Return as text file (PDF placeholder)
+    return Response(
+        content=report_text.encode('utf-8'),
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
 
 
 # ============================================================================

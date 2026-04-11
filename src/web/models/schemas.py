@@ -280,6 +280,16 @@ class ScanResponse(BaseModel):
     analyzed_files: int = 0
     findings_count: int = 0
     tokens_used: int = 0
+    token_usage: Optional[dict] = None  # P14-05: 详细词元使用统计
+
+    # Severity breakdown
+    critical_count: int = 0
+    high_count: int = 0
+    medium_count: int = 0
+    low_count: int = 0
+    info_count: int = 0
+    verified_count: int = 0
+    false_positive_count: int = 0
 
     # P14-01/05/06: 扩展字段
     attack_surface: Optional[dict] = None  # P14-01: 攻击面统计

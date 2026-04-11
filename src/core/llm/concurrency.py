@@ -20,6 +20,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, TypeVar
 
+# For type hints
+from sqlalchemy.ext.asyncio import AsyncSession
+
 T = TypeVar("T")
 
 
@@ -243,30 +246,132 @@ class LLMConcurrencyManager:
         return cls(max_concurrent=limit, provider=provider)
 
 
-# Global concurrency manager singleton
-_global_manager: LLMConcurrencyManager | None = None
+# Global concurrency manager singletons - split by usage
+_agent_scan_manager: LLMConcurrencyManager | None = None
+_verification_manager: LLMConcurrencyManager | None = None
+
+
+def get_agent_scan_concurrency_manager() -> LLMConcurrencyManager:
+    """
+    Get the concurrency manager for agent scanning LLM calls.
+
+    Returns:
+        The agent scan LLMConcurrencyManager instance.
+    """
+    global _agent_scan_manager
+    if _agent_scan_manager is None:
+        # P18: Default changed from 5 to 10 to match database default
+        max_concurrent = 10  # Default fallback
+        try:
+            import os
+            max_concurrent = int(os.getenv("AGENT_SCAN_LLM_CONCURRENT", "10"))
+        except Exception:
+            pass
+        _agent_scan_manager = LLMConcurrencyManager(max_concurrent=max_concurrent)
+    return _agent_scan_manager
+
+
+def get_verification_concurrency_manager() -> LLMConcurrencyManager:
+    """
+    Get the concurrency manager for adversarial verification LLM calls.
+
+    Returns:
+        The verification LLMConcurrencyManager instance.
+    """
+    global _verification_manager
+    if _verification_manager is None:
+        # P18: Default changed from 2 to 10 to match database default
+        max_concurrent = 10  # Default fallback
+        try:
+            import os
+            max_concurrent = int(os.getenv("VERIFICATION_LLM_CONCURRENT", "10"))
+        except Exception:
+            pass
+        _verification_manager = LLMConcurrencyManager(max_concurrent=max_concurrent)
+    return _verification_manager
 
 
 def get_global_concurrency_manager() -> LLMConcurrencyManager:
     """
-    Get the global concurrency manager.
+    Get the global concurrency manager (legacy, for backward compatibility).
+
+    .. deprecated::
+        Use get_agent_scan_concurrency_manager() or get_verification_concurrency_manager() instead.
+        This will be removed in a future version.
 
     Returns:
-        The global LLMConcurrencyManager instance.
-        Creates one from config if not set.
+        The global LLMConcurrencyManager instance (agent scan manager).
     """
-    global _global_manager
-    if _global_manager is None:
-        # P5-05: Try to get max_concurrent_requests from config
-        max_concurrent = 3  # Default fallback
-        try:
-            from src.core.config import get_llm_config
-            llm_config = get_llm_config()
-            max_concurrent = llm_config.get("max_concurrent_requests", 3)
-        except Exception:
-            pass
-        _global_manager = LLMConcurrencyManager(max_concurrent=max_concurrent)
-    return _global_manager
+    return get_agent_scan_concurrency_manager()
+
+
+def set_global_concurrency_manager(manager: LLMConcurrencyManager) -> None:
+    """
+    Set the global concurrency manager (legacy).
+
+    .. deprecated::
+        Use set_agent_scan_concurrency_manager() instead.
+    """
+    global _agent_scan_manager
+    _agent_scan_manager = manager
+
+
+async def initialize_concurrency_managers_from_db(db_session_factory) -> None:
+    """
+    Initialize concurrency managers from database configuration.
+
+    This should be called during application startup to load
+    concurrency settings from the database.
+
+    Args:
+        db_session_factory: Factory for creating database sessions
+    """
+    global _agent_scan_manager, _verification_manager
+
+    try:
+        from src.web.services.llm_config_service import LLMConfigService
+
+        # Get agent scan config
+        async with db_session_factory() as db:
+            agent_config = await LLMConfigService.get_agent_scan_config(db)
+            if agent_config and hasattr(agent_config, 'max_concurrent_requests'):
+                max_concurrent = agent_config.max_concurrent_requests
+                _agent_scan_manager = LLMConcurrencyManager(max_concurrent=max_concurrent)
+                logger = __import__('logging').getLogger(__name__)
+                logger.info(f"Initialized agent scan concurrency manager: max_concurrent={max_concurrent}")
+
+            # Get verification config
+            verify_config = await LLMConfigService.get_verification_config(db)
+            if verify_config and hasattr(verify_config, 'max_concurrent_requests'):
+                max_concurrent = verify_config.max_concurrent_requests
+                _verification_manager = LLMConcurrencyManager(max_concurrent=max_concurrent)
+                logger.info(f"Initialized verification concurrency manager: max_concurrent={max_concurrent}")
+    except Exception as e:
+        logger = __import__('logging').getLogger(__name__)
+        logger.warning(f"Failed to initialize concurrency managers from database: {e}")
+        # Fall back to defaults is handled by the getter functions
+
+
+def set_agent_scan_concurrency_manager(manager: LLMConcurrencyManager) -> None:
+    """
+    Set the agent scan concurrency manager.
+
+    Args:
+        manager: The LLMConcurrencyManager to use for agent scanning.
+    """
+    global _agent_scan_manager
+    _agent_scan_manager = manager
+
+
+def set_verification_concurrency_manager(manager: LLMConcurrencyManager) -> None:
+    """
+    Set the verification concurrency manager.
+
+    Args:
+        manager: The LLMConcurrencyManager to use for adversarial verification.
+    """
+    global _verification_manager
+    _verification_manager = manager
 
 
 def set_global_concurrency_manager(manager: LLMConcurrencyManager) -> None:
@@ -327,3 +432,74 @@ def with_concurrency_control(func: Callable[..., T]) -> Callable[..., T]:
         async with manager:
             return await func(*args, **kwargs)
     return wrapper
+
+
+# =============================================================================
+# P18: Async functions to get concurrency managers from database
+# =============================================================================
+
+
+async def get_agent_scan_concurrency_manager_from_db(
+    db_session_factory: Callable[[], AsyncSession]
+) -> LLMConcurrencyManager:
+    """
+    Get agent scan concurrency manager with config from database.
+
+    This function reads the latest max_concurrent_requests from the database
+    and creates a new concurrency manager with that value.
+
+    Args:
+        db_session_factory: Factory for creating database sessions
+
+    Returns:
+        LLMConcurrencyManager configured with database value
+    """
+    try:
+        from src.web.services.llm_config_service import LLMConfigService
+
+        async with db_session_factory() as db:
+            agent_config = await LLMConfigService.get_agent_scan_config(db)
+            if agent_config and hasattr(agent_config, 'max_concurrent_requests'):
+                max_concurrent = agent_config.max_concurrent_requests
+                logger = __import__('logging').getLogger(__name__)
+                logger.info(f"Using agent scan concurrency from DB: max_concurrent={max_concurrent}")
+                return LLMConcurrencyManager(max_concurrent=max_concurrent)
+    except Exception as e:
+        logger = __import__('logging').getLogger(__name__)
+        logger.warning(f"Failed to get agent scan concurrency from DB: {e}, using default")
+
+    # Fall back to default
+    return get_agent_scan_concurrency_manager()
+
+
+async def get_verification_concurrency_manager_from_db(
+    db_session_factory: Callable[[], AsyncSession]
+) -> LLMConcurrencyManager:
+    """
+    Get verification concurrency manager with config from database.
+
+    This function reads the latest max_concurrent_requests from the database
+    and creates a new concurrency manager with that value.
+
+    Args:
+        db_session_factory: Factory for creating database sessions
+
+    Returns:
+        LLMConcurrencyManager configured with database value
+    """
+    try:
+        from src.web.services.llm_config_service import LLMConfigService
+
+        async with db_session_factory() as db:
+            verify_config = await LLMConfigService.get_verification_config(db)
+            if verify_config and hasattr(verify_config, 'max_concurrent_requests'):
+                max_concurrent = verify_config.max_concurrent_requests
+                logger = __import__('logging').getLogger(__name__)
+                logger.info(f"Using verification concurrency from DB: max_concurrent={max_concurrent}")
+                return LLMConcurrencyManager(max_concurrent=max_concurrent)
+    except Exception as e:
+        logger = __import__('logging').getLogger(__name__)
+        logger.warning(f"Failed to get verification concurrency from DB: {e}, using default")
+
+    # Fall back to default
+    return get_verification_concurrency_manager()
