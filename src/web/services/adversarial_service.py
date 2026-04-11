@@ -419,6 +419,7 @@ async def create_adversarial_service_from_db(
     max_rounds: int = 5,
     round_timeout: int = 180,
     progress_callback: Optional[Callable[[str, dict[str, Any]], None]] = None,
+    llm_client=None,  # P18-Bugfix: 支持传入现有的 llm_client 以正确统计 token
 ) -> Optional[AdversarialService]:
     """Factory function to create an AdversarialService from database config.
 
@@ -427,6 +428,7 @@ async def create_adversarial_service_from_db(
         max_rounds: Maximum number of debate rounds (default 5)
         round_timeout: Timeout per round in seconds (default 180)
         progress_callback: Optional callback for real-time updates
+        llm_client: Optional existing LLM client to reuse (P18-Bugfix)
 
     Returns:
         Configured AdversarialService instance, or None if no config found
@@ -439,8 +441,12 @@ async def create_adversarial_service_from_db(
             logger.warning("No verification LLM config found in database")
             return None
 
-        llm_client = LLMConfigService.create_llm_client(llm_config)
-        logger.info(f"Created adversarial service with config: {llm_config.name}")
+        # P18-Bugfix: 如果没有提供 llm_client，则创建新的
+        if llm_client is None:
+            llm_client = LLMConfigService.create_llm_client(llm_config)
+            logger.info(f"Created new LLM client for adversarial service with config: {llm_config.name}")
+        else:
+            logger.info(f"Reusing existing LLM client for adversarial service with config: {llm_config.name}")
 
         return AdversarialService(
             llm_client=llm_client,

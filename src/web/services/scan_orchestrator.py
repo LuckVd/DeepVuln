@@ -1005,11 +1005,13 @@ class ScanOrchestrator:
         logger.info(f"Starting adversarial verification for {len(all_findings)} findings")
 
         # Create adversarial service from database (verification type config)
+        # P18-Bugfix: 传递现有的 llm_client 以正确统计 token
         adversarial_service = await create_adversarial_service_from_db(
             db_session_factory=self.db_session_factory,
             max_rounds=max_rounds,
             round_timeout=round_timeout,
             progress_callback=self._adversarial_progress_callback,
+            llm_client=self.llm_client,  # 复用 orchestrator 的 llm_client
         )
 
         if adversarial_service is None:
