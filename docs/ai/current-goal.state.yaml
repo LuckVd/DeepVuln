@@ -1,62 +1,25 @@
-goal_id: "P18-config-migration"
-title: "配置系统迁移 - 从 config.local.toml 到数据库"
-stage: "implement"
-status: "completed"
-selected_option: "full_migration"
-design_confirmed: true
+goal_id: null
+title: null
+stage: null
+status: "idle"
+selected_option: null
+design_confirmed: false
 blocked_by: []
 open_questions: []
-resolved_questions:
-  - 前端 UI 配置: 需要添加扫描参数配置
-  - API Key 处理: 添加到前端设置页面
-  - config.local.toml: 完全移除，不保留向后兼容
-  - LLM 新增字段: max_retries, max_concurrent_requests, batch_max_chars, batch_size
-implementation_steps:
-  - "P18-01: 数据库模型创建 ✅"
-  - "P18-02: 后端 API 开发 ✅"
-  - "P18-03: 扫描任务集成 ✅"
-  - "P18-04: 前端 UI 开发 ✅"
-  - "P18-05: 清理旧代码 ✅"
-test_scope:
-  - 扫描任务使用正确的 LLM 配置
-  - 前端配置保存和读取
-  - API 连接测试功能
-  - config.local.toml 移除后系统正常运行
-test_result: "passed"
-new_files:
-  - "migrations/versions/004_add_task_id_to_scans.py"
-  - "migrations/versions/005_add_llm_configs.py"
-  - "migrations/versions/006_add_llm_advanced_fields.py"
-  - "migrations/versions/007_create_system_settings.py"
-  - "src/web/api/v1/llm_configs.py"
-  - "src/web/api/v1/system_settings.py"
-  - "src/web/models/llm_config.py"
-  - "src/web/models/system_setting.py"
-  - "src/web/repositories/llm_config.py"
-  - "src/web/repositories/system_setting.py"
-  - "src/web/services/llm_config_service.py"
-  - "src/web/services/llm_validation.py"
-  - "src/web/frontend/src/api/llm.ts"
-  - "src/web/frontend/src/api/system.ts"
-  - "src/web/frontend/src/components/llm/*.tsx"
-modified_files:
-  - "src/core/config/__init__.py"
-  - "src/layers/l3_analysis/engines/opencode_agent.py"
-  - "src/layers/l3_analysis/adjudication.py"
-  - "src/layers/l3_analysis/llm/openai_client.py"
-  - "src/web/tasks/scan_tasks.py"
-  - "src/web/services/scan_orchestrator.py"
-  - "tests/unit/test_core/test_concurrency.py"
+resolved_questions: []
+implementation_steps: []
+test_scope: []
+test_result: null
+new_files: []
+modified_files: []
 security_blockers: []
-dead_code_actions:
-  - "Settings.from_yaml() 方法未使用"
-  - "ConfigLoader 类仅用于废弃功能"
+dead_code_actions: []
 sync_status: "synced"
-commit_id: null
+commit_id: "c87a0c6"
 last_check_at: "2026-04-11"
 last_synced_at: "2026-04-11"
 previous_goal:
-  goal_id: "P17-llm-config-management"
-  title: "LLM 配置管理 - 多配置支持与 UI 管理"
+  goal_id: "P18-config-migration"
+  title: "配置系统迁移 - 从 config.local.toml 到数据库"
   status: "completed"
-  commit_id: null
+  commit_id: "c87a0c6"
