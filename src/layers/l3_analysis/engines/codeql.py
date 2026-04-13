@@ -1266,7 +1266,7 @@ class CodeQLEngine(BaseEngine):
                 operation="scan",
             )
             # P6-02: Add structured error info if we have a language
-            if "codeql_lang" in dir():
+            if "codeql_lang" in locals():
                 self._add_structured_error_to_result(result, health_result, codeql_lang)
             else:
                 result.metadata["codeql_health"] = health_result.to_dict()
@@ -1283,7 +1283,6 @@ class CodeQLEngine(BaseEngine):
                     shutil.rmtree(database_path, ignore_errors=True)
                 except Exception as e:
                     logger.debug(f"Failed to cleanup database: {e}")
-                shutil.rmtree(database_path, ignore_errors=True)
 
     async def scan_multi_language(
         self,

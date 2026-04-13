@@ -361,8 +361,8 @@ class DefenderVerifier:
         try:
             return robust_json_loads(content)
         except JSONParseError as e:
-            self.logger.warning(f"Failed to parse LLM response: {e}")
-            self.logger.debug(f"Response content: {content[:200]}...")
+            logger.warning(f"Failed to parse LLM response: {e}")
+            logger.debug(f"Response content: {content[:200]}...")
             raise
 
     def _build_argument(

@@ -551,7 +551,7 @@ def adjudicate_findings(
             )
             logger.info("Using ClusterBasedDeduplicator (LLM enabled)")
 
-        dedup_result = deduplicator.deduplicate(findings)
+        dedup_result = await deduplicator.deduplicate(findings)
 
         # Update findings to deduplicated list
         findings = dedup_result.unique_findings

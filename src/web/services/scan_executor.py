@@ -27,6 +27,7 @@ from src.web.models.schemas import (
     CurrentFileResponse,
 )
 from src.web.repositories.scan import ScanRepository
+from src.web.repositories.project import ProjectRepository
 from src.web.repositories.event import ScanEventRepository, ScanPhaseRepository
 from src.web.repositories.finding import FindingRepository
 
@@ -55,6 +56,7 @@ class ScanExecutor:
     def __init__(self):
         """Initialize scan executor."""
         self.scan_repo = ScanRepository()
+        self.project_repo = ProjectRepository()
         self.phase_repo = ScanPhaseRepository()
         self.event_repo = ScanEventRepository()
         self.finding_repo = FindingRepository()
