@@ -10,23 +10,33 @@ import {
   LoadingPage,
   Statistic,
   Timeline,
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
 } from '@/components/ui';
 import {
   ArrowLeft,
   Play,
   Pause,
   Square,
-  MessageSquare,
   Check,
   Loader2,
   Clock,
   X,
+  ChevronDown,
+  Settings,
+  Folder,
+  GitBranch,
+  Cpu,
+  Archive,
 } from 'lucide-react';
 import { useScan, useScanFindings } from '@/hooks/useApi';
 import { useScanProgress } from '@/hooks/useScanProgress';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { ScanProgress } from '@/components/scan';
+import { LiveTerminal } from '@/components/scan';
 import { scansApi } from '@/api/scans';
+import { systemSettingsApi } from '@/api/system';
+import { formatDateTime, formatDuration, setTimezone } from '@/utils/format';
 import type { ScanStatus } from '@/types/models';
 
 const getStatusMap = (t: (key: string) => string) => ({
@@ -44,56 +54,48 @@ const getPhaseName = (phase: string, t: (key: string) => string): string => {
     source_preparation: 'phase.source_preparation',
     engine_selection: 'phase.engine_selection',
     engine_execution: 'phase.engine_execution',
+    l1_attack_surface: 'phase.l1_attack_surface',
+    L2_semgrep: 'phase.L2_semgrep',
+    L2_codeql: 'phase.L2_codeql',
+    L3_agent: 'phase.L3_agent',
+    L3_adjudication: 'phase.L3_adjudication',
+    result_merging: 'phase.result_merging',
+    token_statistics: 'phase.token_statistics',
     exploitability_verification: 'phase.exploitability_verification',
     deduplication_adjudication: 'phase.deduplication_adjudication',
     adversarial_verification: 'phase.adversarial_verification',
-    result_merging: 'phase.result_merging',
-    token_statistics: 'phase.token_statistics',
   };
   const key = phaseMap[phase];
   return key ? t(key) : phase;
 };
 
-const getEventTypeName = (eventType: string, t: (key: string) => string): string => {
-  const eventMap: Record<string, string> = {
-    scan_complete: 'event.scan_complete',
-    engine_start: 'event.engine_start',
-    engine_complete: 'event.engine_complete',
-    error: 'event.error',
-    warning: 'event.warning',
-    info: 'event.info',
+const getShortPhaseName = (phase: string): string => {
+  const shortMap: Record<string, string> = {
+    l1_preparation: 'L1准备',
+    source_preparation: '源码准备',
+    engine_selection: '引擎选择',
+    engine_execution: '引擎执行',
+    l1_attack_surface: '攻击面',
+    L1_preparation: 'L1准备',
+    L1_attack_surface: 'L1攻击面',
+    L2_semgrep: 'Semgrep',
+    L2_codeql: 'CodeQL',
+    L3_agent: 'Agent审计',
+    L3_adjudication: '裁决',
+    result_merging: '结果合并',
+    token_statistics: 'Token统计',
+    exploitability_verification: '可利用性验证',
+    deduplication_adjudication: '去重裁决',
+    adversarial_verification: '对抗性验证',
+    report_generation: '报告生成',
   };
-  const key = eventMap[eventType];
-  return key ? t(key) : eventType;
+  return shortMap[phase] || phase.replace(/_/g, ' ');
 };
 
-const formatEventMessage = (event: any, t: (key: string) => string): string => {
-  const { event_type, message } = event;
-
-  // Try to parse and format known event messages
-  if (event_type === 'scan_complete') {
-    const match = message.match(/(\d+)\s+findings?/);
-    if (match) {
-      return t('event.scan_complete_msg').replace('{}', match[1]);
-    }
-  }
-
-  if (event_type === 'engine_start') {
-    const match = message.match(/Engine\s+['"](\w+)['"]\s+started/i);
-    if (match) {
-      return t('event.engine_start_msg').replace('{}', match[1]);
-    }
-  }
-
-  if (event_type === 'engine_complete') {
-    const match = message.match(/Engine\s+['"](\w+)['"]\s+completed\s+with\s+(\d+)\s+findings?/i);
-    if (match) {
-      return t('event.engine_complete_msg').replace('{}', match[1]).replace('{}', match[2]);
-    }
-  }
-
-  // Return original message if no pattern matches
-  return message;
+const formatPhaseDuration = (seconds: number | null | undefined): string => {
+  if (seconds === null || seconds === undefined) return '';
+  if (seconds <= 0) return '0秒';
+  return formatDuration(seconds);
 };
 
 export default function ScanDetailPage() {
@@ -104,6 +106,23 @@ export default function ScanDetailPage() {
   const STATUS_MAP = getStatusMap(t);
 
   const { data: scan, isLoading, error } = useScan(scanId);
+
+  // 加载系统时区设置
+  useEffect(() => {
+    const loadTimezone = async () => {
+      try {
+        const response = await systemSettingsApi.get();
+        const tz = response.categories?.general?.['general.timezone'];
+        if (tz && typeof tz === 'string') {
+          setTimezone(tz);
+        }
+      } catch (error) {
+        console.error('Failed to load timezone setting:', error);
+      }
+    };
+    loadTimezone();
+  }, []);
+
   const {
     progress,
     status: progressStatus,
@@ -116,28 +135,28 @@ export default function ScanDetailPage() {
     enabled: !isNaN(scanId),
   });
 
-  // Get events stream
-  const [events, setEvents] = useState<any[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(false);
+  // LLM configs from settings
+  const [llmConfigs, setLlmConfigs] = useState<{ agent_scan?: any; verification?: any }>({});
 
-  // Load events
+  // Load LLM configs from settings
   useEffect(() => {
-    if (scanId && !isNaN(scanId)) {
-      const loadEvents = async () => {
-        setEventsLoading(true);
-        try {
-          const { scansApi } = await import('@/api');
-          const data = await scansApi.getEvents(scanId, { page: 1, page_size: 50 });
-          setEvents(data.events || []);
-        } catch (err) {
-          console.error('Failed to load events:', err);
-        } finally {
-          setEventsLoading(false);
+    const loadLlmConfigs = async () => {
+      try {
+        const { llmConfigApi } = await import('@/api');
+        const response = await llmConfigApi.list();
+        const configs: Record<string, any> = {};
+        for (const config of response.items) {
+          if (config.is_default) {
+            configs[config.config_type] = config;
+          }
         }
-      };
-      loadEvents();
-    }
-  }, [scanId]);
+        setLlmConfigs(configs);
+      } catch (err) {
+        console.error('Failed to load LLM configs:', err);
+      }
+    };
+    loadLlmConfigs();
+  }, []);
 
   // Use progress or scan status (prefer progress)
   const currentStatus = (progress?.status || scan?.status || 'pending') as ScanStatus;
@@ -248,7 +267,7 @@ export default function ScanDetailPage() {
         </Button>
       </div>
 
-      {/* Status Card */}
+      {/* Status Card - Merged with all information */}
       <Card className="glass-panel mb-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -291,47 +310,124 @@ export default function ScanDetailPage() {
           </div>
         </div>
 
-        <Descriptions
-          items={[
-            {
-              label: t('scanDetail.scanId'),
-              value: <span className="text-cyan font-mono">#{String(scan.id).padStart(4, '0')}</span>,
-            },
-            {
-              label: t('scanDetail.scanType'),
-              value: scan.scan_type === 'full' ? t('scanDetail.fullScan') : scan.scan_type === 'base' ? t('scanDetail.baseScan') : t('scanDetail.incremental'),
-            },
-            {
-              label: t('scanDetail.created'),
-              value: new Date(scan.created_at).toLocaleString('zh-CN'),
-            },
-          ]}
-          columns={3}
-        />
+        {/* Time Info */}
+        <div className="flex items-center gap-6 mb-4 text-sm">
+          <span className="text-text-secondary font-mono">
+            {t('scanDetail.created')}: {formatDateTime(scan.created_at)}
+          </span>
+          {(scan.completed_at || scan.started_at) && (
+            <span className="text-text-secondary font-mono">
+              │ {t('scanDetail.duration')}:{' '}
+              {(() => {
+                const start = scan.started_at ? new Date(scan.started_at).getTime() : null;
+                const end = scan.completed_at ? new Date(scan.completed_at).getTime() : new Date().getTime();
+                if (!start) return '--';
+                return formatDuration((end - start) / 1000);
+              })()}
+            </span>
+          )}
+        </div>
 
-        {/* Progress Bar */}
-        {currentStatus !== 'failed' && currentStatus !== 'cancelled' && (
-          <div className="mt-6">
+        {/* Phase Progress Bar */}
+        {progress?.phases && progress.phases.length > 0 && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2 text-xs font-mono">
+              <span className="text-text-secondary">扫描进度</span>
+              <span className="text-cyan">{progress.progress_percent}%</span>
+            </div>
+
+            {/* Progress Line */}
             <Progress
-              value={progress?.progress_percent || scan.progress_percent || 0}
+              value={progress.progress_percent}
               variant={currentStatus === 'running' ? 'cyan' : currentStatus === 'completed' ? 'green' : 'default'}
-              className="h-3"
+              className="h-2 mb-3"
             />
-            {scan.current_phase && currentStatus === 'running' && (
-              <div className="mt-3 text-text-secondary font-mono text-sm flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin text-cyan" />
-                <span>{t('scanDetail.phase')}: {getPhaseName(scan.current_phase, t)}</span>
-                {scan.current_step && <span className="text-text-tertiary">// {scan.current_step}</span>}
-              </div>
-            )}
-            {scan.current_phase && currentStatus === 'completed' && (
-              <div className="mt-3 text-text-secondary font-mono text-sm flex items-center gap-2">
-                <Check className="h-4 w-4 text-success" />
-                <span>{t('scanDetail.phase')}: {getPhaseName(scan.current_phase, t)}</span>
-              </div>
+
+            {/* Phase List - Single Row */}
+            <div className="flex items-center gap-4 text-xs font-mono">
+              {progress.phases.map((phase) => {
+                const isCompleted = phase.status === 'completed';
+                const isRunning = phase.status === 'running';
+                const hasProgress = phase.progress_percent > 0;
+                const hasDuration = phase.duration_seconds != null;
+
+                return (
+                  <div key={phase.name} className="flex items-center gap-1">
+                    <span className={isRunning ? 'text-cyan' : isCompleted ? 'text-success' : 'text-text-tertiary'}>
+                      {isCompleted && <Check className="h-3 w-3 inline mr-1" />}
+                      {isRunning && <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />}
+                      {!isCompleted && !isRunning && <Clock className="h-3 w-3 inline mr-1" />}
+                      {getShortPhaseName(phase.name)}
+                      {hasDuration && (
+                        <span className="text-text-tertiary">({formatPhaseDuration(phase.duration_seconds)})</span>
+                      )}
+                      {isRunning && hasProgress && (
+                        <span className="text-cyan">({phase.progress_percent}%)</span>
+                      )}
+                    </span>
+                    <span className="text-text-tertiary">│</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Current Status */}
+        {(progress?.current_phase || scan.current_phase) && currentStatus === 'running' && (
+          <div className="text-text-secondary font-mono text-sm flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-cyan" />
+            <span>{getPhaseName(progress?.current_phase || scan.current_phase || '', t)}</span>
+            {(progress?.current_step || scan.current_step) && (
+              <span className="text-text-tertiary">// {progress?.current_step || scan.current_step}</span>
             )}
           </div>
         )}
+        {(progress?.current_phase || scan.current_phase) && currentStatus === 'completed' && (
+          <div className="text-text-secondary font-mono text-sm flex items-center gap-2">
+            <Check className="h-4 w-4 text-success" />
+            <span>{getPhaseName(progress?.current_phase || scan.current_phase || '', t)}</span>
+          </div>
+        )}
+
+        {/* Scan Details Grid */}
+        <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-border">
+          {/* Scan Name */}
+          <div className="col-span-2">
+            <div className="text-xs text-text-secondary font-mono mb-1">扫描对象</div>
+            <span className="text-text-primary font-mono text-sm">{scan.name}</span>
+          </div>
+
+          {/* Engines */}
+          <div className="col-span-2">
+            <div className="text-xs text-text-secondary font-mono mb-1">引擎</div>
+            <div className="flex flex-wrap gap-1">
+              {(scan.config?.engines && scan.config.engines.length > 0)
+                ? scan.config.engines.map((engine: string) => (
+                    <Badge key={engine} variant="info" className="font-mono text-xs py-0">
+                      {engine.toUpperCase()}
+                    </Badge>
+                  ))
+                : <span className="text-text-tertiary text-sm">--</span>}
+            </div>
+          </div>
+
+          {/* Agent Model */}
+          <div>
+            <div className="text-xs text-text-secondary font-mono mb-1">Agent 模型</div>
+            <span className="text-cyan font-mono text-sm">
+              {llmConfigs.agent_scan?.model || '--'}
+            </span>
+          </div>
+
+          {/* Verification Model */}
+          <div>
+            <div className="text-xs text-text-secondary font-mono mb-1">验证模型</div>
+            <span className="text-warning font-mono text-sm">
+              {llmConfigs.verification?.model || '--'}
+            </span>
+          </div>
+        </div>
       </Card>
 
       {/* Statistics Grid */}
@@ -414,62 +510,13 @@ export default function ScanDetailPage() {
         </div>
       </Card>
 
-      {/* Real-time Progress */}
-      {progress && (
-        <Card className="glass-panel mb-6">
-          <h3 className="text-cyan font-mono font-bold mb-4">{t('scanDetail.realtimeProgress')}</h3>
-          <ScanProgress progress={progress} />
-        </Card>
-      )}
+      {/* Live Terminal */}
+      <LiveTerminal
+        scanId={scanId}
+        scanStatus={currentStatus}
+        wsState={wsState}
+      />
 
-      {/* Events Log */}
-      <Card className="glass-panel">
-        <div className="flex items-center gap-2 mb-4">
-          <MessageSquare className="h-5 w-5 text-cyan" />
-          <h3 className="text-cyan font-mono font-bold">{t('scanDetail.eventLog')}</h3>
-        </div>
-        <div className="space-y-2 font-mono text-sm max-h-96 overflow-y-auto">
-          {eventsLoading ? (
-            <div className="text-center text-text-secondary py-8">
-              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-              {t('scanDetail.loadingEvents')}
-            </div>
-          ) : events.length === 0 ? (
-            <div className="text-center text-text-tertiary py-8">{t('scanDetail.noEvents')}</div>
-          ) : (
-            events.map((event: any, index: number) => (
-              <div
-                key={index}
-                className="flex items-start gap-3 p-3 rounded bg-background-tertiary border border-border hover:border-cyan/50 transition-colors"
-              >
-                <Badge
-                  variant={
-                    event.event_level === 'error'
-                      ? 'critical'
-                      : event.event_level === 'warning'
-                      ? 'high'
-                      : event.event_level === 'info'
-                      ? 'info'
-                      : 'pending'
-                  }
-                  className="shrink-0"
-                >
-                  {getEventTypeName(event.event_type, t)}
-                </Badge>
-                <div className="flex-1 min-w-0">
-                  <div className="text-text-primary">{formatEventMessage(event, t)}</div>
-                  {event.file_path && (
-                    <div className="text-text-tertiary text-xs mt-1">{event.file_path}</div>
-                  )}
-                </div>
-                <div className="text-text-tertiary text-xs whitespace-nowrap">
-                  {new Date(event.created_at).toLocaleTimeString('zh-CN')}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </Card>
     </div>
   );
 }

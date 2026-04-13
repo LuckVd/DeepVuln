@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Card, LanguageSwitcher } from '@/components/ui'
-import { Monitor, Globe } from 'lucide-react'
+import { Card } from '@/components/ui'
+import { Monitor } from 'lucide-react'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { LLMConfigCard, LLMConfigForm } from '@/components/llm'
-import { ScanSettingsCard, ApiKeysCard } from '@/components/settings'
+import { ScanSettingsCard, ApiKeysCard, GeneralSettingsCard } from '@/components/settings'
 import { llmConfigApi, type LLMConfigListItem, type LLMConfig, type LLMConfigCreate, type LLMValidationResult } from '@/api/llm'
 import { systemSettingsApi as systemApi } from '@/api/system'
 
@@ -22,6 +22,7 @@ export default function SettingsPage() {
 
   // System Settings state
   const [systemSettings, setSystemSettings] = useState<Record<string, string | number>>({
+    'general.timezone': 'Asia/Shanghai',
     'scan.timeout': 300,
     'scan.max_concurrent_files': 10,
     'threat_intel.github_token': '',
@@ -240,6 +241,12 @@ export default function SettingsPage() {
           )}
         </Card>
 
+        {/* General Settings */}
+        <GeneralSettingsCard
+          settings={systemSettings}
+          onUpdate={handleUpdateSystemSetting}
+        />
+
         {/* Scan Settings */}
         <ScanSettingsCard
           settings={systemSettings}
@@ -251,22 +258,6 @@ export default function SettingsPage() {
           settings={systemSettings}
           onUpdate={handleUpdateSystemSetting}
         />
-
-        {/* Language Settings */}
-        <Card className="glass-panel">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <Globe className="h-5 w-5 text-cyan" />
-              <h3 className="text-cyan font-mono font-bold">{t('settings.language')}</h3>
-            </div>
-            <LanguageSwitcher />
-          </div>
-          <div className="text-text-secondary font-mono text-sm">
-            {t('settings.language') === '语言'
-              ? t('settings.languageDesc')
-              : t('settings.languageDescEn')}
-          </div>
-        </Card>
 
         {/* System Info */}
         <Card className="glass-panel col-span-2">

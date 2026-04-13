@@ -109,6 +109,7 @@ class AdversarialVerifier:
         self,
         llm_client: LLMClient,
         config: AdversarialVerifierConfig | None = None,
+        language: str = "en",
     ):
         """
         Initialize the adversarial verifier.
@@ -116,9 +117,11 @@ class AdversarialVerifier:
         Args:
             llm_client: LLM client for analysis.
             config: Configuration options.
+            language: Output language for debate content ("en" or "zh").
         """
         self.llm_client = llm_client
         self.config = config or AdversarialVerifierConfig()
+        self.language = language
 
         # Initialize role verifiers
         self.attacker = AttackerVerifier(
@@ -275,6 +278,7 @@ class AdversarialVerifier:
                 defender_argument=defender_arg,
                 debate_history=result.debate_history,
                 round_number=current_round,
+                language=self.language,
             )
 
             # Create debate round record
@@ -335,12 +339,14 @@ class AdversarialVerifier:
                 code_context=code_context,
                 related_code=related_code,
                 round_number=1,
+                language=self.language,
             )
             defender_task = self.defender.analyze(
                 finding=finding,
                 code_context=code_context,
                 related_code=related_code,
                 round_number=1,
+                language=self.language,
             )
 
             attacker_arg, defender_arg = await asyncio.gather(
@@ -353,6 +359,7 @@ class AdversarialVerifier:
                 code_context=code_context,
                 related_code=related_code,
                 round_number=1,
+                language=self.language,
             )
             defender_arg = await self.defender.analyze(
                 finding=finding,
@@ -360,6 +367,7 @@ class AdversarialVerifier:
                 related_code=related_code,
                 attacker_argument=attacker_arg.model_dump(),
                 round_number=1,
+                language=self.language,
             )
 
         return attacker_arg, defender_arg
@@ -392,6 +400,7 @@ class AdversarialVerifier:
                 code_context=code_context,
                 defender_argument=previous_defender,
                 previous_attacker_argument=previous_attacker,
+                language=self.language,
             )
 
             defender_arg = await self.defender.rebut(
@@ -399,6 +408,7 @@ class AdversarialVerifier:
                 code_context=code_context,
                 attacker_argument=attacker_arg,  # Defender sees attacker's rebuttal
                 previous_defender_argument=previous_defender,
+                language=self.language,
             )
         else:
             # Parallel: both rebut based on previous arguments
@@ -407,12 +417,14 @@ class AdversarialVerifier:
                 code_context=code_context,
                 defender_argument=previous_defender,
                 previous_attacker_argument=previous_attacker,
+                language=self.language,
             )
             defender_task = self.defender.rebut(
                 finding=finding,
                 code_context=code_context,
                 attacker_argument=previous_attacker,
                 previous_defender_argument=previous_defender,
+                language=self.language,
             )
 
             attacker_arg, defender_arg = await asyncio.gather(

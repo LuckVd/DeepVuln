@@ -16,6 +16,11 @@ from src.layers.l3_analysis.engines.codeql import (
     CODEQL_LANGUAGE_MAP,
     DEFAULT_QUERY_SUITES,
     SEVERITY_MAP,
+    load_codeql_config,
+    get_effective_suites,
+    get_custom_queries_for_language,
+    CODEQL_CONFIG_PATH,
+    CODEQL_CUSTOM_QUERIES_PATH,
 )
 
 
@@ -756,3 +761,91 @@ class TestCodeQLReadiness:
 
         assert readiness["ready"] is False
         assert readiness["reason"] == "build_tool_missing"
+
+
+class TestCodeQLConfigLoading:
+    """Tests for CodeQL configuration loading from config.yaml."""
+
+    def test_load_codeql_config_returns_empty_dict_when_file_not_found(self, tmp_path):
+        """Test that load_codeql_config returns empty dict when config file doesn't exist."""
+        with patch("src.layers.l3_analysis.engines.codeql.CODEQL_CONFIG_PATH", tmp_path / "nonexistent.yaml"):
+            from src.layers.l3_analysis.engines.codeql import load_codeql_config
+            config = load_codeql_config()
+            assert config == {}
+
+    def test_load_codeql_config_loads_valid_yaml(self, tmp_path):
+        """Test that load_codeql_config loads valid YAML content."""
+        config_file = tmp_path / "config.yaml"
+        config_content = """
+default_suites:
+  java:
+    - java-security-extended
+    - java-code-scanning
+use_custom_queries: true
+"""
+        config_file.write_text(config_content)
+
+        with patch("src.layers.l3_analysis.engines.codeql.CODEQL_CONFIG_PATH", config_file):
+            from src.layers.l3_analysis.engines.codeql import load_codeql_config
+            config = load_codeql_config()
+            assert config["default_suites"]["java"] == ["java-security-extended", "java-code-scanning"]
+            assert config["use_custom_queries"] is True
+
+    def test_get_effective_suites_combines_defaults_with_config(self):
+        """Test that get_effective_suites combines default and config suites."""
+        from src.layers.l3_analysis.engines.codeql import get_effective_suites, DEFAULT_QUERY_SUITES
+
+        with patch("src.layers.l3_analysis.engines.codeql.load_codeql_config", return_value={
+            "default_suites": {
+                "java": ["java-security-extended", "java-code-scanning"]
+            }
+        }):
+            suites = get_effective_suites("java")
+            # Should include default + config suites
+            assert "java-security-extended" in suites
+            assert "java-code-scanning" in suites
+
+    def test_get_effective_suites_fallback_to_default_when_no_config(self):
+        """Test that get_effective_suites falls back to defaults when config is empty."""
+        from src.layers.l3_analysis.engines.codeql import get_effective_suites, DEFAULT_QUERY_SUITES
+
+        with patch("src.layers.l3_analysis.engines.codeql.load_codeql_config", return_value={}):
+            suites = get_effective_suites("python")
+            assert suites == DEFAULT_QUERY_SUITES["python"]
+
+
+class TestCustomQueries:
+    """Tests for custom CodeQL query discovery."""
+
+    def test_get_custom_queries_returns_empty_when_dir_not_found(self, tmp_path):
+        """Test that get_custom_queries returns empty list when directory doesn't exist."""
+        non_existent_dir = tmp_path / "nonexistent" / "codeql"
+
+        with patch("src.layers.l3_analysis.engines.codeql.CODEQL_CUSTOM_QUERIES_PATH", non_existent_dir):
+            from src.layers.l3_analysis.engines.codeql import get_custom_queries_for_language
+            queries = get_custom_queries_for_language("python")
+            assert queries == []
+
+    def test_get_custom_queries_finds_ql_files(self, tmp_path):
+        """Test that get_custom_queries finds .ql files in language directory."""
+        # Create mock custom query directory
+        codeql_dir = tmp_path / "codeql"
+        python_dir = codeql_dir / "python"
+        python_dir.mkdir(parents=True)
+        (python_dir / "CustomSecurity.ql").write_text("/** @name Custom */")
+        (python_dir / "AnotherQuery.ql").write_text("/** @name Another */")
+        (python_dir / "not_ql.txt").write_text("not a query")
+
+        with patch("src.layers.l3_analysis.engines.codeql.CODEQL_CUSTOM_QUERIES_PATH", codeql_dir):
+            from src.layers.l3_analysis.engines.codeql import get_custom_queries_for_language
+            queries = get_custom_queries_for_language("python")
+
+            assert len(queries) == 2
+            assert all(q.suffix == ".ql" for q in queries)
+
+    def test_engine_init_loads_config(self):
+        """Test that CodeQLEngine initialization loads config."""
+        engine = CodeQLEngine()
+        assert hasattr(engine, "_config")
+        assert hasattr(engine, "_use_custom_queries")
+        assert engine._use_custom_queries is True  # Default from config.yaml

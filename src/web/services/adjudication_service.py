@@ -143,7 +143,7 @@ class AdjudicationService:
         if enable_adjudication:
             logger.info("AdjudicationService: exploitability adjudication enabled")
 
-    def deduplicate_findings(
+    async def deduplicate_findings(
         self,
         findings: list[Finding],
     ) -> tuple[list[Finding], DeduplicationResult]:
@@ -164,21 +164,8 @@ class AdjudicationService:
 
         logger.info(f"Deduplicating {len(findings)} findings")
 
-        # Run deduplication (deduplicator.deduplicate is now async)
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            # We're in an async context, we can't await here
-            # This method shouldn't be called from async context
-            logger.warning("deduplicate_findings() called from async context, returning all findings")
-            result = DeduplicationResult(
-                unique_findings=findings,
-                removed_count=0,
-                merged_groups=0,
-            )
-        except RuntimeError:
-            # No running loop, we can use asyncio.run
-            result = asyncio.run(self.deduplicator.deduplicate(findings))
+        # Run deduplication (deduplicator.deduplicate is async)
+        result = await self.deduplicator.deduplicate(findings)
 
         logger.info(
             f"Deduplication complete: {len(result.unique_findings)} unique, "
@@ -254,7 +241,7 @@ class AdjudicationService:
         summary.total_findings = len(findings)
 
         # Step 1: Deduplicate
-        unique_findings, dedup_result = self.deduplicate_findings(findings)
+        unique_findings, dedup_result = await self.deduplicate_findings(findings)
         summary.unique_findings = len(unique_findings)
         summary.duplicates_removed = dedup_result.removed_count
 

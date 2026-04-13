@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Plus, Upload, Eye, Folder, GitBranch, Archive, Play, X } from 'lucide-react';
+import { formatDateTime, formatDuration, setTimezone } from '@/utils/format';
+import { systemSettingsApi } from '@/api/system';
 import {
   Button,
   Card,
@@ -58,10 +60,16 @@ export default function ScansPage() {
     source_path: '',
     scan_type: 'full' as 'full' | 'base',
     enable_adversarial: false,
+    engines: ['semgrep', 'codeql', 'agent', 'ast'] as string[],
   });
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isCreating, setIsCreating] = useState(false);
+
+  // 上传进度状态
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadSpeed, setUploadSpeed] = useState(0);
+  const [uploadEta, setUploadEta] = useState(0);
 
   const { data, isLoading, refetch } = useScans({
     page,
@@ -70,6 +78,22 @@ export default function ScansPage() {
   });
 
   const createMutation = useCreateScan();
+
+  // 加载系统时区设置
+  useEffect(() => {
+    const loadTimezone = async () => {
+      try {
+        const response = await systemSettingsApi.get();
+        const tz = response.categories?.general?.['general.timezone'];
+        if (tz && typeof tz === 'string') {
+          setTimezone(tz);
+        }
+      } catch (error) {
+        console.error('Failed to load timezone setting:', error);
+      }
+    };
+    loadTimezone();
+  }, []);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -82,6 +106,9 @@ export default function ScansPage() {
     }
     if (formData.source_type === 'zip' && !uploadedFile) {
       newErrors.file = t('scans.dialog.error.file');
+    }
+    if (formData.engines.length === 0) {
+      newErrors.engines = '至少选择一个引擎';
     }
 
     setErrors(newErrors);
@@ -104,16 +131,59 @@ export default function ScansPage() {
         formDataObj.append('description', '');
         formDataObj.append('scan_type', formData.scan_type);
         formDataObj.append('config', JSON.stringify({
-          engines: ['semgrep', 'codeql', 'agent'],
+          engines: formData.engines,
           adversarial: formData.enable_adversarial,
         }));
 
+        // 重置上传进度
+        setUploadProgress(0);
+        setUploadSpeed(0);
+        setUploadEta(0);
+
+        // 用于计算上传速度
+        const startTime = Date.now();
+        let lastLoaded = 0;
+        let lastTime = startTime;
+
         const response = await axios.post('/api/v1/scans/upload-zip', formDataObj, {
           headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const loaded = progressEvent.loaded;
+              const total = progressEvent.total;
+              const currentTime = Date.now();
+
+              // 计算进度百分比
+              const percentCompleted = Math.round((loaded * 100) / total);
+              setUploadProgress(percentCompleted);
+
+              // 计算上传速度 (bytes/sec)
+              const timeDiff = (currentTime - lastTime) / 1000; // 秒
+              if (timeDiff > 0.5) { // 每0.5秒更新一次速度
+                const bytesDiff = loaded - lastLoaded;
+                const speed = bytesDiff / timeDiff;
+                setUploadSpeed(speed);
+
+                // 计算预计剩余时间
+                const remainingBytes = total - loaded;
+                const eta = speed > 0 ? remainingBytes / speed : 0;
+                setUploadEta(eta);
+
+                lastLoaded = loaded;
+                lastTime = currentTime;
+              }
+            }
+          },
         });
         scanId = response.data.id;
       } else {
-        const response = await createMutation.mutateAsync(formData);
+        const response = await createMutation.mutateAsync({
+          ...formData,
+          config: {
+            engines: formData.engines,
+            adversarial: formData.enable_adversarial,
+          },
+        });
         scanId = response.id;
       }
 
@@ -139,9 +209,13 @@ export default function ScansPage() {
       source_path: '',
       scan_type: 'full',
       enable_adversarial: false,
+      engines: ['semgrep', 'codeql', 'agent', 'ast'],
     });
     setUploadedFile(null);
     setErrors({});
+    setUploadProgress(0);
+    setUploadSpeed(0);
+    setUploadEta(0);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -350,7 +424,7 @@ export default function ScansPage() {
                       : String(scan.analyzed_files || 0)}
                   </TableCell>
                   <TableCell className="text-text-dim font-mono text-xs">
-                    {new Date(scan.created_at).toLocaleString('zh-CN')}
+                    {formatDateTime(scan.created_at)}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -509,18 +583,131 @@ export default function ScansPage() {
                   )}
                 </div>
                 {errors.file && <p className="text-xs text-critical font-mono mt-1">⚠ {errors.file}</p>}
+
+                {/* 上传进度条 */}
+                {isCreating && formData.source_type === 'zip' && uploadProgress > 0 && (
+                  <div className="mt-3 p-3 rounded bg-cyan/5 border border-cyan/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-text-secondary font-mono">
+                        上传中...
+                      </span>
+                      <span className="text-xs text-cyan font-mono">
+                        {uploadProgress}%
+                      </span>
+                    </div>
+                    <Progress value={uploadProgress} variant="cyan" className="h-2" />
+                    <div className="flex items-center justify-between mt-2 text-xs text-text-tertiary font-mono">
+                      <span>
+                        {uploadSpeed > 0 ? `${(uploadSpeed / 1024).toFixed(1)} KB/s` : ''}
+                      </span>
+                      <span>
+                        {uploadEta > 0 ? `预计剩余 ${formatDuration(uploadEta)}` : ''}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            <CustomSelect
-              label={t('scans.dialog.scanType')}
-              value={formData.scan_type}
-              onChange={(val) => setFormData({ ...formData, scan_type: val as any })}
-              options={[
-                { value: 'full', label: t('scans.dialog.scanTypeFull') },
-                { value: 'base', label: t('scans.dialog.scanTypeBase') },
-              ]}
-            />
+            {/* Engine Selection */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-text-secondary font-sans">
+                  {t('scans.dialog.engines')}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allEngines = ['semgrep', 'codeql', 'agent', 'ast'] as const;
+                    setFormData({
+                      ...formData,
+                      engines: formData.engines.length === allEngines.length ? [] : allEngines,
+                    });
+                  }}
+                  className="text-xs text-cyan hover:text-cyan/80 font-mono transition-colors"
+                >
+                  {formData.engines.length === 4 ? t('scans.dialog.deselectAll') : t('scans.dialog.selectAll')}
+                </button>
+              </div>
+              <p className="text-xs text-text-tertiary">{t('scans.dialog.enginesDescription')}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newEngines = formData.engines.includes('semgrep')
+                      ? formData.engines.filter((e) => e !== 'semgrep')
+                      : [...formData.engines, 'semgrep'];
+                    setFormData({ ...formData, engines: newEngines });
+                  }}
+                  className={`
+                    px-4 py-3 rounded-md border transition-all duration-200 text-left
+                    ${formData.engines.includes('semgrep')
+                      ? 'bg-cyan/20 border-cyan text-cyan shadow-glow-cyan'
+                      : 'border-border text-text-secondary hover:border-cyan/50 hover:text-cyan/70'
+                    }
+                  `}
+                >
+                  <div className="text-sm font-medium">{t('scans.dialog.engineSemgrep')}</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newEngines = formData.engines.includes('codeql')
+                      ? formData.engines.filter((e) => e !== 'codeql')
+                      : [...formData.engines, 'codeql'];
+                    setFormData({ ...formData, engines: newEngines });
+                  }}
+                  className={`
+                    px-4 py-3 rounded-md border transition-all duration-200 text-left
+                    ${formData.engines.includes('codeql')
+                      ? 'bg-cyan/20 border-cyan text-cyan shadow-glow-cyan'
+                      : 'border-border text-text-secondary hover:border-cyan/50 hover:text-cyan/70'
+                    }
+                  `}
+                >
+                  <div className="text-sm font-medium">{t('scans.dialog.engineCodeQL')}</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newEngines = formData.engines.includes('agent')
+                      ? formData.engines.filter((e) => e !== 'agent')
+                      : [...formData.engines, 'agent'];
+                    setFormData({ ...formData, engines: newEngines });
+                  }}
+                  className={`
+                    px-4 py-3 rounded-md border transition-all duration-200 text-left
+                    ${formData.engines.includes('agent')
+                      ? 'bg-cyan/20 border-cyan text-cyan shadow-glow-cyan'
+                      : 'border-border text-text-secondary hover:border-cyan/50 hover:text-cyan/70'
+                    }
+                  `}
+                >
+                  <div className="text-sm font-medium">{t('scans.dialog.engineAgent')}</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newEngines = formData.engines.includes('ast')
+                      ? formData.engines.filter((e) => e !== 'ast')
+                      : [...formData.engines, 'ast'];
+                    setFormData({ ...formData, engines: newEngines });
+                  }}
+                  className={`
+                    px-4 py-3 rounded-md border transition-all duration-200 text-left
+                    ${formData.engines.includes('ast')
+                      ? 'bg-cyan/20 border-cyan text-cyan shadow-glow-cyan'
+                      : 'border-border text-text-secondary hover:border-cyan/50 hover:text-cyan/70'
+                    }
+                  `}
+                >
+                  <div className="text-sm font-medium">{t('scans.dialog.engineAST')}</div>
+                </button>
+              </div>
+              {formData.engines.length === 0 && (
+                <p className="text-xs text-critical font-mono">⚠ 至少选择一个引擎</p>
+              )}
+            </div>
 
             <div className="p-4 rounded-md bg-cyan/5 border border-cyan/20">
               <Switch

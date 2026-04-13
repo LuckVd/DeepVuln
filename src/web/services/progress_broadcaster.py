@@ -133,14 +133,31 @@ class ProgressBroadcaster:
         self.phase_repo = ScanPhaseRepository()
         self.event_repo = ScanEventRepository()
 
-        # Phase weight tracking for progress calculation
-        self.phase_weights = {
-            "source_preparation": 5,
-            "tech_stack_detection": 5,
-            "engine_selection": 5,
-            "engine_execution": 80,
-            "result_merging": 5,
+        # Base phase weights (all 9 phases)
+        # adversarial_verification 是 engine_execution 的两倍
+        self.base_phase_weights = {
+            "l1_preparation": 3,
+            "source_preparation": 3,
+            "engine_selection": 2,
+            "engine_execution": 25,
+            "exploitability_verification": 5,
+            "deduplication_adjudication": 7,
+            "adversarial_verification": 50,  # engine_execution 的两倍
+            "result_merging": 3,
+            "token_statistics": 2,
         }
+
+        # Optional phases (may be skipped based on config)
+        self.optional_phases = {
+            "exploitability_verification",
+            "adversarial_verification",
+        }
+
+        # Scan configuration for optional phase handling
+        self.scan_config: Dict[str, Any] = {}
+
+        # Current effective weights (dynamically calculated)
+        self.phase_weights = self.base_phase_weights.copy()
         self.current_phase: Optional[str] = None
         self.phase_start_time: Optional[datetime] = None
 
@@ -150,6 +167,63 @@ class ProgressBroadcaster:
     def _get_db_session(self) -> AsyncSession:
         """Get a new database session."""
         return self.db_session_factory()
+
+    def set_scan_config(self, config: Dict[str, Any]) -> None:
+        """Set scan configuration for optional phase handling.
+
+        Args:
+            config: Scan configuration dictionary
+        """
+        self.scan_config = config
+        # Recalculate effective weights based on config
+        self.phase_weights = self._calculate_effective_weights()
+
+    def _get_active_phases(self) -> set:
+        """Get phases that are active based on scan config.
+
+        Returns:
+            Set of active phase names
+        """
+        active = set(self.base_phase_weights.keys())
+
+        # Check exploitability_verification (llm_verify defaults to True)
+        if not self.scan_config.get("llm_verify", True):
+            active.discard("exploitability_verification")
+
+        # Check adversarial_verification (adversarial defaults to False)
+        if not self.scan_config.get("adversarial", False):
+            active.discard("adversarial_verification")
+
+        return active
+
+    def _calculate_effective_weights(self) -> Dict[str, int]:
+        """Calculate effective weights based on active phases.
+
+        When optional phases are disabled, redistributes their weights
+        proportionally to other active phases.
+
+        Returns:
+            Dictionary mapping phase names to effective weights
+        """
+        active = self._get_active_phases()
+
+        # Calculate total weight of active phases
+        total_weight = sum(
+            self.base_phase_weights.get(phase, 0)
+            for phase in active
+        )
+
+        # If total is 100, return base weights directly
+        if total_weight == 100:
+            return self.base_phase_weights.copy()
+
+        # Otherwise scale proportionally
+        scale = 100 / total_weight
+        effective = {}
+        for phase in active:
+            effective[phase] = int(self.base_phase_weights[phase] * scale)
+
+        return effective
 
     async def on_phase_start(self, phase_name: str, **data: Any) -> None:
         """Handle phase start event.
@@ -195,8 +269,11 @@ class ProgressBroadcaster:
             self.scan_id, phase_name, phase_data=data
         )
 
-        # Update scan current phase
-        await self._update_scan({"current_phase": phase_name})
+        # Update scan current phase and progress
+        await self._update_scan({
+            "current_phase": phase_name,
+            "progress_percent": self._calculate_progress()
+        })
 
         logger.debug(f"Phase '{phase_name}' started for scan {self.scan_id}")
 
@@ -266,9 +343,9 @@ class ProgressBroadcaster:
                         )
                 await db.commit()
 
-        # Update scan record with collected data
-        if scan_update_data:
-            await self._update_scan(scan_update_data)
+        # Update scan record with progress
+        scan_update_data["progress_percent"] = self._calculate_progress()
+        await self._update_scan(scan_update_data)
 
         # Broadcast to WebSocket
         await self.event_broadcaster.broadcast_phase_complete(
@@ -277,6 +354,7 @@ class ProgressBroadcaster:
             duration_seconds,
             findings=result.get("findings", 0),
             tokens_used=result.get("tokens_used", 0),
+            result=result,
         )
 
         logger.debug(
@@ -428,14 +506,17 @@ class ProgressBroadcaster:
         )
 
     async def on_scan_complete(
-        self, findings_count: int, duration_seconds: float
+        self, findings_count: int, duration_seconds: float, tokens_used: int = 0,
+        severity_breakdown: Optional[Dict[str, int]] = None,
+        per_phase_tokens: Optional[Dict[str, int]] = None,
     ) -> None:
         """Handle scan complete event."""
         # Calculate severity statistics
-        severity_stats = await self._calculate_severity_stats()
+        severity_stats = severity_breakdown or await self._calculate_severity_stats()
 
-        # Get total tokens used from events
-        tokens_used = await self._get_total_tokens_used()
+        # Get total tokens used from events, use max of passed-in and DB value
+        db_tokens = await self._get_total_tokens_used()
+        tokens_used = max(tokens_used, db_tokens)
 
         # Get current scan to access total_files
         async with self._get_db_session() as db:
@@ -456,8 +537,8 @@ class ProgressBroadcaster:
             "medium_count": severity_stats["medium"],
             "low_count": severity_stats["low"],
             "info_count": severity_stats["info"],
-            "verified_count": severity_stats["verified"],
-            "false_positive_count": severity_stats["false_positive"],
+            "verified_count": severity_stats.get("verified", 0),
+            "false_positive_count": severity_stats.get("false_positive", 0),
             "current_phase": None,  # Clear current phase on completion
             "current_step": None,   # Clear current step on completion
         }
@@ -470,7 +551,9 @@ class ProgressBroadcaster:
 
         # Broadcast to WebSocket
         await self.event_broadcaster.broadcast_scan_complete(
-            self.scan_id, findings_count, duration_seconds, tokens_used
+            self.scan_id, findings_count, duration_seconds, tokens_used,
+            severity_breakdown=severity_stats,
+            per_phase_tokens=per_phase_tokens,
         )
 
         # Create completion event
@@ -514,14 +597,41 @@ class ProgressBroadcaster:
 
     async def on_warning(self, message: str) -> None:
         """Handle warning event."""
-        # Create warning event
+        # Create warning event in database
         await self._create_event(
             event_type="warning",
             message=message,
             event_level="warning",
         )
 
+        # Broadcast to WebSocket
+        await self.event_broadcaster.broadcast_event(
+            self.scan_id,
+            event_type="warning",
+            data={"message": message},
+        )
+
         logger.warning(f"Scan {self.scan_id} warning: {message}")
+
+    async def broadcast_event(
+        self,
+        event_type: str,
+        data: Dict[str, Any],
+    ) -> None:
+        """Broadcast a custom event via WebSocket.
+
+        Used for ad-hoc events like adversarial verification rounds,
+        agent conversation turns, file progress updates, etc.
+
+        Args:
+            event_type: Custom event type string
+            data: Event payload
+        """
+        await self.event_broadcaster.broadcast_event(
+            self.scan_id,
+            event_type=event_type,
+            data=data,
+        )
 
     # ========================================================================
     # Private Helper Methods
@@ -579,22 +689,36 @@ class ProgressBroadcaster:
     def _calculate_progress(self) -> int:
         """Calculate overall progress based on completed phases.
 
+        Uses dynamic weights that adjust based on which optional phases
+        are enabled in the scan configuration.
+
         Returns:
             Progress percentage (0-100)
         """
-        # Phase order for progress calculation
+        # Get currently active phases
+        active_phases = self._get_active_phases()
+
+        # Phase order for progress calculation (all 9 phases)
         phase_order = [
+            "l1_preparation",
             "source_preparation",
-            "tech_stack_detection",
             "engine_selection",
             "engine_execution",
+            "exploitability_verification",
+            "deduplication_adjudication",
+            "adversarial_verification",
             "result_merging",
+            "token_statistics",
         ]
 
         total_weight = sum(self.phase_weights.values())
         completed_weight = 0
 
         for phase in phase_order:
+            # Skip inactive phases
+            if phase not in active_phases:
+                continue
+
             if phase in self._completed_phases:
                 completed_weight += self.phase_weights.get(phase, 0)
             elif phase == self.current_phase:
@@ -603,7 +727,7 @@ class ProgressBroadcaster:
                 completed_weight += self.phase_weights.get(phase, 0) * 0.5
                 break
 
-        return int((completed_weight / total_weight) * 100) if total_weight > 0 else 0
+        return int((completed_weight / total_weight * 100)) if total_weight > 0 else 0
 
     async def _get_total_tokens_used(self) -> int:
         """Get total tokens used from all phases.

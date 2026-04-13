@@ -16,6 +16,7 @@ from ..prompts.adversarial import (
     ATTACKER_SYSTEM_PROMPT,
     get_attacker_rebuttal_prompt,
     get_attacker_user_prompt,
+    get_system_prompt,
 )
 from .models import ArgumentStrength, VerificationArgument
 
@@ -58,6 +59,7 @@ class AttackerVerifier:
         code_context: str,
         related_code: str | None = None,
         round_number: int = 1,
+        language: str = "en",
     ) -> VerificationArgument:
         """
         Analyze a vulnerability from an attacker's perspective.
@@ -67,6 +69,7 @@ class AttackerVerifier:
             code_context: The vulnerable code snippet.
             related_code: Additional context code.
             round_number: Current debate round number.
+            language: Output language ("en" or "zh").
 
         Returns:
             VerificationArgument with attacker's analysis.
@@ -80,12 +83,13 @@ class AttackerVerifier:
             finding=finding,
             code_context=code_context,
             related_code=related_code,
+            language=language,
         )
 
         try:
             # Call LLM
             response = await self.llm_client.complete_with_context(
-                system_prompt=ATTACKER_SYSTEM_PROMPT,
+                system_prompt=get_system_prompt(ATTACKER_SYSTEM_PROMPT, language),
                 user_prompt=user_prompt,
             )
 
@@ -115,6 +119,7 @@ class AttackerVerifier:
         code_context: str,
         defender_argument: VerificationArgument,
         previous_attacker_argument: VerificationArgument,
+        language: str = "en",
     ) -> VerificationArgument:
         """
         Rebut the defender's counter-argument.
@@ -127,6 +132,7 @@ class AttackerVerifier:
             code_context: The vulnerable code snippet.
             defender_argument: The defender's counter-argument.
             previous_attacker_argument: The attacker's previous argument.
+            language: Output language ("en" or "zh").
 
         Returns:
             VerificationArgument with attacker's rebuttal.
@@ -143,12 +149,13 @@ class AttackerVerifier:
             code_context=code_context,
             defender_argument=defender_argument.model_dump(),
             previous_attacker_argument=previous_attacker_argument.model_dump(),
+            language=language,
         )
 
         try:
             # Call LLM with the same system prompt (attacker mindset)
             response = await self.llm_client.complete_with_context(
-                system_prompt=ATTACKER_SYSTEM_PROMPT,
+                system_prompt=get_system_prompt(ATTACKER_SYSTEM_PROMPT, language),
                 user_prompt=user_prompt,
             )
 

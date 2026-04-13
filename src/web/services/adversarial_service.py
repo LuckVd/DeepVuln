@@ -93,6 +93,7 @@ class AdversarialService:
         max_rounds: int = 5,
         round_timeout: int = DEFAULT_ROUND_TIMEOUT,
         progress_callback: Optional[Callable[[str, dict[str, Any]], None]] = None,
+        language: str = "zh",
     ):
         """Initialize the adversarial service.
 
@@ -101,11 +102,13 @@ class AdversarialService:
             max_rounds: Maximum number of debate rounds (default 5)
             round_timeout: Timeout per round in seconds (default 180)
             progress_callback: Optional callback for real-time updates
+            language: Output language for debate content ("en" or "zh", default "zh")
         """
         self.llm_client = llm_client
         self.max_rounds = max_rounds
         self.round_timeout = round_timeout
         self.progress_callback = progress_callback
+        self.language = language
 
         # Create verifier configuration
         self.config = AdversarialVerifierConfig(
@@ -120,6 +123,7 @@ class AdversarialService:
         self.verifier = AdversarialVerifier(
             llm_client=llm_client,
             config=self.config,
+            language=language,
         )
 
         logger.info(
@@ -167,18 +171,28 @@ class AdversarialService:
                 "status": AdversarialStatus.UNCERTAIN,
                 "confidence": 0.3,
                 "reasoning": f"Verification timed out after {self.max_rounds} rounds",
-                "verdict": AdversarialVerdict.UNCERTAIN,
+                "verdict": None,
             }
 
         # Determine final status
         if timeout_occurred:
             status = AdversarialStatus.TIMEOUT
-        elif result.get("verdict") == AdversarialVerdict.CONFIRMED:
-            status = AdversarialStatus.CONFIRMED
-        elif result.get("verdict") == AdversarialVerdict.REJECTED:
-            status = AdversarialStatus.REJECTED
         else:
-            status = AdversarialStatus.UNCERTAIN
+            from src.layers.l3_analysis.verification.models import VerdictType
+            verdict_obj = result.get("verdict")
+            if verdict_obj and hasattr(verdict_obj, 'verdict'):
+                vtype = verdict_obj.verdict
+            elif verdict_obj and hasattr(verdict_obj, 'value'):
+                vtype = verdict_obj
+            else:
+                vtype = None
+
+            if vtype == VerdictType.CONFIRMED:
+                status = AdversarialStatus.CONFIRMED
+            elif vtype == VerdictType.FALSE_POSITIVE:
+                status = AdversarialStatus.REJECTED
+            else:
+                status = AdversarialStatus.UNCERTAIN
 
         return {
             "finding_id": finding_id,
@@ -251,47 +265,153 @@ class AdversarialService:
             related_code=related_code if related_code else None,
         )
 
-        # Create a mock session-like structure for compatibility
-        session = type('obj', (object,), {
-            'rounds': [],
-            'result': result_obj,
-        })()
+        # Extract debate rounds from VerificationResult
+        debate_rounds = getattr(result_obj, 'debate_rounds', []) or []
+        logger.info(f"Finding {finding.id}: extracted {len(debate_rounds)} debate rounds from VerificationResult (callback={'yes' if self.progress_callback else 'no'})")
+        for dr in debate_rounds:
+            round_num = getattr(dr, 'round_number', 0)
+            total_rounds = len(debate_rounds)
 
-        # Extract rounds from session
-        if session and hasattr(session, 'rounds'):
-            for i, round_obj in enumerate(session.rounds):
-                debate_round = DebateRound(
-                    round_number=i + 1,
-                    role=round_obj.role if hasattr(round_obj, 'role') else "unknown",
-                    content=round_obj.content if hasattr(round_obj, 'content') else "",
+            # Common finding info (Finding model uses 'type' not 'vuln_type', 'location.file' not 'file_path')
+            finding_id = finding.id or "unknown"
+            finding_title = getattr(finding, 'title', '') or ''
+            vuln_type = str(getattr(finding, 'type', '') or '')
+            severity = str(getattr(finding, 'severity', '') or '')
+            file_path = ''
+            if hasattr(finding, 'location') and finding.location:
+                file_path = getattr(finding.location, 'file', '') or ''
+
+            # --- Attacker argument ---
+            attacker = getattr(dr, 'attacker_argument', None)
+            if attacker:
+                rounds.append(DebateRound(
+                    round_number=round_num,
+                    role="attacker",
+                    content=getattr(attacker, 'claim', ''),
                     timestamp=datetime.now(UTC),
-                    confidence=round_obj.confidence if hasattr(round_obj, 'confidence') else 0.5,
-                )
-                rounds.append(debate_round)
-
-                # Send progress callback
+                    confidence=getattr(attacker, 'confidence', 0.5),
+                ))
                 if self.progress_callback:
-                    self.progress_callback("adversarial_round", {
-                        "finding_id": finding.id,
-                        "round": i + 1,
-                        "role": debate_round.role,
-                        "content": debate_round.content[:200],  # Truncate for callback
-                        "confidence": debate_round.confidence,
-                    })
+                    try:
+                        # Build detail dict with full data for expandable card
+                        attacker_detail = {
+                            "evidence": getattr(attacker, 'evidence', []) or [],
+                            "reasoning": getattr(attacker, 'reasoning', '') or '',
+                            "poc_code": getattr(attacker, 'poc_code', None),
+                            "poc_type": getattr(attacker, 'poc_type', None),
+                            "exploitation_steps": getattr(attacker, 'exploitation_steps', []) or [],
+                            "prerequisites": getattr(attacker, 'prerequisites', []) or [],
+                            "counter_arguments": getattr(attacker, 'counter_arguments', []) or [],
+                            "is_rebuttal": getattr(attacker, 'is_rebuttal', False),
+                        }
+                        self.progress_callback("adversarial_round", {
+                            "finding_id": finding_id,
+                            "finding_title": finding_title,
+                            "vuln_type": vuln_type,
+                            "severity": severity,
+                            "file_path": file_path,
+                            "round": round_num,
+                            "total_rounds": total_rounds,
+                            "role": "attacker",
+                            "claim": getattr(attacker, 'claim', ''),
+                            "evidence": str(getattr(attacker, 'evidence', ''))[:300],
+                            "strength": str(getattr(attacker, 'strength', '')),
+                            "confidence": getattr(attacker, 'confidence', 0.5),
+                            "detail": attacker_detail,
+                        })
+                    except Exception as e:
+                        logger.error(f"Adversarial callback error: {e}")
 
-        # Build result from session
-        if session and hasattr(session, 'result'):
-            result_obj = session.result
-            return {
-                "verdict": result_obj.verdict if hasattr(result_obj, 'verdict') else None,
-                "confidence": result_obj.confidence if hasattr(result_obj, 'confidence') else 0.5,
-                "reasoning": result_obj.reasoning if hasattr(result_obj, 'reasoning') else "",
-            }
+            # --- Defender argument ---
+            defender = getattr(dr, 'defender_argument', None)
+            if defender:
+                rounds.append(DebateRound(
+                    round_number=round_num,
+                    role="defender",
+                    content=getattr(defender, 'claim', ''),
+                    timestamp=datetime.now(UTC),
+                    confidence=getattr(defender, 'confidence', 0.5),
+                ))
+                if self.progress_callback:
+                    try:
+                        # Build detail dict with full data for expandable card
+                        defender_detail = {
+                            "evidence": getattr(defender, 'evidence', []) or [],
+                            "reasoning": getattr(defender, 'reasoning', '') or '',
+                            "sanitizers_found": getattr(defender, 'sanitizers_found', []) or [],
+                            "validation_checks": getattr(defender, 'validation_checks', []) or [],
+                            "framework_protections": getattr(defender, 'framework_protections', []) or [],
+                            "exploitation_barriers": getattr(defender, 'exploitation_barriers', []) or [],
+                            "false_positive_reasons": getattr(defender, 'false_positive_reasons', []) or [],
+                            "counter_arguments": getattr(defender, 'counter_arguments', []) or [],
+                            "is_rebuttal": getattr(defender, 'is_rebuttal', False),
+                        }
+                        self.progress_callback("adversarial_round", {
+                            "finding_id": finding_id,
+                            "finding_title": finding_title,
+                            "vuln_type": vuln_type,
+                            "severity": severity,
+                            "file_path": file_path,
+                            "round": round_num,
+                            "total_rounds": total_rounds,
+                            "role": "defender",
+                            "claim": getattr(defender, 'claim', ''),
+                            "evidence": str(getattr(defender, 'evidence', ''))[:300],
+                            "strength": str(getattr(defender, 'strength', '')),
+                            "confidence": getattr(defender, 'confidence', 0.5),
+                            "detail": defender_detail,
+                        })
+                    except Exception as e:
+                        logger.error(f"Adversarial defender callback error: {e}")
 
+            # --- Arbiter verdict ---
+            arbiter = getattr(dr, 'arbiter_verdict', None)
+            if arbiter:
+                rounds.append(DebateRound(
+                    round_number=round_num,
+                    role="judge",
+                    content=getattr(arbiter, 'reasoning', ''),
+                    timestamp=datetime.now(UTC),
+                    confidence=getattr(arbiter, 'confidence', 0.5),
+                ))
+                if self.progress_callback:
+                    try:
+                        # Build detail dict with full data for expandable card
+                        judge_detail = {
+                            "summary": getattr(arbiter, 'summary', '') or '',
+                            "reasoning": getattr(arbiter, 'reasoning', '') or '',
+                            "attacker_strength": getattr(arbiter, 'attacker_strength', 0),
+                            "defender_strength": getattr(arbiter, 'defender_strength', 0),
+                            "conditions": getattr(arbiter, 'conditions', []) or [],
+                            "key_factors": getattr(arbiter, 'key_factors', []) or [],
+                            "priority": str(getattr(arbiter, 'priority', '')),
+                        }
+                        self.progress_callback("adversarial_round", {
+                            "finding_id": finding_id,
+                            "finding_title": finding_title,
+                            "vuln_type": vuln_type,
+                            "severity": severity,
+                            "file_path": file_path,
+                            "round": round_num,
+                            "total_rounds": total_rounds,
+                            "role": "judge",
+                            "claim": getattr(arbiter, 'summary', '') or getattr(arbiter, 'reasoning', ''),
+                            "verdict": str(getattr(arbiter, 'verdict', '')),
+                            "confidence": getattr(arbiter, 'confidence', 0.5),
+                            "recommended_action": str(getattr(arbiter, 'recommended_action', '')),
+                            "detail": judge_detail,
+                        })
+                    except Exception as e:
+                        logger.error(f"Adversarial judge callback error: {e}")
+
+        # Build result from VerificationResult
+        final_verdict = getattr(result_obj, 'verdict', None)
         return {
-            "verdict": AdversarialVerdict.UNCERTAIN,
-            "confidence": 0.5,
-            "reasoning": "Verification completed with no clear verdict",
+            "verdict": final_verdict,
+            "confidence": getattr(final_verdict, 'confidence', 0.5) if final_verdict else 0.5,
+            "reasoning": getattr(final_verdict, 'reasoning', '') if final_verdict else "",
+            "rounds_completed": getattr(result_obj, 'rounds_completed', 0),
+            "duration_seconds": getattr(result_obj, 'duration_seconds', 0),
         }
 
     async def verify_findings_batch(
@@ -365,6 +485,7 @@ def create_adversarial_service(
     round_timeout: int = 180,
     progress_callback: Optional[Callable[[str, dict[str, Any]], None]] = None,
     db_session_factory: Optional[Callable[[], AsyncSession]] = None,
+    language: str = "zh",
 ) -> AdversarialService:
     """Factory function to create an AdversarialService.
 
@@ -411,6 +532,7 @@ def create_adversarial_service(
         max_rounds=max_rounds,
         round_timeout=round_timeout,
         progress_callback=progress_callback,
+        language=language,
     )
 
 
@@ -420,6 +542,7 @@ async def create_adversarial_service_from_db(
     round_timeout: int = 180,
     progress_callback: Optional[Callable[[str, dict[str, Any]], None]] = None,
     llm_client=None,  # P18-Bugfix: 支持传入现有的 llm_client 以正确统计 token
+    language: str = "zh",
 ) -> Optional[AdversarialService]:
     """Factory function to create an AdversarialService from database config.
 
@@ -453,4 +576,5 @@ async def create_adversarial_service_from_db(
             max_rounds=max_rounds,
             round_timeout=round_timeout,
             progress_callback=progress_callback,
+            language=language,
         )

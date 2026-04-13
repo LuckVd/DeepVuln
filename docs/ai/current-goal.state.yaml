@@ -15,11 +15,11 @@ modified_files: []
 security_blockers: []
 dead_code_actions: []
 sync_status: "synced"
-commit_id: "c87a0c6"
-last_check_at: "2026-04-11"
-last_synced_at: "2026-04-11"
+commit_id: "pending"
+last_check_at: "2026-04-13"
+last_synced_at: "2026-04-13"
 previous_goal:
-  goal_id: "P18-config-migration"
-  title: "配置系统迁移 - 从 config.local.toml 到数据库"
+  goal_id: "web-enhancement-batch"
+  title: "Web 前端增强 + 安全修复"
   status: "completed"
-  commit_id: "c87a0c6"
+  commit_id: "pending"

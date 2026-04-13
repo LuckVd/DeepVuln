@@ -253,6 +253,7 @@ def get_attacker_user_prompt(
     related_code: str | None = None,
     call_chain: list[str] | None = None,
     entry_point: dict[str, Any] | None = None,
+    language: str = "en",
 ) -> str:
     """Build the user prompt for the attacker role."""
     vuln_type = finding.get("type", "unknown")
@@ -591,6 +592,7 @@ def get_defender_user_prompt(
     attacker_argument: dict[str, Any] | None = None,
     call_chain: list[str] | None = None,
     entry_point: dict[str, Any] | None = None,
+    language: str = "en",
 ) -> str:
     """Build the user prompt for the defender role."""
     vuln_type = finding.get("type", "unknown")
@@ -942,6 +944,7 @@ def get_arbiter_user_prompt(
     attacker_argument: dict[str, Any],
     defender_argument: dict[str, Any],
     debate_history: list[dict[str, Any]] | None = None,
+    language: str = "en",
 ) -> str:
     """Build the user prompt for the arbiter role."""
     prompt = f"""## Vulnerability Under Review
@@ -1116,6 +1119,7 @@ def get_attacker_rebuttal_prompt(
     code_context: str,
     defender_argument: dict[str, Any],
     previous_attacker_argument: dict[str, Any],
+    language: str = "en",
 ) -> str:
     """Build the prompt for attacker's rebuttal."""
     return f"""## Vulnerability Under Debate
@@ -1173,6 +1177,7 @@ def get_defender_rebuttal_prompt(
     code_context: str,
     attacker_argument: dict[str, Any],
     previous_defender_argument: dict[str, Any],
+    language: str = "en",
 ) -> str:
     """Build the prompt for defender's rebuttal."""
     return f"""## Vulnerability Under Debate
@@ -1225,3 +1230,37 @@ As the DEFENDER, respond to the attacker's counter-argument:
 
 Provide your rebuttal in JSON format with the same structure as before.
 """
+
+
+# =============================================================================
+# CHINESE LANGUAGE SUPPORT
+# =============================================================================
+
+# Chinese output instruction - prepended (high priority) and appended (reminder)
+_CHINESE_OUTPUT_PREFIX = """【重要指令 - 最高优先级】你必须使用中文（简体中文）输出所有文本内容。所有 claim、evidence、reasoning、summary、conditions、key_factors、exploitation_steps、prerequisites、counter_arguments、sanitizers_found、validation_checks、framework_protections、exploitation_barriers、false_positive_reasons 等文本字段必须用中文撰写。JSON 字段名保持英文，枚举值（weak/moderate/strong/definitive）保持英文，代码保持原文。这条语言指令的优先级高于其他所有指令。
+
+"""
+
+_CHINESE_OUTPUT_SUFFIX = """
+
+## 语言要求（最终确认）
+
+回顾你的输出，确保：
+1. 所有 `claim` 字段使用中文
+2. 所有 `evidence` 列表中的每条证据使用中文
+3. 所有 `reasoning` 字段使用中文
+4. 所有 `summary` 字段使用中文
+5. 所有 `exploitation_steps`、`prerequisites`、`counter_arguments`、`conditions`、`key_factors`、`sanitizers_found`、`validation_checks`、`framework_protections`、`exploitation_barriers`、`false_positive_reasons` 使用中文
+6. JSON 字段名保持英文不变
+7. 枚举值（如 weak、moderate、strong、definitive）保持英文不变
+8. PoC 代码保持原始代码语言（不翻译）
+
+如果你在输出中使用了英文文本，请立即改写为中文后再输出。
+"""
+
+
+def get_system_prompt(base_prompt: str, language: str = "en") -> str:
+    """Get system prompt with optional Chinese output instruction."""
+    if language == "zh":
+        return _CHINESE_OUTPUT_PREFIX + base_prompt + _CHINESE_OUTPUT_SUFFIX
+    return base_prompt

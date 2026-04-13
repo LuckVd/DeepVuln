@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
-import { Card, Badge, Progress, Statistic, Timeline } from '@/components/ui';
-import { Check, Loader2, Clock, X, Pause } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Card, Badge, Progress, Statistic, Timeline, Collapsible, CollapsibleTrigger, CollapsibleContent, Button } from '@/components/ui';
+import { Check, Loader2, Clock, X, Pause, ChevronDown, ChevronRight } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { ScanProgressResponse, PhaseInfo } from '@/types/models';
 import { cn } from '@/shared/utils/cn';
@@ -8,6 +8,91 @@ import { cn } from '@/shared/utils/cn';
 interface ScanProgressProps {
   progress: ScanProgressResponse | null;
   loading?: boolean;
+}
+
+// Engine Card Component
+interface EngineCardProps {
+  name: string;
+  status: 'completed' | 'running' | 'pending' | 'failed';
+  phase: PhaseInfo | null;
+}
+
+function EngineCard({ name, status, phase }: EngineCardProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const { t } = useLanguage();
+
+  const statusVariant: Record<string, 'completed' | 'running' | 'pending' | 'failed'> = {
+    completed: 'completed',
+    running: 'running',
+    pending: 'pending',
+    failed: 'failed',
+  };
+
+  const statusConfig = {
+    completed: { icon: <Check className="h-3 w-3" />, text: t('status.completed') },
+    running: { icon: <Loader2 className="h-3 w-3 animate-spin" />, text: t('status.running') },
+    pending: { icon: <Clock className="h-3 w-3" />, text: t('status.waiting') },
+    failed: { icon: <X className="h-3 w-3" />, text: t('status.failed') },
+  };
+
+  const config = statusConfig[status];
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <div className="border border-border rounded-md overflow-hidden">
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full flex items-center justify-between px-3 py-2 h-auto hover:bg-cyan/5"
+          >
+            <div className="flex items-center gap-2 flex-1">
+              <span className="text-text-primary font-medium">{name.toUpperCase()}</span>
+              <Badge variant={statusVariant[status]} className="min-w-[70px] justify-center text-xs">
+                {config.icon}
+                <span className="ml-1">{config.text}</span>
+              </Badge>
+              {status === 'running' && phase && (
+                <span className="text-xs text-text-tertiary">{phase.progress_percent}%</span>
+              )}
+            </div>
+            {isOpen ? <ChevronDown className="h-4 w-4 text-text-secondary" /> : <ChevronRight className="h-4 w-4 text-text-secondary" />}
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="px-3 py-2 bg-background-secondary border-t border-border">
+            {phase ? (
+              <div className="grid grid-cols-3 gap-3 text-xs">
+                {/* Duration */}
+                <div>
+                  <div className="text-text-tertiary font-mono">{t('scanProgress.duration')}</div>
+                  <div className="text-cyan font-mono">
+                    {phase.duration_seconds ? `${phase.duration_seconds.toFixed(1)}s` : '--'}
+                  </div>
+                </div>
+                {/* Findings */}
+                <div>
+                  <div className="text-text-tertiary font-mono">{t('scanProgress.findings')}</div>
+                  <div className={phase.findings > 0 ? "text-critical font-mono" : "text-text-secondary font-mono"}>
+                    {phase.findings || 0}
+                  </div>
+                </div>
+                {/* Tokens */}
+                <div>
+                  <div className="text-text-tertiary font-mono">{t('scanProgress.tokens')}</div>
+                  <div className={phase.tokens_used > 0 ? "text-warning font-mono" : "text-text-secondary font-mono"}>
+                    {phase.tokens_used || 0}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-text-tertiary text-xs">{t('scanProgress.noDetails')}</div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
 }
 
 export function ScanProgress({ progress, loading }: ScanProgressProps) {
@@ -151,38 +236,72 @@ export function ScanProgress({ progress, loading }: ScanProgressProps) {
         />
       </Card>
 
-      {/* Engine Status */}
+      {/* Engine Status - Expanded with Details */}
       <Card className="glass-panel">
         <h3 className="text-cyan font-mono font-bold mb-4">{t('scanProgress.engineStatus')}</h3>
-        <div className="space-y-3 font-mono text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-text-secondary">{t('scanProgress.completed')}:</span>
-            <div className="flex gap-2">
-              {progress.engines.completed.map((engine) => (
-                <Badge key={engine} variant="completed">{engine}</Badge>
+        <div className="space-y-2 font-mono text-sm">
+          {/* Completed Engines with Details */}
+          {progress.engines.completed && progress.engines.completed.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs text-text-secondary">{t('scanProgress.completed')}</div>
+              {progress.engines.completed.map((engineName) => {
+                const phase = progress.phases.find(p =>
+                  p.name.toLowerCase().includes(engineName.toLowerCase()) ||
+                  engineName.toLowerCase().includes('semgrep') && p.name.includes('semgrep') ||
+                  engineName.toLowerCase().includes('codeql') && p.name.includes('codeql') ||
+                  engineName.toLowerCase().includes('agent') && p.name.includes('agent')
+                );
+                return (
+                  <EngineCard
+                    key={engineName}
+                    name={engineName}
+                    status="completed"
+                    phase={phase || null}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {/* Running Engine */}
+          {progress.engines.running && progress.engines.running.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs text-text-secondary">{t('scanProgress.running')}</div>
+              {progress.engines.running.map((engineName) => {
+                const phase = progress.phases.find(p => p.status === 'running');
+                return (
+                  <EngineCard
+                    key={engineName}
+                    name={engineName}
+                    status="running"
+                    phase={phase || null}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {/* Pending Engines */}
+          {progress.engines.pending && progress.engines.pending.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs text-text-secondary">{t('scanProgress.pending')}</div>
+              {progress.engines.pending.map((engineName) => (
+                <EngineCard
+                  key={engineName}
+                  name={engineName}
+                  status="pending"
+                  phase={null}
+                />
               ))}
-              {progress.engines.completed.length === 0 && <span className="text-text-tertiary">--</span>}
             </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-text-secondary">{t('scanProgress.running')}:</span>
-            <div className="flex gap-2">
-              {progress.engines.running ? (
-                <Badge variant="running">{progress.engines.running}</Badge>
-              ) : (
-                <span className="text-text-tertiary">--</span>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-text-secondary">{t('scanProgress.pending')}:</span>
-            <div className="flex gap-2">
-              {progress.engines.pending.map((engine) => (
-                <Badge key={engine} variant="pending">{engine}</Badge>
-              ))}
-              {progress.engines.pending.length === 0 && <span className="text-text-tertiary">--</span>}
-            </div>
-          </div>
+          )}
+
+          {/* No engines */}
+          {(!progress.engines.completed || progress.engines.completed.length === 0) &&
+           !progress.engines.running &&
+           (!progress.engines.pending || progress.engines.pending.length === 0) && (
+            <div className="text-text-tertiary text-center py-4">--</div>
+          )}
         </div>
       </Card>
     </div>

@@ -1,5 +1,50 @@
 # Change Log
 
+## 2026-04-13
+
+### Web 前端增强 + 安全修复 - 批量同步 ✅
+
+- **Summary**: 扫描详情页面增强、终端风格实时进度、WebSocket 修复、安全加固
+- **影响范围**: 前端 UI、WebSocket、后端 API 安全
+- **核心变更**:
+  1. **扫描详情页面增强**:
+     - 新增 Collapsible 组件（基于 @radix-ui/react-collapsible）
+     - ScanDetail: 添加扫描目标卡片、可折叠配置卡片、修复主进度条
+     - ScanProgress: 引擎状态改为可展开卡片列表
+  2. **终端风格实时进度窗口 (LiveTerminal)**:
+     - 新建 LiveTerminal 组件（终端 UI + 扫描线 + 闪烁光标）
+     - 复用全局 WS 单例、性能优化（React.memo、300ms 节流、200 条上限）
+     - 后端增强 WS 事件数据（阶段详情、引擎进度、对抗辩论、漏洞发现）
+  3. **WebSocket 跨进程修复**:
+     - Redis Pub/Sub 桥接（Celery Worker → FastAPI）
+     - Vite 代理添加 `ws: true`
+     - useWebSocket 循环断连修复（useRef 存 options）
+  4. **安全修复**:
+     - `llm_configs.py`: create/update 响应遮蔽 API Key（与 get 一致）
+     - `llm_configs.py`: 写操作端点添加 `Depends(require_api_key)`
+     - `system_settings.py`: update 端点添加 `Depends(require_api_key)`
+  5. **其他增强**:
+     - 对抗性辩论数据推送（attacker/defender/judge 详情）
+     - 规则翻译工具增强（ruleTranslations.ts）
+     - 前端国际化完善（translations.ts）
+     - GeneralSettingsCard、Checkbox 组件
+     - CodeQL config/rules 更新
+     - Token 统计修复
+- **新增文件** (7 个):
+  - `src/web/frontend/src/components/scan/LiveTerminal.tsx`
+  - `src/web/frontend/src/components/settings/GeneralSettingsCard.tsx`
+  - `src/web/frontend/src/components/ui/checkbox.tsx`
+  - `src/web/frontend/src/components/ui/collapsible.tsx`
+  - `src/web/frontend/src/utils/format.ts`
+  - `tests/unit/test_web/test_timezone_awareness.py`
+  - `.claude/commands/ai-feat.md`
+- **修改文件**: 39 个
+- **测试结果**: CodeQL 63/63 通过, Web 85 passed (18 failed 为已有问题，与本次无关)
+- **安全检查**: ✅ API Key 遮蔽修复 + 端点认证修复
+- **变更统计**: +2079/-528 行
+
+---
+
 ## 2026-04-11
 
 ### P18: 配置系统迁移 - 完成 ✅

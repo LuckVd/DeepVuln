@@ -21,6 +21,24 @@ export type SeverityLevel = 'critical' | 'high' | 'medium' | 'low' | 'info'
 // 漏洞状态
 export type FindingStatus = 'pending' | 'confirmed' | 'false_positive' | 'conditional'
 
+// 扫描配置
+export interface ScanConfig {
+  engines?: string[]
+  llm_detect?: boolean
+  static_only?: boolean
+  llm_verify?: boolean
+  adversarial?: boolean
+  adversarial_max_rounds?: number
+  adversarial_round_timeout?: number
+  incremental?: boolean
+  base_ref?: string
+  head_ref?: string
+  agent_max_files?: number
+  model?: string
+  skip_tests?: boolean
+  [key: string]: unknown
+}
+
 // 扫描模型（已移除项目维度）
 export interface Scan {
   id: number
@@ -57,10 +75,7 @@ export interface Scan {
   } | null
   tokens_budget: number | null
   task_id: string | null  // Celery task ID for task control
-  config?: {
-    engines?: string[]
-    [key: string]: unknown
-  }
+  config?: ScanConfig
   created_at: string
   started_at: string | null
   completed_at: string | null

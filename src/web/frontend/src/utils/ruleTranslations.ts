@@ -187,6 +187,86 @@ const RULE_TRANSLATIONS: Record<string, RuleTranslation> = {
     description: '用户输入直接用于 LDAP 查询，可能导致 LDAP 注入。',
     remediation: '使用参数化 LDAP 查询或对用户输入进行严格验证和转义。'
   },
+
+  // Suspicious - Agent Generated Types
+  'suspicious_information_disclosure': {
+    type: '信息泄露',
+    name: '可疑信息泄露',
+    description: '错误详情从服务器响应（data?.detail）被记录到控制台。如果服务器在错误响应中包含敏感信息，可能会在浏览器开发工具中暴露。',
+    remediation: '避免在日志中记录敏感信息，在生产环境中使用通用的错误消息，将详细信息仅记录到服务器端日志。'
+  },
+  'suspicious_unsafe_deserialization': {
+    type: '不安全反序列化',
+    name: '可疑不安全反序列化',
+    description: '检测到潜在的不安全反序列化操作，可能导致远程代码执行。',
+    remediation: '避免反序列化不受信任的数据。使用安全的序列化格式（如 JSON），并对数据进行完整性验证。'
+  },
+  'suspicious_business_logic_vulnerability': {
+    type: '业务逻辑',
+    name: '可疑业务逻辑漏洞',
+    description: '检测到潜在的业务逻辑漏洞，可能被利用绕过安全限制。',
+    remediation: '审查业务逻辑，确保所有操作都经过适当的身份验证和授权检查。'
+  },
+  'suspicious_path_traversal': {
+    type: '路径遍历',
+    name: '可疑路径遍历',
+    description: '检测到潜在的路径遍历漏洞，用户输入可能被用于访问任意文件。',
+    remediation: '验证和规范化文件路径，限制访问在特定目录内。使用 basename() 等函数获取文件名。'
+  },
+  'suspicious_xss': {
+    type: '跨站脚本',
+    name: '可疑跨站脚本',
+    description: '检测到潜在的跨站脚本漏洞，用户输入未经充分转义直接输出。',
+    remediation: '对所有用户输入进行 HTML 转义，使用 Content Security Policy 头部，使用安全的模板引擎自动转义。'
+  },
+  'suspicious_code_quality': {
+    type: '代码质量',
+    name: '可疑代码质量问题',
+    description: '代码中存在质量问题，可能导致可维护性下降或潜在错误。',
+    remediation: '重构代码以提高可读性和可维护性。遵循代码规范和最佳实践。'
+  },
+  'suspicious_privilege_escalation': {
+    type: '权限提升',
+    name: '可疑权限提升',
+    description: '检测到潜在的权限提升漏洞，可能允许低权限用户执行高权限操作。',
+    remediation: '实施严格的访问控制，确保每个操作都经过适当的权限检查。使用最小权限原则。'
+  },
+  'suspicious_input_validation_bypass': {
+    type: '输入验证',
+    name: '可疑输入验证绕过',
+    description: '检测到潜在的输入验证绕过，攻击者可能绕过安全检查。',
+    remediation: '在服务器端进行严格的输入验证，不要仅依赖客户端验证。使用白名单而不是黑名单。'
+  },
+  'suspicious_namespace_pollution': {
+    type: '命名空间污染',
+    name: '可疑命名空间污染',
+    description: '检测到潜在的命名空间污染，可能导致意外的行为或安全漏洞。',
+    remediation: '使用模块模式封装代码，避免全局变量污染。使用严格模式 (`use strict`)。'
+  },
+  'suspicious_network_exposure': {
+    type: '网络暴露',
+    name: '可疑网络暴露',
+    description: '检测到潜在的网络暴露问题，敏感服务可能暴露在不安全的网络环境中。',
+    remediation: '确保敏感服务仅在受信任的网络接口上监听，使用防火墙限制访问，实施网络分段。'
+  },
+  'suspicious_denial_of_service': {
+    type: '拒绝服务',
+    name: '可疑拒绝服务',
+    description: '检测到潜在的拒绝服务漏洞，可能导致资源耗尽。',
+    remediation: '实施速率限制、资源配额和超时机制。使用异步处理避免阻塞。'
+  },
+  'suspicious_sql_injection': {
+    type: 'SQL 注入',
+    name: '可疑 SQL 注入',
+    description: '检测到潜在的 SQL 注入漏洞，用户输入可能被直接拼接到 SQL 查询中。',
+    remediation: '使用参数化查询或 ORM 框架，避免直接拼接 SQL 字符串。对用户输入进行严格验证。'
+  },
+  'suspicious_code_quality_issue': {
+    type: '代码质量',
+    name: '可疑代码质量问题',
+    description: '代码中存在质量问题，可能导致可维护性下降或潜在错误。',
+    remediation: '重构代码以提高可读性和可维护性。遵循代码规范和最佳实践。'
+  },
 };
 
 /**
@@ -201,7 +281,58 @@ export function getRuleTranslation(vulnType: string): RuleTranslation | null {
  */
 export function getVulnTypeName(vulnType: string): string {
   const translation = RULE_TRANSLATIONS[vulnType];
-  return translation?.name || vulnType;
+  if (translation?.name) {
+    return translation.name;
+  }
+
+  // Generic translation rules for unknown types
+  return translateGenericVulnType(vulnType);
+}
+
+/**
+ * Generic translation for unknown vulnerability types
+ */
+function translateGenericVulnType(vulnType: string): string {
+  // Handle suspicious_* pattern
+  if (vulnType.startsWith('suspicious_')) {
+    const suffix = vulnType.replace('suspicious_', '').replace(/_/g, ' ');
+    return `可疑${suffix}`;
+  }
+
+  // Handle common patterns
+  const patterns: Record<string, string> = {
+    'injection': '注入',
+    'xss': '跨站脚本',
+    'sql_injection': 'SQL 注入',
+    'command_injection': '命令注入',
+    'path_traversal': '路径遍历',
+    'deserialization': '反序列化',
+    'csrf': '跨站请求伪造',
+    'ssrf': '服务端请求伪造',
+    'xxe': 'XML 外部实体注入',
+    'information_disclosure': '信息泄露',
+    'privilege_escalation': '权限提升',
+    'denial_of_service': '拒绝服务',
+    'hardcoded': '硬编码',
+    'credentials': '凭据',
+    'crypto': '加密',
+    'weak': '弱',
+    'unsafe': '不安全',
+    'buffer_overflow': '缓冲区溢出',
+    'race_condition': '竞态条件',
+    'ldap': 'LDAP',
+    'open_redirect': '开放重定向',
+  };
+
+  // Try to match patterns
+  for (const [pattern, translation] of Object.entries(patterns)) {
+    if (vulnType.includes(pattern)) {
+      return vulnType.replace(new RegExp(pattern, 'g'), translation);
+    }
+  }
+
+  // Replace underscores with spaces and capitalize
+  return vulnType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
 /**

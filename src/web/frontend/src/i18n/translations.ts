@@ -28,6 +28,8 @@ export const translations = {
     'common.init': '启动',
     'common.waiting': '等待中...',
     'common.of': '/', // 用于分页等场景
+    'common.enabled': '已启用',
+    'common.disabled': '已禁用',
 
     // Scans
     'scans.title': '扫描队列',
@@ -64,6 +66,14 @@ export const translations = {
     'scans.dialog.scanType': '扫描类型',
     'scans.dialog.scanTypeFull': '完整扫描（所有引擎）',
     'scans.dialog.scanTypeBase': '基础扫描（核心引擎）',
+    'scans.dialog.engines': '扫描引擎',
+    'scans.dialog.enginesDescription': '选择要使用的检测引擎',
+    'scans.dialog.engineSemgrep': 'Semgrep - 模式匹配',
+    'scans.dialog.engineCodeQL': 'CodeQL - 语义分析',
+    'scans.dialog.engineAgent': 'Agent - AI 深度审计',
+    'scans.dialog.engineAST': 'AST - 抽象语法树',
+    'scans.dialog.selectAll': '全选',
+    'scans.dialog.deselectAll': '取消全选',
     'scans.dialog.initiate': '创建',
     'scans.dialog.error.form': '创建失败，请重试',
     'scans.dialog.error.name': '任务名称必填',
@@ -168,6 +178,10 @@ export const translations = {
     'scanProgress.pending': '等待中',
     'scanProgress.failed': '失败',
     'scanProgress.skipped': '已跳过',
+    'scanProgress.duration': '耗时',
+    'scanProgress.findings': '发现数',
+    'scanProgress.tokens': 'Token',
+    'scanProgress.noDetails': '暂无详情',
 
     // Reports
     'reports.title': '报告',
@@ -274,6 +288,17 @@ export const translations = {
     'scanDetail.noEvents': '无事件记录',
     'scanDetail.duration': '持续时间',
     'scanDetail.tokens': '令牌',
+    'scanDetail.scanTarget': '扫描目标',
+    'scanDetail.sourceType': '来源类型',
+    'scanDetail.sourcePath': '源路径',
+    'scanDetail.branch': '分支',
+    'scanDetail.scanConfig': '扫描配置',
+    'scanDetail.engines': '扫描引擎',
+    'scanDetail.llmDetect': 'LLM 攻击面检测',
+    'scanDetail.llmVerify': '可利用性验证',
+    'scanDetail.adversarial': '对抗性验证',
+    'scanDetail.skipTests': '跳过测试文件',
+    'scanDetail.llmModel': 'LLM 模型',
 
     // Scan Phases
     'phase.l1_preparation': 'L1 情报准备',
@@ -328,6 +353,8 @@ export const translations = {
     'common.init': 'INITIATE',
     'common.waiting': 'Waiting...',
     'common.of': '/',
+    'common.enabled': 'Enabled',
+    'common.disabled': 'Disabled',
 
     // Scans
     'scans.title': 'SCAN QUEUE',
@@ -364,6 +391,14 @@ export const translations = {
     'scans.dialog.scanType': 'SCAN TYPE',
     'scans.dialog.scanTypeFull': 'FULL SCAN (All Engines)',
     'scans.dialog.scanTypeBase': 'BASE SCAN (Core Only)',
+    'scans.dialog.engines': 'SCAN ENGINES',
+    'scans.dialog.enginesDescription': 'Select detection engines to use',
+    'scans.dialog.engineSemgrep': 'Semgrep - Pattern Matching',
+    'scans.dialog.engineCodeQL': 'CodeQL - Semantic Analysis',
+    'scans.dialog.engineAgent': 'Agent - AI Deep Audit',
+    'scans.dialog.engineAST': 'AST - Abstract Syntax Tree',
+    'scans.dialog.selectAll': 'SELECT ALL',
+    'scans.dialog.deselectAll': 'DESELECT ALL',
     'scans.dialog.initiate': 'CREATE',
     'scans.dialog.error.form': 'Creation failed. Please try again.',
     'scans.dialog.error.name': 'Task name required',
@@ -467,6 +502,10 @@ export const translations = {
     'scanProgress.pending': 'PENDING',
     'scanProgress.failed': 'FAILED',
     'scanProgress.skipped': 'SKIPPED',
+    'scanProgress.duration': 'DURATION',
+    'scanProgress.findings': 'FINDINGS',
+    'scanProgress.tokens': 'TOKENS',
+    'scanProgress.noDetails': 'NO DETAILS',
 
     // Reports
     'reports.title': 'REPORTS',
@@ -574,6 +613,17 @@ export const translations = {
     'scanDetail.noEvents': 'NO EVENTS RECORDED',
     'scanDetail.duration': 'DURATION',
     'scanDetail.tokens': 'TOKENS',
+    'scanDetail.scanTarget': 'SCAN TARGET',
+    'scanDetail.sourceType': 'SOURCE TYPE',
+    'scanDetail.sourcePath': 'SOURCE PATH',
+    'scanDetail.branch': 'BRANCH',
+    'scanDetail.scanConfig': 'SCAN CONFIGURATION',
+    'scanDetail.engines': 'SCAN ENGINES',
+    'scanDetail.llmDetect': 'LLM ATTACK SURFACE',
+    'scanDetail.llmVerify': 'EXPLOITABILITY VERIFY',
+    'scanDetail.adversarial': 'ADVERSARIAL',
+    'scanDetail.skipTests': 'SKIP TESTS',
+    'scanDetail.llmModel': 'LLM MODEL',
 
     // Scan Phases
     'phase.l1_preparation': 'L1 Intelligence Preparation',
@@ -588,18 +638,18 @@ export const translations = {
 
     // Event Types
     'event.scan_complete': 'Scan Complete',
-    'event.engine_start': 'Engine Start',
+    'event.engine_start': 'Engine Started',
     'event.engine_complete': 'Engine Complete',
     'event.error': 'Error',
     'event.warning': 'Warning',
     'event.info': 'Info',
 
     // Event Messages
-    'event.scan_complete_msg': 'Scan completed with {} findings',
+    'event.scan_complete_msg': 'Scan complete, found {} findings',
     'event.engine_start_msg': 'Engine "{}" started',
     'event.engine_complete_msg': 'Engine "{}" completed with {} findings',
   },
 };
 
 export type Language = 'zh' | 'en';
-export type TranslationKey = keyof typeof translations.zh;
+export type TranslationKey = keyof typeof translations.zh | keyof typeof translations.en;

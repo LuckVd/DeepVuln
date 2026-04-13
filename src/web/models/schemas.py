@@ -1,8 +1,21 @@
 """Pydantic schemas for API requests and responses."""
 
-from datetime import datetime
-from typing import Optional, Any
+from datetime import datetime, timezone
+from typing import Optional, Any, Annotated
 from pydantic import BaseModel, Field, ConfigDict
+from pydantic.functional_serializers import PlainSerializer
+
+
+# Naive UTC datetimes are serialized with a trailing 'Z' so that JavaScript
+# `new Date(...)` correctly interprets them as UTC rather than local time.
+UtcDateTime = Annotated[
+    datetime,
+    PlainSerializer(
+        lambda v: v.replace(tzinfo=timezone.utc).isoformat() if v else v,
+        return_type=str,
+        when_used="json",
+    ),
+]
 
 
 # ============================================================================
@@ -66,7 +79,7 @@ class ScanConfig(BaseModel):
     """
     # Engine selection
     engines: list[str] = Field(
-        default=["semgrep", "codeql", "agent"],
+        default=["semgrep", "codeql", "agent", "ast"],
         description="List of engines to use"
     )
 
@@ -199,8 +212,8 @@ class ScanProgressResponse(BaseModel):
     phases: list[PhaseInfo] = Field(default_factory=list)
 
     # Time information
-    started_at: Optional[datetime] = None
-    estimated_completion: Optional[datetime] = None
+    started_at: Optional[UtcDateTime] = None
+    estimated_completion: Optional[UtcDateTime] = None
 
 
 class AgentConversationMessage(BaseModel):
@@ -272,6 +285,7 @@ class ScanResponse(BaseModel):
     branch: Optional[str] = None
     status: str
     scan_type: str
+    config: Optional[ScanConfig] = None
     current_phase: Optional[str] = None
     progress_percent: int = 0
 
@@ -298,9 +312,9 @@ class ScanResponse(BaseModel):
     incremental_stats: Optional[dict] = None  # P14-06: 增量扫描统计
 
     # Timestamps
-    created_at: datetime
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    created_at: UtcDateTime
+    started_at: Optional[UtcDateTime] = None
+    completed_at: Optional[UtcDateTime] = None
 
 
 class ScanListResponse(BaseModel):
@@ -350,7 +364,7 @@ class FindingResponse(FindingBase):
     engine: str
     status: str
     cpg_path: Optional[dict] = None
-    created_at: datetime
+    created_at: UtcDateTime
 
 
 class FindingListResponse(BaseModel):
@@ -390,7 +404,7 @@ class ScanEventResponse(BaseModel):
     # Token fields
     tokens_used: int = 0
 
-    created_at: datetime
+    created_at: UtcDateTime
 
 
 class ScanEventListResponse(BaseModel):
@@ -410,7 +424,7 @@ class PauseScanResponse(BaseModel):
     scan_id: int
     status: str
     checkpoint_saved: bool
-    paused_at: datetime
+    paused_at: UtcDateTime
     current_phase: Optional[str] = None
     can_resume: bool
 
@@ -420,7 +434,7 @@ class ResumeScanResponse(BaseModel):
     scan_id: int
     status: str
     resumed_from_phase: Optional[str] = None
-    resumed_at: datetime
+    resumed_at: UtcDateTime
     task_id: str
     skip_phases: list[str] = []
 
@@ -429,7 +443,7 @@ class CancelScanResponse(BaseModel):
     """Response for cancel scan request."""
     scan_id: int
     status: str
-    cancelled_at: datetime
+    cancelled_at: UtcDateTime
     cleanup_started: bool
 
 
@@ -455,4 +469,4 @@ class WebSocketEvent(BaseModel):
     message: Optional[str] = None
     data: Optional[dict] = None
     tokens_used: Optional[int] = None
-    timestamp: Optional[datetime] = None
+    timestamp: Optional[UtcDateTime] = None

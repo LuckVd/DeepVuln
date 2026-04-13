@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from ..llm.client import LLMClient, LLMError
-from ..prompts.adversarial import ARBITER_SYSTEM_PROMPT, get_arbiter_user_prompt
+from ..prompts.adversarial import ARBITER_SYSTEM_PROMPT, get_arbiter_user_prompt, get_system_prompt
 from .models import (
     AdversarialVerdict,
     DebateRound,
@@ -70,6 +70,7 @@ class ArbiterVerifier:
         defender_argument: VerificationArgument,
         debate_history: list[dict[str, Any]] | None = None,
         round_number: int = 1,
+        language: str = "en",
     ) -> AdversarialVerdict:
         """
         Evaluate arguments and make a final judgment.
@@ -80,6 +81,7 @@ class ArbiterVerifier:
             defender_argument: Defender's argument (latest).
             debate_history: History of previous debate rounds.
             round_number: Current round number.
+            language: Output language ("en" or "zh").
 
         Returns:
             AdversarialVerdict with final judgment.
@@ -90,12 +92,13 @@ class ArbiterVerifier:
             attacker_argument=attacker_argument.model_dump(),
             defender_argument=defender_argument.model_dump(),
             debate_history=debate_history,
+            language=language,
         )
 
         try:
             # Call LLM
             response = await self.llm_client.complete_with_context(
-                system_prompt=ARBITER_SYSTEM_PROMPT,
+                system_prompt=get_system_prompt(ARBITER_SYSTEM_PROMPT, language),
                 user_prompt=user_prompt,
             )
 

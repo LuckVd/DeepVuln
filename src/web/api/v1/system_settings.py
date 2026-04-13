@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.web.api.deps import get_db
+from src.web.core.security import require_api_key
 from src.web.models.system_schemas import (
     SystemSettingResponse,
     SystemSettingsBatch,
@@ -19,6 +20,9 @@ router = APIRouter()
 
 # Define default settings
 DEFAULT_SETTINGS = {
+    # General settings
+    "general.timezone": "Asia/Shanghai",
+
     # Scan settings
     "scan.timeout": "300",
     "scan.max_concurrent_files": "10",
@@ -47,6 +51,7 @@ async def get_system_settings(
     # Build settings dict
     settings_dict: Dict[str, SystemSettingResponse] = {}
     categories: Dict[str, Dict[str, Any]] = {
+        "general": {},
         "scan": {},
         "verification": {},
         "threat_intel": {},
@@ -94,7 +99,8 @@ async def get_system_settings(
 @router.put("/system-settings", response_model=SystemSettingsResponse)
 async def update_system_settings(
     batch: SystemSettingsBatch,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_api_key),
 ):
     """Batch update system settings."""
     repo = SystemSettingRepository()

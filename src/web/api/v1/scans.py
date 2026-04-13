@@ -2,7 +2,7 @@
 
 import json
 import csv
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 from io import StringIO
 
@@ -37,6 +37,16 @@ from src.web.repositories.finding import FindingRepository
 from src.web.repositories.event import ScanPhaseRepository, ScanEventRepository
 
 router = APIRouter()
+
+
+def _iso(dt: datetime | None) -> str | None:
+    """Serialize a naive-UTC datetime to an ISO 8601 string with 'Z' suffix.
+
+    This ensures JavaScript `new Date(...)` treats the value as UTC.
+    """
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc).isoformat()
 
 
 @router.post("/scans", response_model=ScanResponse, status_code=status.HTTP_201_CREATED)
@@ -418,8 +428,8 @@ async def get_scan_phases(
                 "files_processed": phase.files_processed,
                 "findings_found": phase.findings_found,
                 "tokens_used": phase.tokens_used,
-                "started_at": phase.started_at.isoformat() if phase.started_at else None,
-                "completed_at": phase.completed_at.isoformat() if phase.completed_at else None,
+                "started_at": _iso(phase.started_at),
+                "completed_at": _iso(phase.completed_at),
                 "duration_seconds": phase.duration_seconds,
                 "error_message": phase.error_message,
             }
@@ -489,7 +499,7 @@ async def get_scan_events(
                 "agent_turn": event.agent_turn,
                 "agent_role": event.agent_role,
                 "agent_message": event.agent_message,
-                "created_at": event.created_at.isoformat() if event.created_at else None,
+                "created_at": _iso(event.created_at),
             }
             for event in events
         ],
@@ -647,7 +657,7 @@ async def get_current_file(
     for event in recent_events:
         if event.event_type in ["agent_action", "adversarial_start", "adversarial_round"]:
             agent_actions.append({
-                "timestamp": event.created_at.isoformat() if event.created_at else None,
+                "timestamp": _iso(event.created_at),
                 "action": event.event_type,
                 "message": event.message,
                 "details": event.details,
@@ -730,7 +740,7 @@ async def get_scan_findings(
                 "engine": f.engine,
                 "status": f.status,
                 "cpg_path": f.cpg_path,
-                "created_at": f.created_at.isoformat() if f.created_at else None,
+                "created_at": _iso(f.created_at),
             }
             for f in findings
         ],
@@ -859,9 +869,9 @@ async def get_scan_report(
             }
             for e in recent_events
         ],
-        "created_at": scan.created_at.isoformat() if scan.created_at else None,
-        "started_at": scan.started_at.isoformat() if scan.started_at else None,
-        "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
+        "created_at": _iso(scan.created_at),
+        "started_at": _iso(scan.started_at),
+        "completed_at": _iso(scan.completed_at),
         "report_path": scan.report_path,
     }
 
@@ -928,7 +938,7 @@ async def export_scan_report_csv(
             finding.engine,
             finding.status,
             (finding.description or "")[:200],  # Truncate long descriptions
-            finding.created_at.isoformat() if finding.created_at else "",
+            _iso(finding.created_at) or "",
         ])
 
     # Generate filename

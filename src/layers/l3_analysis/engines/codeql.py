@@ -19,6 +19,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from rich.markup import escape
 
 from src.core.codeql_health import (
@@ -43,6 +45,12 @@ from src.layers.l3_analysis.models import (
 
 # Default cache directory for CodeQL databases
 DEFAULT_CACHE_DIR = Path("/tmp/codeql_cache")
+
+# Path to CodeQL rules configuration
+CODEQL_CONFIG_PATH = Path(__file__).parent.parent.parent.parent / "rules" / "codeql" / "config.yaml"
+
+# Path to custom CodeQL queries
+CODEQL_CUSTOM_QUERIES_PATH = Path(__file__).parent.parent.parent.parent / "rules" / "codeql"
 
 logger = get_logger(__name__)
 
@@ -106,6 +114,82 @@ TAG_TO_TYPE: dict[str, FindingType] = {
     "maintainability": FindingType.INFO,
     "performance": FindingType.INFO,
 }
+
+
+def load_codeql_config() -> dict[str, Any]:
+    """
+    Load CodeQL configuration from rules/codeql/config.yaml.
+
+    Returns:
+        Configuration dictionary with default_suites, custom_queries, etc.
+        Returns empty dict if config file doesn't exist or is invalid.
+    """
+    config: dict[str, Any] = {}
+
+    if not CODEQL_CONFIG_PATH.exists():
+        logger.debug(f"CodeQL config file not found: {CODEQL_CONFIG_PATH}")
+        return config
+
+    try:
+        with open(CODEQL_CONFIG_PATH, encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+        logger.info(f"Loaded CodeQL config from: {CODEQL_CONFIG_PATH}")
+    except Exception as e:
+        logger.warning(f"Failed to load CodeQL config from {CODEQL_CONFIG_PATH}: {e}")
+
+    return config
+
+
+def get_custom_queries_for_language(language: str) -> list[Path]:
+    """
+    Get custom CodeQL query files for a specific language.
+
+    Args:
+        language: CodeQL language name (e.g., "java", "python").
+
+    Returns:
+        List of paths to custom .ql files for the language.
+    """
+    custom_queries: list[Path] = []
+    lang_dir = CODEQL_CUSTOM_QUERIES_PATH / language
+
+    if not lang_dir.exists():
+        return custom_queries
+
+    try:
+        for ql_file in lang_dir.glob("*.ql"):
+            if ql_file.is_file():
+                custom_queries.append(ql_file)
+        logger.debug(f"Found {len(custom_queries)} custom queries for {language}")
+    except Exception as e:
+        logger.warning(f"Failed to scan custom queries for {language}: {e}")
+
+    return custom_queries
+
+
+def get_effective_suites(language: str) -> list[str]:
+    """
+    Get effective query suites for a language, combining defaults with config.
+
+    Args:
+        language: CodeQL language name.
+
+    Returns:
+        List of query suite names to use.
+    """
+    # Start with default suites
+    suites = DEFAULT_QUERY_SUITES.get(language, []).copy()
+
+    # Load config and merge additional suites
+    config = load_codeql_config()
+    config_suites = config.get("default_suites", {}).get(language, [])
+
+    # Add config suites that aren't already in the list
+    for suite in config_suites:
+        if suite not in suites:
+            suites.append(suite)
+
+    return suites
 
 
 class CodeQLEngine(BaseEngine):
@@ -184,6 +268,10 @@ class CodeQLEngine(BaseEngine):
 
         # Health manager for fail-safe operations
         self.health_manager = CodeQLHealthManager()
+
+        # Load configuration from config.yaml
+        self._config = load_codeql_config()
+        self._use_custom_queries: bool = self._config.get("use_custom_queries", True)
 
     def is_available(self) -> bool:
         """
@@ -1057,8 +1145,8 @@ class CodeQLEngine(BaseEngine):
             elif queries:
                 suites_to_run = queries
             else:
-                # Use ALL default security suites
-                suites_to_run = DEFAULT_QUERY_SUITES.get(codeql_lang, ["security"])
+                # Use effective suites (defaults + config.yaml)
+                suites_to_run = get_effective_suites(codeql_lang)
 
             # Run each suite and collect findings
             suite_results: list[tuple[str, dict[str, Any] | None]] = []
@@ -1926,6 +2014,13 @@ class CodeQLEngine(BaseEngine):
                         cmd.append(f"{pack_name}:{query_suite}")
                 else:
                     cmd.append(query_suite)
+
+            # Add custom query files if enabled
+            if self._use_custom_queries:
+                custom_queries = get_custom_queries_for_language(language)
+                for custom_query in custom_queries:
+                    cmd.append(str(custom_query))
+                    logger.debug(f"Adding custom query: {custom_query}")
 
             # Add search path if specified
             if self.search_path:

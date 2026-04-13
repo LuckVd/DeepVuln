@@ -30,10 +30,12 @@ Commands to include:
 - `/ai-scan`
 - `/ai-roadmap`
 - `/ai-goal`
+- `/ai-feat`
 - `/ai-check`
 - `/ai-sync`
 - `/ai-deadcode`
 - `/ai-security`
+- `/ai-bugfix`
 
 Guardrails:
 

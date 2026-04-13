@@ -156,6 +156,10 @@ class ScanOrchestrator:
         """
         self.start_time = datetime.now(timezone.utc)
 
+        # Set scan configuration for progress callback
+        # This enables dynamic weight calculation for optional phases
+        self.progress_callback.set_scan_config(self.config)
+
         try:
             # Phase 0: L1_Preparation (P14-01 新增)
             # 包含 TechStackDetection + AttackSurfaceDetection
@@ -166,6 +170,9 @@ class ScanOrchestrator:
                 {
                     "languages": self.tech_stack.get("languages", []),
                     "frameworks": self.tech_stack.get("frameworks", []),
+                    "primary_language": self.tech_stack.get("primary_language"),
+                    "total_files": self.tech_stack.get("total_files", 0),
+                    "file_counts": self.tech_stack.get("file_counts", {}),
                     "attack_surface": self.attack_surface_report.get(
                         "total_entry_points", 0
                     ) if self.attack_surface_report else 0,
@@ -191,12 +198,23 @@ class ScanOrchestrator:
             # Phase 3: Execute engines (concurrent)
             await self.progress_callback.on_phase_start("engine_execution")
             await self._execute_engines(engines)
+            # Build per-engine detail summary
+            per_engine_details = {}
+            for name, result in self.scan_results.items():
+                per_engine_details[name] = {
+                    "findings": len(result.findings),
+                    "duration_seconds": getattr(result, 'duration_seconds', 0) or 0,
+                    "tokens_used": 0,
+                }
+                if isinstance(result.raw_output, dict):
+                    per_engine_details[name]["tokens_used"] = result.raw_output.get("total_tokens", 0)
             await self.progress_callback.on_phase_complete(
                 "engine_execution",
                 {
                     "findings": sum(
                         len(r.findings) for r in self.scan_results.values()
-                    )
+                    ),
+                    "per_engine_details": per_engine_details,
                 }
             )
 
@@ -258,8 +276,21 @@ class ScanOrchestrator:
             ).total_seconds()
 
             # Report completion
+            tokens_used = 0
+            if self.llm_client:
+                usage = self.llm_client.get_total_usage()
+                tokens_used = usage.total_tokens
+
+            # Build per-phase token breakdown for scan_complete
+            per_phase_tokens = {
+                "agent_scan": token_stats.get("agent_scan_tokens", 0),
+                "adversarial": self._adversarial_tokens_used,
+                "total": token_stats.get("total_tokens", 0),
+            }
+
             await self.progress_callback.on_scan_complete(
-                self.total_findings, duration_seconds
+                self.total_findings, duration_seconds, tokens_used,
+                per_phase_tokens=per_phase_tokens,
             )
 
             return {
@@ -575,10 +606,13 @@ class ScanOrchestrator:
 
         # Agent - check LLM config
         if "agent" in requested:
-            engine = OpenCodeAgent()
-            if engine.is_available():
+            # 只有在配置了 LLM 客户端时才启用 agent
+            if self.llm_client and self.llm_client.is_available:
+                engine = OpenCodeAgent(llm_client=self.llm_client)
                 selected_engines["agent"] = engine
                 logger.info(f"Scan {self.scan_id}: Agent engine selected")
+            else:
+                logger.warning(f"Scan {self.scan_id}: Agent engine requested but no LLM client available")
 
         # AST Engine - if available
         if "ast" in requested:
@@ -889,10 +923,18 @@ class ScanOrchestrator:
             result = verification_results[finding.id]
             # Store verification result in finding metadata
             finding.metadata = finding.metadata or {}
-            finding.metadata["exploitability_verification"] = (
-                verification_service.create_exploitability_dict(result)
-            )
+            exploit_dict = verification_service.create_exploitability_dict(result)
+            finding.metadata["exploitability_verification"] = exploit_dict
             verified_count += 1
+
+            # Broadcast per-finding verification result
+            await self.progress_callback.broadcast_event("verification_result", {
+                "finding_id": finding.id or "unknown",
+                "finding_title": getattr(finding, 'title', '') or '',
+                "status": exploit_dict.get("status", ""),
+                "confidence": result.confidence,
+                "reasoning": getattr(result, 'reasoning', '') or '',
+            })
 
             logger.debug(
                 f"Finding {finding.id}: {result.status.value} "
@@ -952,6 +994,21 @@ class ScanOrchestrator:
                     source_path=str(self.source_path),  # Add required source_path
                 )
             self.scan_results[engine].findings.append(finding)
+
+            # Broadcast per-finding adjudication result
+            adj_data = finding.metadata.get("adjudication", {}) if finding.metadata else {}
+            await self.progress_callback.broadcast_event("adjudication_result", {
+                "finding_id": finding.id or "unknown",
+                "finding_title": getattr(finding, 'title', '') or '',
+                "vuln_type": str(getattr(finding, 'rule_id', '') or ''),
+                "severity": str(getattr(finding, 'severity', '') or ''),
+                "file_path": getattr(finding.location, 'file', '') if hasattr(finding, 'location') and finding.location else '',
+                "final_status": adj_data.get("final_status", ""),
+                "override_applied": adj_data.get("override_applied", False),
+                "override_reason": adj_data.get("override_reason", ""),
+                "evidence_strength": adj_data.get("evidence_strength"),
+                "report_status": adj_data.get("report_status", ""),
+            })
 
         # Store summary for later use in database
         self.adjudication_summary = summary.to_dict()
@@ -1024,6 +1081,17 @@ class ScanOrchestrator:
             if adversarial_service.should_verify_finding(f)
         ]
 
+        # Broadcast skipped findings
+        skipped_findings = [f for f in all_findings if not adversarial_service.should_verify_finding(f)]
+        for f in skipped_findings:
+            skip_reason = "低严重等级" if hasattr(f, 'severity') and str(f.severity).lower() == 'info' else "低置信度"
+            await self.progress_callback.broadcast_event("finding_skipped", {
+                "finding_id": f.id or "unknown",
+                "finding_title": getattr(f, 'title', '') or '',
+                "severity": str(getattr(f, 'severity', '')),
+                "reason": skip_reason,
+            })
+
         if not findings_to_verify:
             logger.info("No findings met criteria for adversarial verification")
             return {"verified_count": 0, "confirmed": 0, "rejected": 0}
@@ -1055,25 +1123,36 @@ class ScanOrchestrator:
         # Apply results to findings
         confirmed = 0
         rejected = 0
+        logger.info(f"Adversarial results: {len(verification_results)} entries, "
+                     f"all_findings IDs: {[f.id for f in all_findings]}, "
+                     f"result keys: {list(verification_results.keys())}")
         for finding_id, result in verification_results.items():
+            status_val = result.get("status", "UNKNOWN")
+            logger.info(f"Adversarial result: finding_id={finding_id}, status={status_val}, "
+                         f"status_type={type(status_val)}, verdict={result.get('verdict')}")
             # Find the finding
+            found = False
             for finding in all_findings:
                 if finding.id == finding_id:
                     # Store result in finding metadata
                     finding.metadata = finding.metadata or {}
                     finding.metadata["adversarial_verification"] = result
 
+                    found = True
                     # Update counters
                     if result.get("status") == "confirmed":
                         confirmed += 1
                     elif result.get("status") == "rejected":
                         rejected += 1
 
-                    logger.debug(
-                        f"Finding {finding_id}: {result.get('status')} "
-                        f"(confidence: {result.get('confidence', 0):.2f})"
+                    logger.info(
+                        f"Finding {finding_id}: matched, status={result.get('status')} "
+                        f"(confidence: {result.get('confidence', 0):.2f}), "
+                        f"confirmed={confirmed}, rejected={rejected}"
                     )
                     break
+            if not found:
+                logger.warning(f"Finding {finding_id} not found in all_findings (IDs: {[f.id for f in all_findings[:5]]})")
 
         summary = {
             "verified_count": len(verification_results),
@@ -1100,14 +1179,28 @@ class ScanOrchestrator:
             event_type: Type of event (e.g., "adversarial_round")
             data: Event data
         """
-        # Forward to the main progress callback
         try:
             if hasattr(self.progress_callback, "broadcast_event"):
-                # Use WebSocket broadcast for real-time updates
-                self.progress_callback.broadcast_event(
-                    event_type=event_type,
-                    data=data,
+                # Schedule the async broadcast in the running event loop
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self.progress_callback.broadcast_event(
+                        event_type=event_type,
+                        data=data,
+                    )
                 )
+                logger.debug(f"Adversarial callback scheduled: {event_type} round={data.get('round')}")
+            else:
+                logger.warning(f"progress_callback has no broadcast_event method: {type(self.progress_callback)}")
+        except RuntimeError:
+            # No running event loop — try to get the Celery event loop
+            logger.warning("No running event loop for adversarial callback, trying direct call")
+            try:
+                asyncio.get_event_loop().run_until_complete(
+                    self.progress_callback.broadcast_event(event_type=event_type, data=data)
+                )
+            except Exception as e2:
+                logger.warning(f"Adversarial callback fallback also failed: {e2}")
         except Exception as e:
             logger.warning(f"Failed to broadcast adversarial progress: {e}")
 

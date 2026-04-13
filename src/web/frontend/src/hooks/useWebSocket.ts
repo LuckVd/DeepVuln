@@ -16,105 +16,87 @@ interface UseWebSocketOptions {
 export function useWebSocket(scanId: number | null, options: UseWebSocketOptions = {}) {
   const [state, setState] = useState<ConnectionState>('disconnected')
   const clientRef = useRef(getWebSocketClient())
-  const connectingRef = useRef(false)  // 防止重复连接
 
+  // Keep options in a ref so event subscriptions always use latest callbacks
+  // without triggering effect re-run (which would disconnect WS).
+  const optionsRef = useRef(options)
+  optionsRef.current = options
+
+  // --- Event subscriptions (no disconnect in cleanup!) ---
   useEffect(() => {
     const client = clientRef.current
 
-    // 订阅状态变化
+    // Subscribe to state changes
     const unsubscribeState = client.onStateChange((newState) => {
       setState(newState)
-      // 连接成功或失败后重置标志
-      if (newState === 'connected' || newState === 'error') {
-        connectingRef.current = false
-      }
     })
 
-    // 订阅各种事件
+    // Subscribe to events using ref-based callbacks
     const unsubscribers: (() => void)[] = []
 
-    if (options.onMessage) {
-      unsubscribers.push(
-        client.on('connected', options.onMessage),
-        client.on('pong', options.onMessage),
-      )
-    }
+    unsubscribers.push(
+      client.on('progress', (event) => {
+        optionsRef.current.onProgress?.(event.data)
+      })
+    )
 
-    if (options.onProgress) {
-      unsubscribers.push(
-        client.on('progress', (event) => {
-          options.onProgress?.(event.data)
-        })
-      )
-    }
+    unsubscribers.push(
+      client.on('phase_start', (event) => {
+        optionsRef.current.onPhaseStart?.({ phase: event.data.phase })
+      })
+    )
 
-    if (options.onPhaseStart) {
-      unsubscribers.push(
-        client.on('phase_start', (event) => {
-          options.onPhaseStart?.({ phase: event.data.phase })
+    unsubscribers.push(
+      client.on('phase_complete', (event) => {
+        optionsRef.current.onPhaseComplete?.({
+          phase: event.data.phase,
+          findings: event.data.findings,
+          duration_seconds: event.data.duration_seconds,
         })
-      )
-    }
+      })
+    )
 
-    if (options.onPhaseComplete) {
-      unsubscribers.push(
-        client.on('phase_complete', (event) => {
-          options.onPhaseComplete?.({
-            phase: event.data.phase,
-            findings: event.data.findings,
-            duration_seconds: event.data.duration_seconds,
-          })
-        })
-      )
-    }
+    unsubscribers.push(
+      client.on('finding_new', (event) => {
+        optionsRef.current.onFindingNew?.(event.data)
+      })
+    )
 
-    if (options.onFindingNew) {
-      unsubscribers.push(
-        client.on('finding_new', (event) => {
-          options.onFindingNew?.(event.data)
-        })
-      )
-    }
+    unsubscribers.push(
+      client.on('scan_complete', (event) => {
+        optionsRef.current.onScanComplete?.(event.data)
+      })
+    )
 
-    if (options.onScanComplete) {
-      unsubscribers.push(
-        client.on('scan_complete', (event) => {
-          options.onScanComplete?.(event.data)
-        })
-      )
-    }
+    unsubscribers.push(
+      client.on('scan_failed', (event) => {
+        optionsRef.current.onScanFailed?.(event.data.error)
+      })
+    )
 
-    if (options.onScanFailed) {
-      unsubscribers.push(
-        client.on('scan_failed', (event) => {
-          options.onScanFailed?.(event.data.error)
-        })
-      )
-    }
-
-    if (options.onScanPaused) {
-      unsubscribers.push(
-        client.on('scan_paused', (event) => {
-          options.onScanPaused?.(event.data.checkpoint_saved)
-        })
-      )
-    }
+    unsubscribers.push(
+      client.on('scan_paused', (event) => {
+        optionsRef.current.onScanPaused?.(event.data.checkpoint_saved)
+      })
+    )
 
     return () => {
       unsubscribeState()
       unsubscribers.forEach((unsub) => unsub())
-      client.disconnect()
+      // NOTE: do NOT call client.disconnect() here!
+      // Connection lifecycle is managed by the scanId effect below.
     }
-  }, [options])
+  }, []) // Run once on mount
 
+  // --- Connection management (driven only by scanId) ---
   useEffect(() => {
     const client = clientRef.current
 
-    // 只在 scanId 变化时处理连接，避免 state 触发循环
-    if (scanId && !connectingRef.current && state !== 'connected') {
-      connectingRef.current = true
+    if (scanId) {
       client.connect(scanId)
-    } else if (!scanId && state === 'connected') {
+    }
+
+    return () => {
       client.disconnect()
     }
   }, [scanId])

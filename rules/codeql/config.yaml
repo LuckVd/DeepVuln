@@ -3,6 +3,9 @@
 version: "1.0"
 description: "CodeQL security queries for DeepVuln"
 
+# Enable custom queries from rules/codeql/<language>/*.ql
+use_custom_queries: true
+
 # Default query suites by language
 default_suites:
   java:

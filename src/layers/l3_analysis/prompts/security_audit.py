@@ -441,33 +441,33 @@ class SecurityAuditPrompt:
         # Build vulnerability patterns section based on focus
         patterns_section = get_vulnerability_patterns_prompt(self.vulnerability_focus)
 
-        return f"""You are an expert security code auditor with deep knowledge of application security vulnerabilities, secure coding practices, and threat modeling.
+        return f"""你是一位专业的安全代码审计专家，在应用程序安全漏洞、安全编码实践和威胁建模方面拥有深厚的知识。
 
-Your task is to analyze code snippets for security vulnerabilities and provide detailed, actionable findings.
+你的任务是分析代码片段中的安全漏洞，并提供详细、可操作的发现。
 
-## Your Expertise
+## 你的专长
 
-- Web application security (OWASP Top 10)
-- API security vulnerabilities
-- Authentication and authorization flaws
-- Injection vulnerabilities (SQL, command, XSS, etc.)
-- Cryptographic weaknesses
-- Business logic vulnerabilities
-- Language-specific security issues
+- Web 应用安全 (OWASP Top 10)
+- API 安全漏洞
+- 身份验证和授权缺陷
+- 注入漏洞 (SQL、命令、XSS 等)
+- 加密弱点
+- 业务逻辑漏洞
+- 特定语言的安全问题
 
 {patterns_section}
-## Analysis Approach
+## 分析方法
 
-1. **Identify data sources**: Look for user input, external data, and untrusted sources
-2. **Trace data flow**: Follow how data moves through the code
-3. **Find sinks**: Identify dangerous functions that could be exploited
-4. **Check sanitization**: Verify if proper validation/sanitization exists
-5. **Assess impact**: Evaluate the potential harm if exploited
+1. **识别数据源**: 寻找用户输入、外部数据和不受信任的来源
+2. **追踪数据流**: 跟踪数据在代码中的流动
+3. **找到汇点**: 识别可能被利用的危险函数
+4. **检查清理**: 验证是否存在适当的验证/清理机制
+5. **评估影响**: 评估被利用后可能造成的危害
 
 {ATTACKER_PERSPECTIVE}
-## Output Format
+## 输出格式
 
-You MUST respond with valid JSON in this exact format:
+你必须使用以下精确的 JSON 格式响应（所有字段值必须使用中文）:
 ```json
 {{
   "findings": [
@@ -475,16 +475,16 @@ You MUST respond with valid JSON in this exact format:
       "type": "vulnerability_type_snake_case",
       "severity": "critical|high|medium|low|info",
       "confidence": 0.0-1.0,
-      "title": "Brief descriptive title",
-      "description": "Detailed explanation of the vulnerability",
+      "title": "简短的描述性标题",
+      "description": "漏洞的详细解释（必须使用中文）",
       "line": 42,
       "end_line": 45,
-      "code_snippet": "vulnerable code",
-      "dataflow": "source -> processing -> sink",
-      "attack_surface": "How attacker reaches this code (or 'internal' if not externally reachable)",
+      "code_snippet": "存在漏洞的代码",
+      "dataflow": "数据源 -> 处理过程 -> 汇点",
+      "attack_surface": "攻击者如何到达此代码（如果不是外部可达则填 'internal'）",
       "user_controlled": true/false,
-      "exploitation_conditions": "What conditions must be met to exploit",
-      "recommendation": "How to fix this vulnerability",
+      "exploitation_conditions": "利用此漏洞需要满足的条件",
+      "recommendation": "如何修复此漏洞（必须使用中文）",
       "cwe": "CWE-XXX",
       "owasp": "A01:2021"
     }}
@@ -492,28 +492,29 @@ You MUST respond with valid JSON in this exact format:
   "suspicious_code": [
     {{
       "location": "file.py:45",
-      "code_snippet": "dangerous code pattern",
-      "why_suspicious": "This pattern is commonly associated with X vulnerability",
-      "potential_vulnerability": "vulnerability_type",
+      "code_snippet": "危险的代码模式",
+      "why_suspicious": "此模式通常与某种漏洞相关",
+      "potential_vulnerability": "漏洞类型",
       "confidence": 0.3,
       "recommended_action": "manual_review|verify_data_flow|check_sanitization"
     }}
   ],
-  "summary": "Brief overall assessment",
+  "summary": "简要的整体评估",
   "security_score": 1-10
 }}
 ```
 
-## Important Rules
+## 重要规则
 
-1. **Be thorough**: Look for ALL the vulnerable patterns listed above
-2. **Include suspicious_code**: If you see a dangerous pattern but are unsure about exploitability, add it to suspicious_code
-3. **Don't skip uncertain findings**: Better to report as suspicious than to miss a real vulnerability
-4. Include specific line numbers when possible
-5. Provide actionable remediation advice
-6. Always respond with valid JSON only - no additional text
-7. **CRITICAL**: Think like an attacker - what could go wrong?
-8. **CRITICAL**: When in doubt, add to suspicious_code rather than skipping"""  # noqa: E501
+1. **彻底检查**: 查找上述列出的所有漏洞模式
+2. **包含 suspicious_code**: 如果你看到危险模式但不确定是否可利用，将其添加到 suspicious_code
+3. **不要跳过不确定的发现**: 最好报告为可疑而不是遗漏真正的漏洞
+4. 尽可能包含具体的行号
+5. 提供可操作的修复建议
+6. 始终仅使用有效的 JSON 响应 - 不要包含额外文本
+7. **关键**: 像攻击者一样思考 - 什么可能出错？
+8. **关键**: 有疑问时，添加到 suspicious_code 而不是跳过
+9. **关键**: title、description 和 recommendation 必须使用中文"""  # noqa: E501
 
     def get_user_prompt_for_file(
         self,
@@ -522,36 +523,36 @@ You MUST respond with valid JSON in this exact format:
     ) -> str:
         """Build the user prompt for analyzing a file."""
         prompt_parts = [
-            f"Analyze the following {self.language} code for security vulnerabilities.",
+            f"分析以下 {self.language} 代码中的安全漏洞。",
             "",
-            f"**File:** `{file_path}`",
+            f"**文件:** `{file_path}`",
         ]
 
         if self.framework:
-            prompt_parts.append(f"**Framework:** {self.framework}")
+            prompt_parts.append(f"**框架:** {self.framework}")
 
         if self.vulnerability_focus:
             vuln_names = [
                 VULNERABILITY_TYPES.get(v, {}).get("name", v)
                 for v in self.vulnerability_focus
             ]
-            prompt_parts.append(f"**Focus Areas:** {', '.join(vuln_names)}")
+            prompt_parts.append(f"**重点关注:** {', '.join(vuln_names)}")
 
         if self.attack_surface:
-            prompt_parts.append(f"**Attack Surface:** {', '.join(self.attack_surface)}")
+            prompt_parts.append(f"**攻击面:** {', '.join(self.attack_surface)}")
 
         prompt_parts.append("")
-        prompt_parts.append("**Code:**")
+        prompt_parts.append("**代码:**")
         prompt_parts.append("```")
         # Truncate if too long
         if len(code) > self.max_code_length:
-            code = code[:self.max_code_length] + "\n... (truncated)"
+            code = code[:self.max_code_length] + "\n... (已截断)"
         prompt_parts.append(code)
         prompt_parts.append("```")
 
         if self.context_findings:
             prompt_parts.append("")
-            prompt_parts.append("**Related Findings from Previous Analysis:**")
+            prompt_parts.append("**之前分析的相关发现:**")
             for finding in self.context_findings[:5]:  # Limit context
                 prompt_parts.append(
                     f"- [{finding.get('severity', 'unknown')}] {finding.get('title', 'Unknown')}"
@@ -568,21 +569,21 @@ You MUST respond with valid JSON in this exact format:
     ) -> str:
         """Build the user prompt for analyzing a specific function."""
         prompt_parts = [
-            f"Analyze this {self.language} function for security vulnerabilities.",
+            f"分析此 {self.language} 函数中的安全漏洞。",
             "",
-            f"**File:** `{file_path}`",
-            f"**Function:** `{function_name}`",
+            f"**文件:** `{file_path}`",
+            f"**函数:** `{function_name}`",
         ]
 
         if caller_context:
             prompt_parts.append("")
-            prompt_parts.append("**Called from:**")
+            prompt_parts.append("**调用来源:**")
             prompt_parts.append("```")
             prompt_parts.append(caller_context[:500])  # Limit context
             prompt_parts.append("```")
 
         prompt_parts.append("")
-        prompt_parts.append("**Function Code:**")
+        prompt_parts.append("**函数代码:**")
         prompt_parts.append("```")
         prompt_parts.append(code)
         prompt_parts.append("```")

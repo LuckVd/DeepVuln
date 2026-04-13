@@ -1,44 +1,31 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
-import { translations, Language } from '@/i18n/translations';
+import { createContext, useContext, useMemo, ReactNode } from 'react';
+import { translations } from '@/i18n/translations';
+
+// 固定使用中文
+const LANGUAGE = 'zh' as const;
 
 interface LanguageContextType {
-  language: Language;
-  setLanguage: (lang: Language) => void;
+  language: typeof LANGUAGE;
   t: (key: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-const LANGUAGE_STORAGE_KEY = 'deepvuln_language';
-
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<Language>(() => {
-    // Get from localStorage or default to 'zh'
-    const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-    return (stored === 'zh' || stored === 'en') ? stored : 'zh';
-  });
+  // 设置 HTML lang 属性为中文
+  useMemo(() => {
+    document.documentElement.lang = LANGUAGE;
+  }, []);
 
-  useEffect(() => {
-    // Save to localStorage when language changes
-    localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
-    // Update HTML lang attribute
-    document.documentElement.lang = language;
-  }, [language]);
-
-  const setLanguage = (lang: Language) => {
-    setLanguageState(lang);
-  };
-
-  // Translation function with direct key lookup
+  // 翻译函数，仅支持中文
   const t = useMemo(() => (key: string): string => {
-    return translations[language]?.[key as keyof typeof translations.zh] || key;
-  }, [language]);
+    return translations[LANGUAGE]?.[key as keyof typeof translations.zh] || key;
+  }, []);
 
   const contextValue = useMemo(() => ({
-    language,
-    setLanguage,
+    language: LANGUAGE,
     t
-  }), [language, setLanguage, t]);
+  }), [t]);
 
   return (
     <LanguageContext.Provider value={contextValue}>

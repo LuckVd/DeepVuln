@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { Badge, Button, Alert, Tabs, Descriptions, Sheet, Progress } from '@/components/ui';
 import {
   Check,
@@ -10,7 +10,9 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { translateDescription, translateRemediation } from '@/utils/ruleTranslations';
+import { translateDescription, translateRemediation, getVulnTypeName } from '@/utils/ruleTranslations';
+import { formatDateTime, setTimezone } from '@/utils/format';
+import { systemSettingsApi } from '@/api/system';
 import type { Finding, FindingStatus } from '@/types/models';
 import CodeHighlight from './CodeHighlight';
 
@@ -33,6 +35,22 @@ export default function FindingDrawer({
   isUpdating = false,
 }: FindingDrawerProps) {
   const { t } = useLanguage();
+
+  // 加载系统时区设置
+  useEffect(() => {
+    const loadTimezone = async () => {
+      try {
+        const response = await systemSettingsApi.get();
+        const tz = response.categories?.general?.['general.timezone'];
+        if (tz && typeof tz === 'string') {
+          setTimezone(tz);
+        }
+      } catch (error) {
+        console.error('Failed to load timezone setting:', error);
+      }
+    };
+    loadTimezone();
+  }, []);
 
   // Dynamic status and severity maps with translations
   const STATUS_MAP = useMemo<Record<FindingStatus, { text: string; variant: 'pending' | 'completed' | 'failed' | 'medium'; icon: React.ReactNode }>>(() => ({
@@ -148,7 +166,7 @@ export default function FindingDrawer({
                   items={[
                     {
                       label: t('findings.vulnType'),
-                      value: <span className="text-cyan font-mono">{finding.vuln_type}</span>,
+                      value: <span className="text-cyan font-mono">{getVulnTypeName(finding.vuln_type)}</span>,
                       span: 2,
                     },
                     {
@@ -247,7 +265,7 @@ export default function FindingDrawer({
                   { label: t('findings.scanId'), value: String(finding.scan_id), span: 1 },
                   {
                     label: t('findings.createdAt'),
-                    value: new Date(finding.created_at).toLocaleString('zh-CN'),
+                    value: formatDateTime(finding.created_at),
                     span: 2,
                   },
                   ...(finding.cpg_path

@@ -2,6 +2,9 @@
 
 P11-06: This module provides WebSocket support for broadcasting scan events
 to connected clients in real-time.
+
+Redis Pub/Sub bridge: Celery workers broadcast events via Redis pub/sub.
+The FastAPI process subscribes and relays to connected WebSocket clients.
 """
 
 import asyncio
@@ -13,6 +16,9 @@ from typing import Dict, List, Set, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
+
+# Redis pub/sub channel pattern for scan events
+REDIS_SCAN_CHANNEL_PREFIX = "deepvuln:scan_events:"
 
 
 # ============================================================================
@@ -53,7 +59,12 @@ class WebSocketEvent:
 # ============================================================================
 
 class ConnectionManager:
-    """Manages WebSocket connections and broadcasts messages."""
+    """Manages WebSocket connections and broadcasts messages.
+
+    Supports Redis pub/sub bridge for cross-process communication:
+    - Celery workers publish events to Redis channels
+    - This manager subscribes and relays to local WebSocket clients
+    """
 
     def __init__(self):
         """Initialize the connection manager."""
@@ -63,6 +74,10 @@ class ConnectionManager:
         self.websocket_scan_map: Dict[WebSocket, int] = {}
         # Active ping tasks
         self.ping_tasks: Dict[WebSocket, asyncio.Task] = {}
+        # Redis pub/sub state
+        self._redis_publisher = None
+        self._redis_subscriber = None
+        self._subscriber_task: Optional[asyncio.Task] = None
 
     async def connect(self, websocket: WebSocket, scan_id: int) -> None:
         """Connect a WebSocket to a scan.
@@ -145,10 +160,17 @@ class ConnectionManager:
     ) -> None:
         """Broadcast an event to all connections watching a scan.
 
+        Also publishes to Redis so other processes (e.g. Celery workers)
+        can relay events to their local WebSocket clients.
+
         Args:
             event: Event to broadcast
             scan_id: ID of the scan to broadcast to
         """
+        # Always publish to Redis for cross-process delivery
+        await self._publish_to_redis(scan_id, event)
+
+        # Deliver to local WebSocket connections
         if scan_id not in self.scan_connections:
             return
 
@@ -203,6 +225,116 @@ class ConnectionManager:
         except Exception as e:
             logger.warning(f"Heartbeat error: {e}")
             await self.disconnect(websocket)
+
+    # ========================================================================
+    # Redis Pub/Sub Bridge
+    # ========================================================================
+
+    async def _get_redis_publisher(self):
+        """Get or create Redis client for publishing."""
+        if self._redis_publisher is None:
+            try:
+                import redis.asyncio as aioredis
+                from src.web.core.celery_app import get_celery_settings
+                settings = get_celery_settings()
+                self._redis_publisher = aioredis.from_url(
+                    settings.redis_url,
+                    decode_responses=True,
+                )
+                logger.info("Redis publisher connected")
+            except Exception as e:
+                logger.warning(f"Failed to create Redis publisher: {e}")
+        return self._redis_publisher
+
+    async def _publish_to_redis(self, scan_id: int, event: WebSocketEvent) -> None:
+        """Publish an event to Redis channel for cross-process delivery.
+
+        Args:
+            scan_id: ID of the scan
+            event: Event to publish
+        """
+        try:
+            redis = await self._get_redis_publisher()
+            if redis is None:
+                return
+            channel = f"{REDIS_SCAN_CHANNEL_PREFIX}{scan_id}"
+            await redis.publish(channel, event.to_json())
+        except Exception as e:
+            logger.debug(f"Redis publish failed (non-critical): {e}")
+
+    async def start_redis_subscriber(self) -> None:
+        """Start Redis subscriber to relay events from Celery workers.
+
+        This should be called during FastAPI startup.
+        """
+        if self._subscriber_task is not None:
+            return
+        self._subscriber_task = asyncio.create_task(self._redis_subscribe_loop())
+        logger.info("Redis subscriber started")
+
+    async def stop_redis_subscriber(self) -> None:
+        """Stop Redis subscriber. Called during FastAPI shutdown."""
+        if self._subscriber_task:
+            self._subscriber_task.cancel()
+            try:
+                await self._subscriber_task
+            except asyncio.CancelledError:
+                pass
+            self._subscriber_task = None
+        if self._redis_subscriber:
+            await self._redis_subscriber.close()
+            self._redis_subscriber = None
+        if self._redis_publisher:
+            await self._redis_publisher.close()
+            self._redis_publisher = None
+        logger.info("Redis subscriber stopped")
+
+    async def _redis_subscribe_loop(self) -> None:
+        """Background task that subscribes to scan event channels via Redis."""
+        try:
+            import redis.asyncio as aioredis
+            from src.web.core.celery_app import get_celery_settings
+            settings = get_celery_settings()
+            self._redis_subscriber = aioredis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+            )
+            pubsub = self._redis_subscriber.pubsub()
+            # Subscribe to all scan event channels using pattern
+            await pubsub.psubscribe(f"{REDIS_SCAN_CHANNEL_PREFIX}*")
+            logger.info(f"Redis subscribed to {REDIS_SCAN_CHANNEL_PREFIX}*")
+
+            async for message in pubsub.listen():
+                if message["type"] != "pmessage":
+                    continue
+                try:
+                    # Extract scan_id from channel name
+                    channel = message["channel"]
+                    scan_id_str = channel.replace(REDIS_SCAN_CHANNEL_PREFIX, "")
+                    scan_id = int(scan_id_str)
+
+                    # Parse event and relay to local WebSocket clients
+                    event_data = json.loads(message["data"])
+
+                    # Only relay to local connections (skip if none)
+                    if scan_id not in self.scan_connections:
+                        continue
+
+                    connections = list(self.scan_connections[scan_id])
+                    for websocket in connections:
+                        try:
+                            await websocket.send_text(message["data"])
+                        except Exception as e:
+                            logger.warning(f"Failed to relay to scan {scan_id}: {e}")
+                            await self.disconnect(websocket)
+
+                except Exception as e:
+                    logger.warning(f"Error processing Redis message: {e}")
+
+        except asyncio.CancelledError:
+            logger.info("Redis subscriber loop cancelled")
+        except Exception as e:
+            logger.error(f"Redis subscriber loop error: {e}")
 
     def get_connection_count(self, scan_id: Optional[int] = None) -> int:
         """Get the number of active connections.
@@ -271,6 +403,7 @@ class ScanEventBroadcaster:
         duration_seconds: float,
         findings: int = 0,
         tokens_used: int = 0,
+        result: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Broadcast phase complete event.
 
@@ -280,15 +413,29 @@ class ScanEventBroadcaster:
             duration_seconds: Phase duration
             findings: Number of findings found
             tokens_used: Number of tokens used
+            result: Optional phase result data for detailed terminal output
         """
+        data: Dict[str, Any] = {
+            "phase": phase_name,
+            "duration_seconds": duration_seconds,
+            "findings": findings,
+            "tokens_used": tokens_used,
+        }
+        if result:
+            # Forward selected result fields for terminal display
+            for key in (
+                "total_files", "languages", "frameworks", "attack_surface",
+                "engines", "verified_findings", "unique_findings",
+                "duplicates_removed", "confirmed", "rejected",
+                "total_findings", "total_tokens", "estimated_cost",
+                "per_engine_details", "severity_breakdown", "per_phase_tokens",
+                "file_counts", "primary_language",
+            ):
+                if key in result:
+                    data[key] = result[key]
         event = WebSocketEvent(
             event_type="phase_complete",
-            data={
-                "phase": phase_name,
-                "duration_seconds": duration_seconds,
-                "findings": findings,
-                "tokens_used": tokens_used,
-            },
+            data=data,
             scan_id=scan_id,
         )
         await self.manager.broadcast_to_scan(event, scan_id)
@@ -343,6 +490,8 @@ class ScanEventBroadcaster:
         findings_count: int,
         duration_seconds: float,
         tokens_used: int,
+        severity_breakdown: Optional[Dict[str, int]] = None,
+        per_phase_tokens: Optional[Dict[str, int]] = None,
     ) -> None:
         """Broadcast scan complete event.
 
@@ -351,14 +500,21 @@ class ScanEventBroadcaster:
             findings_count: Total findings found
             duration_seconds: Total scan duration
             tokens_used: Total tokens used
+            severity_breakdown: Optional severity distribution stats
+            per_phase_tokens: Optional per-phase token usage breakdown
         """
+        data: Dict[str, Any] = {
+            "findings_count": findings_count,
+            "duration_seconds": duration_seconds,
+            "tokens_used": tokens_used,
+        }
+        if severity_breakdown:
+            data["severity_breakdown"] = severity_breakdown
+        if per_phase_tokens:
+            data["per_phase_tokens"] = per_phase_tokens
         event = WebSocketEvent(
             event_type="scan_complete",
-            data={
-                "findings_count": findings_count,
-                "duration_seconds": duration_seconds,
-                "tokens_used": tokens_used,
-            },
+            data=data,
             scan_id=scan_id,
         )
         await self.manager.broadcast_to_scan(event, scan_id)
@@ -399,6 +555,29 @@ class ScanEventBroadcaster:
             data={
                 "checkpoint_saved": checkpoint_saved,
             },
+            scan_id=scan_id,
+        )
+        await self.manager.broadcast_to_scan(event, scan_id)
+
+    async def broadcast_event(
+        self,
+        scan_id: int,
+        event_type: str,
+        data: Dict[str, Any],
+    ) -> None:
+        """Broadcast a custom event to WebSocket clients.
+
+        This is a generic method used for ad-hoc event types such as
+        adversarial verification rounds, agent conversation turns, etc.
+
+        Args:
+            scan_id: ID of the scan
+            event_type: Custom event type string (e.g. "adversarial_round")
+            data: Event payload
+        """
+        event = WebSocketEvent(
+            event_type=event_type,
+            data=data,
             scan_id=scan_id,
         )
         await self.manager.broadcast_to_scan(event, scan_id)

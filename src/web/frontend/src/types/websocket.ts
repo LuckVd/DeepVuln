@@ -9,6 +9,11 @@ export type WebSocketEventType =
   | 'scan_complete'
   | 'scan_failed'
   | 'scan_paused'
+  | 'adversarial_round'
+  | 'warning'
+  | 'adjudication_result'
+  | 'verification_result'
+  | 'finding_skipped'
   | 'ping'
   | 'pong'
 
@@ -31,6 +36,27 @@ export interface PhaseCompleteData {
   duration_seconds: number
   findings: number
   tokens_used: number
+  per_engine_details?: Record<string, EngineDetail>
+  severity_breakdown?: SeverityBreakdown
+  per_phase_tokens?: Record<string, number>
+}
+
+// Per-engine detail in phase_complete
+export interface EngineDetail {
+  findings: number
+  duration_seconds: number
+  tokens_used: number
+}
+
+// Severity breakdown for scan_complete
+export interface SeverityBreakdown {
+  critical: number
+  high: number
+  medium: number
+  low: number
+  info: number
+  verified?: number
+  false_positive?: number
 }
 
 // finding_new 事件数据
@@ -56,6 +82,8 @@ export interface ScanCompleteData {
   findings_count: number
   duration_seconds: number
   tokens_used: number
+  severity_breakdown?: SeverityBreakdown
+  per_phase_tokens?: Record<string, number>
 }
 
 // scan_failed 事件数据

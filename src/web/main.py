@@ -18,8 +18,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Startup:
         - Initialize database connection
         - Create tables if they don't exist
+        - Start Redis pub/sub subscriber for WebSocket relay
 
     Shutdown:
+        - Stop Redis subscriber
         - Close database connections
     """
     # Startup
@@ -34,9 +36,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await init_db(db_settings.url)
         print("✅ Database initialized")
 
+        # Start Redis pub/sub subscriber for cross-process WS relay
+        from src.web.api.websocket import get_connection_manager
+        manager = get_connection_manager()
+        await manager.start_redis_subscriber()
+        print("✅ Redis subscriber started")
+
         yield
 
     finally:
+        # Stop Redis subscriber
+        from src.web.api.websocket import get_connection_manager
+        manager = get_connection_manager()
+        await manager.stop_redis_subscriber()
+        print("🛑 Redis subscriber stopped")
+
         # Shutdown
         await close_db()
         print("👋 DeepVuln Web Service stopped")

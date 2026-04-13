@@ -42,5 +42,10 @@ export {
 export { Tabs } from './tabs';
 export { Descriptions } from './descriptions';
 export { Timeline } from './timeline';
-export { LanguageSwitcher } from './LanguageSwitcher';
 export { Switch } from './switch';
+export { Checkbox } from './checkbox';
+export {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from './collapsible';

@@ -17,6 +17,7 @@ from ..prompts.adversarial import (
     DEFENDER_SYSTEM_PROMPT,
     get_defender_rebuttal_prompt,
     get_defender_user_prompt,
+    get_system_prompt,
 )
 from .models import ArgumentStrength, VerificationArgument
 
@@ -166,6 +167,7 @@ class DefenderVerifier:
         related_code: str | None = None,
         attacker_argument: dict[str, Any] | None = None,
         round_number: int = 1,
+        language: str = "en",
     ) -> VerificationArgument:
         """
         Analyze a vulnerability from a defender's perspective.
@@ -176,6 +178,7 @@ class DefenderVerifier:
             related_code: Additional context code.
             attacker_argument: The attacker's argument to counter.
             round_number: Current debate round number.
+            language: Output language ("en" or "zh").
 
         Returns:
             VerificationArgument with defender's analysis.
@@ -199,12 +202,13 @@ class DefenderVerifier:
             code_context=code_context,
             related_code=related_code,
             attacker_argument=attacker_argument,
+            language=language,
         )
 
         try:
             # Call LLM
             response = await self.llm_client.complete_with_context(
-                system_prompt=DEFENDER_SYSTEM_PROMPT,
+                system_prompt=get_system_prompt(DEFENDER_SYSTEM_PROMPT, language),
                 user_prompt=user_prompt,
             )
 
@@ -253,6 +257,7 @@ class DefenderVerifier:
         code_context: str,
         attacker_argument: VerificationArgument,
         previous_defender_argument: VerificationArgument,
+        language: str = "en",
     ) -> VerificationArgument:
         """
         Rebut the attacker's counter-argument.
@@ -265,6 +270,7 @@ class DefenderVerifier:
             code_context: The vulnerable code snippet.
             attacker_argument: The attacker's counter-argument.
             previous_defender_argument: The defender's previous argument.
+            language: Output language ("en" or "zh").
 
         Returns:
             VerificationArgument with defender's rebuttal.
@@ -290,12 +296,13 @@ class DefenderVerifier:
             code_context=code_context,
             attacker_argument=attacker_argument.model_dump(),
             previous_defender_argument=previous_defender_argument.model_dump(),
+            language=language,
         )
 
         try:
             # Call LLM with the same system prompt (defender mindset)
             response = await self.llm_client.complete_with_context(
-                system_prompt=DEFENDER_SYSTEM_PROMPT,
+                system_prompt=get_system_prompt(DEFENDER_SYSTEM_PROMPT, language),
                 user_prompt=user_prompt,
             )
 
