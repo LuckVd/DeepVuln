@@ -225,47 +225,31 @@ async def _check_scan_progress_async(scan_id: int) -> Dict[str, Any]:
     Returns:
         Dictionary containing current scan status
     """
-    from src.web.core.config import get_database_settings
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from src.web.models.database import get_session_local
 
-    # Create fresh database connection for this task
-    db_settings = get_database_settings()
-    engine = create_async_engine(
-        db_settings.url,
-        echo=False,
-        pool_pre_ping=True,
-    )
-    async_session_maker = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
+    async_session_maker = get_session_local()
+    scan_repo = ScanRepository()
 
-    try:
-        scan_repo = ScanRepository()
-
-        async with async_session_maker() as db:
-            scan = await scan_repo.get(db, id=scan_id)
-            if scan is None:
-                return {
-                    "success": False,
-                    "error": f"Scan {scan_id} not found",
-                }
-
+    async with async_session_maker() as db:
+        scan = await scan_repo.get(db, id=scan_id)
+        if scan is None:
             return {
-                "success": True,
-                "scan_id": scan_id,
-                "status": scan.status,
-                "progress_percent": scan.progress_percent,
-                "current_phase": scan.current_phase,
-                "findings_count": scan.findings_count,
-                "tokens_used": scan.tokens_used,
-                "started_at": scan.started_at.isoformat() if scan.started_at else None,
-                "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
-                "error_message": scan.error_message,
+                "success": False,
+                "error": f"Scan {scan_id} not found",
             }
-    finally:
-        await engine.dispose()
+
+        return {
+            "success": True,
+            "scan_id": scan_id,
+            "status": scan.status,
+            "progress_percent": scan.progress_percent,
+            "current_phase": scan.current_phase,
+            "findings_count": scan.findings_count,
+            "tokens_used": scan.tokens_used,
+            "started_at": scan.started_at.isoformat() if scan.started_at else None,
+            "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
+            "error_message": scan.error_message,
+        }
 
 
 @celery_app.task(name="check_scan_progress")

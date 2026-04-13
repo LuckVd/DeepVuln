@@ -510,18 +510,7 @@ def create_adversarial_service(
 
         from src.web.services.llm_config_service import LLMConfigService
 
-        # Get verification config from database
-        import asyncio
-
-        async def _get_verification_client() -> LLMClient:
-            async with db_session_factory() as db:
-                llm_config = await LLMConfigService.get_verification_config(db)
-                if llm_config is None:
-                    raise ValueError("No verification LLM config found in database")
-                return LLMConfigService.create_llm_client(llm_config)
-
-        # Note: This should be called from an async context
-        # For now, we'll require the caller to provide the client
+        # Caller must provide the LLM client
         raise ValueError(
             "LLM client must be provided for adversarial verification. "
             "Please configure a 'verification' type LLM config in settings."

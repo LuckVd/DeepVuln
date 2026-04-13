@@ -1,5 +1,6 @@
 """FastAPI application initialization and configuration."""
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -8,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.web.core.config import get_database_settings, get_web_settings
 from src.web.models.database import init_db, close_db
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -28,19 +31,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db_settings = get_database_settings()
     web_settings = get_web_settings()
 
-    print(f"🚀 Starting DeepVuln Web Service on {web_settings.host}:{web_settings.port}")
-    print(f"📦 Database: {db_settings.url}")
+    logger.info(f"Starting DeepVuln Web Service on {web_settings.host}:{web_settings.port}")
+    logger.info(f"Database: {db_settings.url}")
 
     try:
         # Initialize database
         await init_db(db_settings.url)
-        print("✅ Database initialized")
+        logger.info("Database initialized")
 
         # Start Redis pub/sub subscriber for cross-process WS relay
         from src.web.api.websocket import get_connection_manager
         manager = get_connection_manager()
         await manager.start_redis_subscriber()
-        print("✅ Redis subscriber started")
+        logger.info("Redis subscriber started")
 
         yield
 
@@ -49,11 +52,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from src.web.api.websocket import get_connection_manager
         manager = get_connection_manager()
         await manager.stop_redis_subscriber()
-        print("🛑 Redis subscriber stopped")
+        logger.info("Redis subscriber stopped")
 
         # Shutdown
         await close_db()
-        print("👋 DeepVuln Web Service stopped")
+        logger.info("DeepVuln Web Service stopped")
 
 
 def create_app() -> FastAPI:

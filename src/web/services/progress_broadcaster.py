@@ -387,27 +387,21 @@ class ProgressBroadcaster:
 
         Updates real-time statistics including findings count and tokens used.
         """
-        # Get current total tokens used from all completed phases
-        tokens_used = await self._get_total_tokens_used()
-
-        # Get total findings from all completed phases
-        total_findings = await self._get_total_findings_from_phases()
-
-        # Calculate severity statistics from findings in database
-        severity_stats = await self._calculate_severity_stats()
+        # Get all stats in a single DB session (consolidated from 3 queries to 1 session)
+        stats = await self._get_engine_complete_stats()
 
         # Real-time update of scan statistics
         await self._update_scan(
             {
-                "findings_count": total_findings,
-                "tokens_used": tokens_used,
-                "critical_count": severity_stats["critical"],
-                "high_count": severity_stats["high"],
-                "medium_count": severity_stats["medium"],
-                "low_count": severity_stats["low"],
-                "info_count": severity_stats["info"],
-                "verified_count": severity_stats["verified"],
-                "false_positive_count": severity_stats["false_positive"],
+                "findings_count": stats["total_findings"],
+                "tokens_used": stats["tokens_used"],
+                "critical_count": stats["critical"],
+                "high_count": stats["high"],
+                "medium_count": stats["medium"],
+                "low_count": stats["low"],
+                "info_count": stats["info"],
+                "verified_count": stats["verified"],
+                "false_positive_count": stats["false_positive"],
             }
         )
 
@@ -419,8 +413,8 @@ class ProgressBroadcaster:
             details={
                 "findings_count": findings_count,
                 "duration_seconds": duration_seconds,
-                "total_findings": total_findings,
-                "tokens_used": tokens_used,
+                "total_findings": stats["total_findings"],
+                "tokens_used": stats["tokens_used"],
             },
         )
 
@@ -433,7 +427,7 @@ class ProgressBroadcaster:
 
         logger.info(
             f"Engine '{engine_name}' completed for scan {self.scan_id}: "
-            f"{findings_count} findings (total: {total_findings}), {tokens_used} tokens"
+            f"{findings_count} findings (total: {stats['total_findings']}), {stats['tokens_used']} tokens"
         )
 
     async def on_engine_failed(self, engine_name: str, error: str) -> None:
@@ -729,83 +723,58 @@ class ProgressBroadcaster:
 
         return int((completed_weight / total_weight * 100)) if total_weight > 0 else 0
 
-    async def _get_total_tokens_used(self) -> int:
-        """Get total tokens used from all phases.
+    async def _get_engine_complete_stats(self) -> Dict[str, Any]:
+        """Get all stats needed for engine complete in a single DB session.
 
         Returns:
-            Total tokens used
+            Dictionary with tokens_used, total_findings, severity stats
         """
-        async with self._get_db_session() as db:
-            from sqlalchemy import select, func
+        from sqlalchemy import select, func
 
-            result = await db.execute(
-                select(func.sum(ScanPhase.tokens_used)).where(
-                    ScanPhase.scan_id == self.scan_id
-                )
+        stats: Dict[str, Any] = {
+            "tokens_used": 0,
+            "total_findings": 0,
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+            "verified": 0,
+            "false_positive": 0,
+        }
+
+        async with self._get_db_session() as db:
+            # Query 1: Tokens + findings from phases (single query)
+            phase_result = await db.execute(
+                select(
+                    func.sum(ScanPhase.tokens_used),
+                    func.sum(ScanPhase.findings_found),
+                ).where(ScanPhase.scan_id == self.scan_id)
             )
-            return result.scalar_one() or 0
+            row = phase_result.one_or_none()
+            if row:
+                stats["tokens_used"] = row[0] or 0
+                stats["total_findings"] = row[1] or 0
 
-    async def _get_total_findings_from_phases(self) -> int:
-        """Get total findings from all completed phases.
-
-        Returns:
-            Total findings found across all phases
-        """
-        async with self._get_db_session() as db:
-            from sqlalchemy import select, func
-
-            result = await db.execute(
-                select(func.sum(ScanPhase.findings_found)).where(
-                    ScanPhase.scan_id == self.scan_id
-                )
-            )
-            return result.scalar_one() or 0
-
-    async def _calculate_severity_stats(self) -> Dict[str, int]:
-        """Calculate severity statistics from findings.
-
-        Returns:
-            Dictionary with severity counts
-        """
-        async with self._get_db_session() as db:
-            from sqlalchemy import select, func
-
-            # Count findings by severity and status
-            result = await db.execute(
+            # Query 2: Severity stats from findings
+            sev_result = await db.execute(
                 select(
                     Finding.severity,
                     Finding.status,
-                    func.count(Finding.id)
-                ).where(
-                    Finding.scan_id == self.scan_id
-                ).group_by(Finding.severity, Finding.status)
+                    func.count(Finding.id),
+                ).where(Finding.scan_id == self.scan_id).group_by(Finding.severity, Finding.status)
             )
-
-            # Initialize counters
-            stats = {
-                "critical": 0,
-                "high": 0,
-                "medium": 0,
-                "low": 0,
-                "info": 0,
-                "verified": 0,
-                "false_positive": 0,
-            }
-
-            # Aggregate counts
-            for severity, status, count in result.all():
+            for severity, status, count in sev_result.all():
                 severity_lower = (severity or "").lower()
                 if severity_lower in stats:
                     stats[severity_lower] += count
-
-                # Count by status
                 status_lower = (status or "").lower()
                 if status_lower == "verified":
                     stats["verified"] += count
                 elif status_lower == "false_positive":
                     stats["false_positive"] += count
 
-            return stats
+        return stats
 
 
 # ============================================================================
