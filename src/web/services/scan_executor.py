@@ -605,7 +605,7 @@ class ScanExecutor:
                     celery_app = get_celery_app()
                     # Use Celery control to revoke the task
                     # terminate=True will kill the task immediately
-                    celery_app.control.revoke(scan.task_id, terminate=True, signal='SIGKILL')
+                    celery_app.control.revoke(scan.task_id, terminate=True, signal='SIGTERM')
                     logger.info(f"Revoked Celery task {scan.task_id} for scan {scan_id}")
                 except Exception as e:
                     logger.error(f"Failed to revoke Celery task {scan.task_id}: {e}")

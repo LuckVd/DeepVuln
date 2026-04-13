@@ -120,7 +120,7 @@ async def create_scan_from_zip(
     import json as json_lib
     try:
         config_dict = json_lib.loads(config) if config else {"engines": ["semgrep", "codeql", "agent"]}
-    except:
+    except Exception:
         config_dict = {"engines": ["semgrep", "codeql", "agent"]}
 
     scan_data = ScanCreate(

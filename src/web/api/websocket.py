@@ -290,51 +290,68 @@ class ConnectionManager:
         logger.info("Redis subscriber stopped")
 
     async def _redis_subscribe_loop(self) -> None:
-        """Background task that subscribes to scan event channels via Redis."""
-        try:
-            import redis.asyncio as aioredis
-            from src.web.core.celery_app import get_celery_settings
-            settings = get_celery_settings()
-            self._redis_subscriber = aioredis.from_url(
-                settings.redis_url,
-                decode_responses=True,
-            )
-            pubsub = self._redis_subscriber.pubsub()
-            # Subscribe to all scan event channels using pattern
-            await pubsub.psubscribe(f"{REDIS_SCAN_CHANNEL_PREFIX}*")
-            logger.info(f"Redis subscribed to {REDIS_SCAN_CHANNEL_PREFIX}*")
+        """Background task that subscribes to scan event channels via Redis.
 
-            async for message in pubsub.listen():
-                if message["type"] != "pmessage":
-                    continue
-                try:
-                    # Extract scan_id from channel name
-                    channel = message["channel"]
-                    scan_id_str = channel.replace(REDIS_SCAN_CHANNEL_PREFIX, "")
-                    scan_id = int(scan_id_str)
+        Includes automatic reconnection with exponential backoff.
+        """
+        import redis.asyncio as aioredis
+        from src.web.core.celery_app import get_celery_settings
 
-                    # Parse event and relay to local WebSocket clients
-                    event_data = json.loads(message["data"])
+        retry_count = 0
+        max_retries = 100
+        base_delay = 2
 
-                    # Only relay to local connections (skip if none)
-                    if scan_id not in self.scan_connections:
+        while self._running:
+            try:
+                settings = get_celery_settings()
+                self._redis_subscriber = aioredis.from_url(
+                    settings.redis_url,
+                    decode_responses=True,
+                )
+                pubsub = self._redis_subscriber.pubsub()
+                await pubsub.psubscribe(f"{REDIS_SCAN_CHANNEL_PREFIX}*")
+                logger.info(f"Redis subscribed to {REDIS_SCAN_CHANNEL_PREFIX}*")
+                retry_count = 0  # Reset on successful connection
+
+                async for message in pubsub.listen():
+                    if message["type"] != "pmessage":
                         continue
+                    try:
+                        channel = message["channel"]
+                        scan_id_str = channel.replace(REDIS_SCAN_CHANNEL_PREFIX, "")
+                        scan_id = int(scan_id_str)
 
-                    connections = list(self.scan_connections[scan_id])
-                    for websocket in connections:
-                        try:
-                            await websocket.send_text(message["data"])
-                        except Exception as e:
-                            logger.warning(f"Failed to relay to scan {scan_id}: {e}")
-                            await self.disconnect(websocket)
+                        event_data = json.loads(message["data"])
 
-                except Exception as e:
-                    logger.warning(f"Error processing Redis message: {e}")
+                        if scan_id not in self.scan_connections:
+                            continue
 
-        except asyncio.CancelledError:
-            logger.info("Redis subscriber loop cancelled")
-        except Exception as e:
-            logger.error(f"Redis subscriber loop error: {e}")
+                        connections = list(self.scan_connections[scan_id])
+                        for websocket in connections:
+                            try:
+                                await websocket.send_text(message["data"])
+                            except Exception as e:
+                                logger.warning(f"Failed to relay to scan {scan_id}: {e}")
+                                await self.disconnect(websocket)
+
+                    except Exception as e:
+                        logger.warning(f"Error processing Redis message: {e}")
+
+                # If pubsub.listen() returns normally (unsubscribed), try to reconnect
+                if pubsub:
+                    await pubsub.close()
+
+            except asyncio.CancelledError:
+                logger.info("Redis subscriber loop cancelled")
+                return
+            except Exception as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Redis subscriber max retries ({max_retries}) exceeded")
+                    return
+                delay = min(base_delay * (2 ** (retry_count - 1)), 60)
+                logger.error(f"Redis subscriber error (retry {retry_count}/{max_retries} in {delay}s): {e}")
+                await asyncio.sleep(delay)
 
     def get_connection_count(self, scan_id: Optional[int] = None) -> int:
         """Get the number of active connections.

@@ -71,6 +71,11 @@ async def _execute_scan_async(
             if scan is None:
                 raise ValueError(f"Scan {scan_id} not found")
 
+            # Idempotency guard: skip if already completed/cancelled
+            if scan.status not in (ScanStatus.PENDING, ScanStatus.RUNNING):
+                logger.warning(f"Scan {scan_id} already {scan.status}, skipping execution")
+                return
+
             # Update scan status to running
             scan.status = ScanStatus.RUNNING
             scan.started_at = datetime.now(timezone.utc).replace(tzinfo=None)

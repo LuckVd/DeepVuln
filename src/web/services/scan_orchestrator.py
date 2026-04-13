@@ -1229,9 +1229,9 @@ class ScanOrchestrator:
                 finding.metadata["source_engine"] = engine_name
                 all_findings.append(finding)
 
-        # Deduplicate findings
-        unique_findings = self._deduplicate_findings(all_findings)
-        duplicates_removed = len(all_findings) - len(unique_findings)
+        # Deduplication is handled by _run_adjudication(), skip here
+        unique_findings = all_findings
+        duplicates_removed = 0
 
         if duplicates_removed > 0:
             logger.info(
@@ -1545,7 +1545,6 @@ class ScanOrchestrator:
 
 def create_scan_orchestrator(
     scan_id: int,
-    project_id: int,
     scan_config: Dict[str, Any],
     progress_callback: Optional[ProgressCallback] = None,
     llm_client: Optional[LLMClient] = None,
@@ -1555,7 +1554,6 @@ def create_scan_orchestrator(
 
     Args:
         scan_id: ID of the scan
-        project_id: ID of the project
         scan_config: Scan configuration
         progress_callback: Optional progress callback
         llm_client: Optional LLM client for LLM-based features
@@ -1565,7 +1563,6 @@ def create_scan_orchestrator(
     """
     return ScanOrchestrator(
         scan_id=scan_id,
-        project_id=project_id,
         scan_config=scan_config,
         progress_callback=progress_callback,
         llm_client=llm_client,
