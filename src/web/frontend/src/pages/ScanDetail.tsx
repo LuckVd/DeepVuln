@@ -105,7 +105,7 @@ export default function ScanDetailPage() {
   const scanId = parseInt(id || '0');
   const STATUS_MAP = getStatusMap(t);
 
-  const { data: scan, isLoading, error } = useScan(scanId);
+  const { data: scan, isLoading, error, refetch } = useScan(scanId);
 
   // 加载系统时区设置
   useEffect(() => {
@@ -172,8 +172,7 @@ export default function ScanDetailPage() {
   const handleStart = async () => {
     try {
       await scansApi.start(scanId);
-      // Refresh after starting
-      window.location.reload();
+      await refetch();
     } catch (err) {
       console.error('Failed to start:', err);
     }
@@ -443,7 +442,7 @@ export default function ScanDetailPage() {
       </div>
 
       {/* Token Usage */}
-      {(scan.tokens_used !== null || scan.tokens_used !== null) && (
+      {(scan.tokens_used != null || scan.token_usage != null) && (
         <Card className="glass-panel mb-6">
           <h3 className="text-cyan font-mono font-bold mb-4">{t('scanDetail.tokenUsage')}</h3>
           <div className="grid grid-cols-3 gap-4 mb-4">

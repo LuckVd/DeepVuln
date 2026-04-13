@@ -29,7 +29,7 @@ import { useScans, useCreateScan } from '@/hooks/useApi';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { scansApi } from '@/api/scans';
 import type { ScanStatus } from '@/types/models';
-import axios from 'axios';
+import client from '@/api/client';
 
 // Status mapping with cyberpunk variants
 const getStatusMap = (t: (key: string) => string) => ({
@@ -145,7 +145,7 @@ export default function ScansPage() {
         let lastLoaded = 0;
         let lastTime = startTime;
 
-        const response = await axios.post('/api/v1/scans/upload-zip', formDataObj, {
+        const response = await client.post('/scans/upload-zip', formDataObj, {
           headers: { 'Content-Type': 'multipart/form-data' },
           onUploadProgress: (progressEvent) => {
             if (progressEvent.total) {
@@ -298,7 +298,7 @@ export default function ScansPage() {
       <div className="mb-6 flex items-center justify-between">
         <CustomSelect
           value={statusFilter || ''}
-          onChange={(val) => setStatusFilter(val as ScanStatus | undefined)}
+          onChange={(val) => { setStatusFilter(val as ScanStatus | undefined); setPage(1); }}
           options={[
             { value: '', label: t('scans.status.all') },
             { value: 'pending', label: t('scans.status.pending') },
