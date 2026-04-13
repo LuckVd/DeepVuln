@@ -753,7 +753,7 @@ async def update_finding_status(
     finding_id: int,
     status_update: FindingUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    
+    _: None = Depends(require_api_key),
 ) -> FindingResponse:
     """
     Update the status of a finding.
@@ -1062,7 +1062,7 @@ async def export_scan_report_pdf(
 async def pause_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    
+    _: None = Depends(require_api_key),
 ) -> PauseScanResponse:
     """
     Pause a running scan.
@@ -1109,7 +1109,7 @@ async def pause_scan(
 async def resume_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    
+    _: None = Depends(require_api_key),
 ) -> ResumeScanResponse:
     """
     Resume a paused scan.
@@ -1156,7 +1156,7 @@ async def resume_scan(
 async def cancel_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    
+    _: None = Depends(require_api_key),
 ) -> CancelScanResponse:
     """
     Cancel a scan.

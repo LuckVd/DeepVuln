@@ -1,5 +1,6 @@
 """Security utilities for API authentication and authorization."""
 
+import hmac
 from typing import Optional, Any
 
 from fastapi import HTTPException, Security, status
@@ -33,7 +34,6 @@ def get_api_key_header() -> APIKeyHeader:
 
 async def verify_api_key(
     api_key: Optional[str] = Security(get_api_key_header),
-    settings: Any = SecurityDepends(lambda: get_security_settings()),
 ) -> bool:
     """
     Verify API key from request header.
@@ -58,24 +58,14 @@ async def verify_api_key(
             detail="API key is missing. Provide it via X-API-Key header.",
         )
 
-    # Validate API key
-    if api_key not in valid_keys:
+    # Validate API key (constant-time comparison to prevent timing attacks)
+    if not any(hmac.compare_digest(api_key, k) for k in valid_keys):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API key.",
         )
 
     return True
-
-
-class SecurityDepends:
-    """Helper for dependency injection of settings."""
-
-    def __init__(self, settings_class):
-        self.settings_class = settings_class
-
-    def __call__(self):
-        return self.settings_class()
 
 
 async def require_api_key(
@@ -115,7 +105,7 @@ async def optional_api_key(
         return None
 
     valid_keys = settings.get_api_keys()
-    if api_key in valid_keys:
+    if any(hmac.compare_digest(api_key, k) for k in valid_keys):
         return api_key
 
     return None
