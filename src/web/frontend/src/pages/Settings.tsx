@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card } from '@/components/ui'
 import { Monitor } from 'lucide-react'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -11,7 +11,8 @@ type ConnectionStatus = 'idle' | 'checking' | 'connected' | 'failed'
 
 export default function SettingsPage() {
   const { t } = useLanguage()
-  const [uptime, setUptime] = useState('--:--:--')
+  const [uptime, setUptime] = useState('00:00:00')
+  const startTime = useRef(Date.now())
 
   // LLM Config state
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigListItem[]>([])
@@ -30,13 +31,13 @@ export default function SettingsPage() {
   })
   const [savingSettings, setSavingSettings] = useState(false)
 
-  // Update uptime every second
+  // Update uptime every second (time since page load)
   useEffect(() => {
     const updateUptime = () => {
-      const now = new Date()
-      const hours = String(now.getHours()).padStart(2, '0')
-      const minutes = String(now.getMinutes()).padStart(2, '0')
-      const seconds = String(now.getSeconds()).padStart(2, '0')
+      const elapsed = Math.floor((Date.now() - startTime.current) / 1000)
+      const hours = String(Math.floor(elapsed / 3600)).padStart(2, '0')
+      const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0')
+      const seconds = String(elapsed % 60).padStart(2, '0')
       setUptime(`${hours}:${minutes}:${seconds}`)
     }
     updateUptime()
@@ -268,7 +269,7 @@ export default function SettingsPage() {
           <div className="grid grid-cols-4 gap-6 font-mono text-sm">
             <div className="space-y-2">
               <div className="text-text-secondary">{t('settings.version')}</div>
-              <div className="text-cyan">v2.0.4</div>
+              <div className="text-cyan">{typeof __APP_VERSION__ !== 'undefined' ? `v${__APP_VERSION__}` : 'dev'}</div>
             </div>
             <div className="space-y-2">
               <div className="text-text-secondary">{t('settings.backend')}</div>
