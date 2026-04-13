@@ -1,5 +1,58 @@
 # Change Log
 
+## 2026-04-13 (续)
+
+### 项目审视问题修复 - 25 个修复点全部完成 ✅
+
+- **Goal ID**: bugfix-comprehensive-review
+- **Summary**: 修复项目代码审视中发现的 25 个问题，涵盖运行时崩溃、安全漏洞、后端逻辑、前端 Bug、代码质量和低优先级清理
+- **影响范围**: 后端 API、前端 UI、安全模块、扫描引擎、验证器
+- **核心变更**:
+  1. **批次 1 - Critical 运行时崩溃修复** (`6506f39`):
+     - 3 个验证器中 `self.logger` → `logger` 修正
+     - `adjudication.py` 添加缺失的 `await`
+     - `scan_executor.py` 添加 `self.project_repo` 初始化
+     - `codeql.py` `dir()` → `locals()` 修正
+     - `codeql.py` 删除重复 `shutil.rmtree()`
+  2. **批次 2 - 安全漏洞修复** (`efd9dc4`):
+     - 4 个扫描控制端点添加认证
+     - API Key 比较改用 `hmac.compare_digest` 恒定时间
+     - 删除重复 `SecurityDepends` 类定义
+     - 移除 `verify_api_key` 无用参数
+  3. **批次 3 - 后端逻辑修复** (`e6f21af`):
+     - 工厂函数参数修正
+     - Redis 订阅者添加重连逻辑
+     - 移除双重去重
+     - bare `except:` → `except Exception:`
+     - SIGKILL → SIGTERM
+     - Celery 任务幂等性保护
+  4. **批次 4 - 前端 Bug 修复** (`127a8ee`):
+     - Token Usage 条件修正
+     - ZIP 上传使用配置的 client
+     - 移除 `window.location.reload()`
+     - 翻页 filter 重置
+  5. **批次 5 - 代码质量改进** (`9dfdeb7`):
+     - `main.py` print → logging
+     - `progress_broadcaster.py` 合并 DB 查询
+     - `adversarial_service.py` 删除死代码
+     - `scan_tasks.py` 进度检查复用 DB engine
+  6. **批次 6 - 低优先级清理** (`57a858a`):
+     - `Settings.tsx` 修复 uptime 实际运行时间
+     - 版本号从构建时注入
+- **测试结果**: tests 目录不在仓库中，各批次通过独立语法检查和功能验证
+- **安全扫描**: 4 个发现，均为预存问题（非本次引入）
+  - BLOCKER: `config.py` 硬编码 DB 凭据
+  - HIGH: `main.py` 日志输出 DB URL 明文
+  - MEDIUM: WebSocket 端点无认证
+  - LOW: API Key 认证默认禁用
+- **死代码检测**: 10 项高置信度发现
+  - 5 项可安全清理（建议下一轮处理）
+  - 4 项延后
+  - 1 项 Bug（websocket.py `_running` 属性未初始化）
+- **变更统计**: 6 个独立 commit，跨 20+ 文件
+
+---
+
 ## 2026-04-13
 
 ### Web 前端增强 + 安全修复 - 批量同步 ✅

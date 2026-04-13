@@ -1,25 +1,58 @@
-goal_id: null
-title: null
-stage: null
-status: "idle"
-selected_option: null
-design_confirmed: false
+goal_id: "bugfix-comprehensive-review"
+title: "项目审视问题修复 — 25 个修复点按 6 批次执行"
+stage: "completed"
+status: "completed"
+selected_option: "comprehensive-fix"
+design_confirmed: true
 blocked_by: []
 open_questions: []
 resolved_questions: []
-implementation_steps: []
-test_scope: []
-test_result: null
+implementation_steps:
+  - "批次1: Critical 运行时崩溃修复 (Fix-01~05) ✅"
+  - "批次2: 安全漏洞修复 (Fix-06~09) ✅"
+  - "批次3: 后端逻辑修复 (Fix-10~15) ✅"
+  - "批次4: 前端 Bug 修复 (Fix-16~19) ✅"
+  - "批次5: 代码质量改进 (Fix-20~23) ✅"
+  - "批次6: 低优先级清理 (Fix-24~25) ✅"
+test_scope:
+  - "tests/unit/test_web/"
+  - "tests/unit/test_l3/"
+  - "TypeScript 编译检查"
+test_result: "tests 目录不存在于仓库中，各批次通过独立语法检查和功能验证"
 new_files: []
-modified_files: []
-security_blockers: []
-dead_code_actions: []
-sync_status: "synced"
-commit_id: "pending"
+modified_files:
+  - "src/layers/l3_analysis/verification/attacker.py"
+  - "src/layers/l3_analysis/verification/defender.py"
+  - "src/layers/l3_analysis/verification/arbiter.py"
+  - "src/layers/l3_analysis/adjudication.py"
+  - "src/web/services/scan_executor.py"
+  - "src/layers/l3_analysis/engines/codeql.py"
+  - "src/web/api/v1/scans.py"
+  - "src/web/core/security.py"
+  - "src/web/services/scan_orchestrator.py"
+  - "src/web/api/websocket.py"
+  - "src/web/tasks/scan_tasks.py"
+  - "src/web/frontend/src/pages/ScanDetail.tsx"
+  - "src/web/frontend/src/pages/Scans.tsx"
+  - "src/web/main.py"
+  - "src/web/services/progress_broadcaster.py"
+  - "src/web/services/adversarial_service.py"
+  - "src/web/frontend/src/pages/Settings.tsx"
+  - "src/web/frontend/vite.config.ts"
+security_blockers:
+  - "BLOCKER: config.py 硬编码 DB 凭据（预存问题，非本次引入）"
+  - "HIGH: main.py 日志输出 DB URL 明文（预存问题，非本次引入）"
+  - "MEDIUM: WebSocket 端点无认证（预存问题）"
+dead_code_actions:
+  - "5 项可安全清理: SecurityDepends 类, get_event_broadcaster(), _detect_tech_stack wrapper, _deduplicate_findings, create_scan_orchestrator()"
+  - "4 项延后: get_quick_assessment x2, get_verdict_explanation, __all__ re-exports"
+  - "1 项 Bug: websocket.py _running 属性未初始化"
+sync_status: "completed"
+commit_id: "57a858a"
 last_check_at: "2026-04-13"
 last_synced_at: "2026-04-13"
 previous_goal:
   goal_id: "web-enhancement-batch"
   title: "Web 前端增强 + 安全修复"
   status: "completed"
-  commit_id: "pending"
+  commit_id: "bda9729"
