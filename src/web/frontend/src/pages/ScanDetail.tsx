@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 import {
   Card,
   Badge,
@@ -38,6 +38,39 @@ import { scansApi } from '@/api/scans';
 import { systemSettingsApi } from '@/api/system';
 import { formatDateTime, formatDuration, setTimezone } from '@/utils/format';
 import type { ScanStatus } from '@/types/models';
+
+// Agent analyzed files statistic with expandable file list
+function AgentFilesStatistic({ analyzedFiles, filePaths }: { analyzedFiles: number; filePaths: string[] | null }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div>
+      <div
+        className="cursor-pointer select-none"
+        onClick={() => filePaths && filePaths.length > 0 && setExpanded(!expanded)}
+      >
+        <Statistic
+          title="Agent 分析"
+          value={analyzedFiles}
+          valueClassName="text-cyan"
+        />
+        {filePaths && filePaths.length > 0 && (
+          <span className="text-xs text-text-tertiary font-mono ml-1">
+            {expanded ? '▲' : '▼'} 查看文件
+          </span>
+        )}
+      </div>
+      {expanded && filePaths && filePaths.length > 0 && (
+        <div className="mt-2 p-2 rounded border border-border bg-background-secondary max-h-48 overflow-y-auto custom-scrollbar">
+          {filePaths.map((path, i) => (
+            <div key={i} className="text-xs font-mono text-text-secondary py-0.5 truncate" title={path}>
+              {path}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const getStatusMap = (t: (key: string) => string) => ({
   pending: { text: t('status.waiting'), variant: 'pending' as const },
@@ -131,6 +164,7 @@ export default function ScanDetailPage() {
     pause,
     resume,
     cancel,
+    forceRefresh,
   } = useScanProgress(isNaN(scanId) ? null : scanId, {
     enabled: !isNaN(scanId),
   });
@@ -159,20 +193,22 @@ export default function ScanDetailPage() {
   }, []);
 
   // Use progress or scan status (prefer progress)
-  const currentStatus = (progress?.status || scan?.status || 'pending') as ScanStatus;
-  const statusConfig = STATUS_MAP[currentStatus] || { text: currentStatus, variant: 'pending' as const };
+  // Don't default to 'pending' while data is still loading
+  const currentStatus = (progress?.status || scan?.status || (isLoading ? null : 'pending')) as ScanStatus | null;
+  const statusConfig = STATUS_MAP[currentStatus || 'pending'] || { text: currentStatus || 'pending', variant: 'pending' as const };
 
-  // Calculate control button availability
-  const canStart = currentStatus === 'pending';
-  const canRetry = currentStatus === 'failed';
-  const canPause = currentStatus === 'running';
-  const canResume = currentStatus === 'paused';
-  const canCancel = ['pending', 'running', 'paused'].includes(currentStatus);
+  // Calculate control button availability - hide all buttons while loading
+  const canStart = !isLoading && currentStatus === 'pending';
+  const canRetry = !isLoading && currentStatus === 'failed';
+  const canPause = !isLoading && currentStatus === 'running';
+  const canResume = !isLoading && currentStatus === 'paused';
+  const canCancel = !isLoading && currentStatus != null && ['pending', 'running', 'paused'].includes(currentStatus);
 
   const handleStart = async () => {
     try {
       await scansApi.start(scanId);
       await refetch();
+      await forceRefresh();
     } catch (err) {
       console.error('Failed to start:', err);
     }
@@ -391,9 +427,22 @@ export default function ScanDetailPage() {
 
         {/* Scan Details Grid */}
         <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-border">
-          {/* Scan Name */}
-          <div className="col-span-2">
+          {/* Scan Target */}
+          <div className="col-span-4">
             <div className="text-xs text-text-secondary font-mono mb-1">扫描对象</div>
+            <span className="text-text-primary font-mono text-sm">
+              {(scan.config as any)?.original_filename
+                || (() => {
+                    if (!scan.source_path) return '--';
+                    const name = scan.source_path.split('/').filter(Boolean).pop() || scan.source_path;
+                    return name.replace(/\.(git|zip)$/, '');
+                  })()}
+            </span>
+          </div>
+
+          {/* Task Name */}
+          <div>
+            <div className="text-xs text-text-secondary font-mono mb-1">任务名</div>
             <span className="text-text-primary font-mono text-sm">{scan.name}</span>
           </div>
 
@@ -412,16 +461,16 @@ export default function ScanDetailPage() {
           </div>
 
           {/* Agent Model */}
-          <div>
+          <div className="col-span-2">
             <div className="text-xs text-text-secondary font-mono mb-1">Agent 模型</div>
             <span className="text-cyan font-mono text-sm">
               {llmConfigs.agent_scan?.model || '--'}
             </span>
           </div>
 
-          {/* Verification Model */}
-          <div>
-            <div className="text-xs text-text-secondary font-mono mb-1">验证模型</div>
+          {/* Adversarial Model */}
+          <div className="col-span-2">
+            <div className="text-xs text-text-secondary font-mono mb-1">辩论模型</div>
             <span className="text-warning font-mono text-sm">
               {llmConfigs.verification?.model || '--'}
             </span>
@@ -429,15 +478,19 @@ export default function ScanDetailPage() {
         </div>
       </Card>
 
+      {/* Live Terminal */}
+      <LiveTerminal
+        scanId={scanId}
+        scanStatus={currentStatus}
+        wsState={wsState}
+      />
+
       {/* Statistics Grid */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 gap-4 mb-6">
         <Statistic title={t('scanDetail.totalFiles')} value={scan.total_files || 0} />
-        <Statistic title={t('scanDetail.indexed')} value={scan.indexed_files || 0} />
-        <Statistic title={t('scanDetail.analyzed')} value={scan.analyzed_files || 0} />
-        <Statistic
-          title={t('scanDetail.findings')}
-          value={scan.findings_count || 0}
-          valueClassName={(scan.findings_count || 0) > 0 ? 'text-critical' : ''}
+        <AgentFilesStatistic
+          analyzedFiles={scan.analyzed_files || 0}
+          filePaths={scan.agent_analyzed_files || null}
         />
       </div>
 
@@ -468,14 +521,21 @@ export default function ScanDetailPage() {
       {/* Vulnerability Distribution */}
       <Card className="glass-panel mb-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-cyan font-mono font-bold">{t('scanDetail.vulnDistribution')}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-cyan font-mono font-bold">{t('scanDetail.vulnDistribution')}</h3>
+            {(scan.findings_count ?? 0) > 0 && (
+              <Badge variant="critical" className="font-mono text-xs">
+                {scan.findings_count} 个漏洞
+              </Badge>
+            )}
+          </div>
           {scan.findings_count && scan.findings_count > 0 && (
             <Button size="sm" onClick={() => navigate(`/scans/${scan.id}/findings`)}>
               {t('scanDetail.viewAllFindings')}
             </Button>
           )}
         </div>
-        <div className="grid grid-cols-6 gap-4">
+        <div className="grid grid-cols-5 gap-4">
           <Statistic
             title={t('severity.critical')}
             value={scan.critical_count || 0}
@@ -501,20 +561,8 @@ export default function ScanDetailPage() {
             value={scan.info_count || 0}
             valueClassName={scan.info_count ? 'text-text-secondary' : ''}
           />
-          <Statistic
-            title={t('scanDetail.verified')}
-            value={scan.verified_count || 0}
-            valueClassName={scan.verified_count ? 'text-purple-400' : ''}
-          />
         </div>
       </Card>
-
-      {/* Live Terminal */}
-      <LiveTerminal
-        scanId={scanId}
-        scanStatus={currentStatus}
-        wsState={wsState}
-      />
 
     </div>
   );

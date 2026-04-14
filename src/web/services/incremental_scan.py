@@ -54,13 +54,11 @@ class IncrementalScanContext:
     def __init__(
         self,
         scan_id: int,
-        project_id: int,
         base_ref: str,
         head_ref: str,
         source_path: Path,
     ):
         self.scan_id = scan_id
-        self.project_id = project_id
         self.base_ref = base_ref
         self.head_ref = head_ref
         self.source_path = source_path
@@ -81,7 +79,6 @@ class IncrementalScanContext:
         """Convert to dictionary for JSON serialization."""
         return {
             "scan_id": self.scan_id,
-            "project_id": self.project_id,
             "base_ref": self.base_ref,
             "head_ref": self.head_ref,
             "changed_files_count": len(self.changed_files),
@@ -344,15 +341,13 @@ class FileHashUtils:
 class IncrementalScanService:
     """Service for managing incremental scans."""
 
-    def __init__(self, scan_id: int, project_id: int):
+    def __init__(self, scan_id: int):
         """Initialize the incremental scan service.
 
         Args:
             scan_id: ID of the scan
-            project_id: ID of the project
         """
         self.scan_id = scan_id
-        self.project_id = project_id
         self.context: Optional[IncrementalScanContext] = None
 
     async def analyze_incremental_changes(
@@ -388,7 +383,6 @@ class IncrementalScanService:
         # Build context
         context = IncrementalScanContext(
             scan_id=self.scan_id,
-            project_id=self.project_id,
             base_ref=base_ref,
             head_ref=head_ref,
             source_path=source_path,
@@ -541,15 +535,13 @@ class IncrementalScanService:
 
 def get_incremental_scan_service(
     scan_id: int,
-    project_id: int,
 ) -> IncrementalScanService:
     """Get or create an incremental scan service instance.
 
     Args:
         scan_id: ID of the scan
-        project_id: ID of the project
 
     Returns:
         IncrementalScanService instance
     """
-    return IncrementalScanService(scan_id, project_id)
+    return IncrementalScanService(scan_id)

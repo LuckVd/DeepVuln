@@ -208,6 +208,11 @@ class ScanOrchestrator:
                 }
                 if isinstance(result.raw_output, dict):
                     per_engine_details[name]["tokens_used"] = result.raw_output.get("total_tokens", 0)
+                    # Extract agent file analysis data
+                    if name == "agent":
+                        per_engine_details[name]["files_analyzed"] = result.raw_output.get("files_analyzed", 0)
+                        per_engine_details[name]["agent_total_files"] = result.raw_output.get("total_files", 0)
+                        per_engine_details[name]["analyzed_file_paths"] = result.raw_output.get("analyzed_file_paths", [])
             await self.progress_callback.on_phase_complete(
                 "engine_execution",
                 {
@@ -288,9 +293,14 @@ class ScanOrchestrator:
                 "total": token_stats.get("total_tokens", 0),
             }
 
+            # Extract agent analysis data from per_engine_details
+            agent_detail = per_engine_details.get("agent", {})
+
             await self.progress_callback.on_scan_complete(
                 self.total_findings, duration_seconds, tokens_used,
                 per_phase_tokens=per_phase_tokens,
+                agent_analyzed_files=agent_detail.get("analyzed_file_paths", []),
+                agent_files_analyzed=agent_detail.get("files_analyzed", 0),
             )
 
             return {
@@ -342,12 +352,15 @@ class ScanOrchestrator:
             return
 
         # Need to extract source (this happens when Phase 0 was skipped or source is not a ZIP)
+        # Read source_path from the scan record
         async with self.db_session_factory() as db:
-            project = await self.project_repo.get(db, id=self.project_id)
-            if not project:
-                raise ValueError(f"Project {self.project_id} not found")
+            from src.web.repositories.scan import ScanRepository
+            scan_repo = ScanRepository()
+            scan = await scan_repo.get(db, id=self.scan_id)
+            if not scan:
+                raise ValueError(f"Scan {self.scan_id} not found")
 
-        source_path = Path(project.source_path)
+        source_path = Path(scan.source_path)
 
         # Handle ZIP files
         if source_path.suffix == ".zip":
@@ -504,7 +517,6 @@ class ScanOrchestrator:
         # Create incremental scan service
         self.incremental_scan_service = IncrementalScanService(
             scan_id=self.scan_id,
-            project_id=self.project_id,
         )
 
         # Analyze changes
@@ -1241,6 +1253,9 @@ class ScanOrchestrator:
         # Save to database
         async with self.db_session_factory() as db:
             for finding_data in unique_findings:
+                # Derive finding status from adversarial verification and adjudication
+                finding_status = self._derive_finding_status(finding_data)
+
                 finding = FindingModel(
                     scan_id=self.scan_id,
                     vuln_type=finding_data.rule_id or finding_data.type.value,
@@ -1252,8 +1267,10 @@ class ScanOrchestrator:
                     function_name=finding_data.location.function,
                     title=finding_data.title,
                     description=finding_data.description,
+                    evidence=finding_data.location.snippet,
                     remediation=finding_data.fix_suggestion,
                     engine=finding_data.source,
+                    status=finding_status,
                     extra_metadata=finding_data.metadata,
                 )
                 db.add(finding)
@@ -1264,6 +1281,58 @@ class ScanOrchestrator:
         logger.info(
             f"Scan {self.scan_id}: Saved {self.total_findings} findings to database"
         )
+
+    def _derive_finding_status(self, finding_data: Finding) -> str:
+        """Derive finding status from adversarial verification and adjudication metadata.
+
+        Priority: adversarial verification > adjudication > default pending
+
+        Args:
+            finding_data: Finding object with metadata containing verification results
+
+        Returns:
+            Status string: confirmed, false_positive, conditional, or pending
+        """
+        metadata = finding_data.metadata or {}
+
+        # 1. Check adversarial verification result (highest priority)
+        adversarial = metadata.get("adversarial_verification")
+        if adversarial and isinstance(adversarial, dict):
+            adv_status = adversarial.get("status", "")
+            # Map adversarial status to finding status
+            status_map = {
+                "confirmed": "confirmed",
+                "rejected": "false_positive",
+                "uncertain": "conditional",
+                "timeout": "conditional",
+            }
+            mapped = status_map.get(adv_status)
+            if mapped:
+                logger.debug(
+                    f"Finding {finding_data.id}: status={mapped} from adversarial ({adv_status})"
+                )
+                return mapped
+
+        # 2. Check adjudication result
+        adjudication = metadata.get("adjudication")
+        if adjudication and isinstance(adjudication, dict):
+            adj_status = adjudication.get("final_status", "")
+            status_map = {
+                "confirmed": "confirmed",
+                "false_positive": "false_positive",
+                "conditional": "conditional",
+                "not_exploitable": "false_positive",
+                "informational": "conditional",
+            }
+            mapped = status_map.get(adj_status)
+            if mapped:
+                logger.debug(
+                    f"Finding {finding_data.id}: status={mapped} from adjudication ({adj_status})"
+                )
+                return mapped
+
+        # 3. Default pending
+        return "pending"
 
     def _deduplicate_findings(
         self, findings: List[Finding]

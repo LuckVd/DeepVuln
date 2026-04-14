@@ -26,6 +26,24 @@ from src.web.models.finding import Finding
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively convert non-JSON-serializable types to safe values."""
+    if obj is None:
+        return None
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(item) for item in obj]
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_for_json(v) for k, v in obj.items()}
+    # Enums, Path, etc. → str
+    return str(obj)
+
+
 def _utc_now_naive() -> datetime:
     """Get current UTC time as naive datetime (for database compatibility)."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -78,7 +96,7 @@ class ProgressCallback(Protocol):
         ...
 
     async def on_scan_complete(
-        self, findings_count: int, duration_seconds: float
+        self, findings_count: int, duration_seconds: float, **kwargs: Any
     ) -> None:
         """Called when the scan completes."""
         ...
@@ -233,6 +251,14 @@ class ProgressBroadcaster:
         self.current_phase = phase_name
         self.phase_start_time = _utc_now_naive()
 
+        # Persist event to database
+        await self._create_event(
+            event_type="phase_start",
+            message=f"Phase '{phase_name}' started",
+            event_level="info",
+            details={"phase": phase_name, **data},
+        )
+
         async with self._get_db_session() as db:
             from sqlalchemy import select, update
 
@@ -346,6 +372,31 @@ class ProgressBroadcaster:
         # Update scan record with progress
         scan_update_data["progress_percent"] = self._calculate_progress()
         await self._update_scan(scan_update_data)
+
+        # Persist event to database (with full result data for terminal replay)
+        phase_result_details = {
+            "phase": phase_name,
+            "duration_seconds": round(duration_seconds, 2),
+            "findings": result.get("findings", 0),
+            "tokens_used": result.get("tokens_used", 0),
+        }
+        # Forward selected result fields for terminal display
+        for key in (
+            "total_files", "languages", "frameworks", "attack_surface",
+            "engines", "verified_findings", "unique_findings",
+            "duplicates_removed", "confirmed", "rejected",
+            "total_findings", "total_tokens", "estimated_cost",
+            "per_engine_details", "severity_breakdown", "per_phase_tokens",
+            "file_counts", "primary_language",
+        ):
+            if key in result:
+                phase_result_details[key] = result[key]
+        await self._create_event(
+            event_type="phase_complete",
+            message=f"Phase '{phase_name}' completed in {duration_seconds:.1f}s",
+            event_level="info",
+            details=phase_result_details,
+        )
 
         # Broadcast to WebSocket
         await self.event_broadcaster.broadcast_phase_complete(
@@ -480,6 +531,18 @@ class ProgressBroadcaster:
                 "file_path": getattr(finding, "file_path", "unknown"),
             }
 
+        # Persist event to database (best-effort, must not crash the scan)
+        try:
+            sanitized = _sanitize_for_json(finding_data)
+            await self._create_event(
+                event_type="finding",
+                message=f"New finding: {finding_data.get('title', 'Unknown')}",
+                event_level="info",
+                details=sanitized,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to persist finding event: {e}")
+
         # Broadcast to WebSocket
         await self.event_broadcaster.broadcast_finding(
             self.scan_id, finding_data
@@ -499,10 +562,33 @@ class ProgressBroadcaster:
             message=message,
         )
 
+    async def _calculate_severity_stats(self) -> Dict[str, int]:
+        """Calculate severity statistics from findings in the database."""
+        from src.web.repositories.finding import FindingRepository
+        finding_repo = FindingRepository()
+        async with self._get_db_session() as db:
+            findings = await finding_repo.get_by_scan(db, scan_id=self.scan_id)
+        stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0, "verified": 0, "false_positive": 0}
+        for f in findings:
+            sev = (f.severity or "info").lower()
+            if sev in stats:
+                stats[sev] += 1
+            else:
+                stats["info"] += 1
+        return stats
+
+    async def _get_total_tokens_used(self) -> int:
+        """Get total tokens used from scan record."""
+        async with self._get_db_session() as db:
+            scan = await self.scan_repo.get(db, id=self.scan_id)
+            return scan.tokens_used if scan else 0
+
     async def on_scan_complete(
         self, findings_count: int, duration_seconds: float, tokens_used: int = 0,
         severity_breakdown: Optional[Dict[str, int]] = None,
         per_phase_tokens: Optional[Dict[str, int]] = None,
+        agent_analyzed_files: Optional[list] = None,
+        agent_files_analyzed: int = 0,
     ) -> None:
         """Handle scan complete event."""
         # Calculate severity statistics
@@ -537,9 +623,18 @@ class ProgressBroadcaster:
             "current_step": None,   # Clear current step on completion
         }
 
-        # Set analyzed_files equal to total_files (all code files were analyzed)
-        if total_files > 0:
-            update_data["analyzed_files"] = total_files
+        # Set analyzed_files to actual agent-analyzed count
+        update_data["analyzed_files"] = agent_files_analyzed or 0
+
+        # Store agent analyzed file paths in scan config
+        if agent_analyzed_files:
+            async with self._get_db_session() as db:
+                scan = await self.scan_repo.get(db, id=self.scan_id)
+                if scan and isinstance(scan.config, dict):
+                    scan_config = {**scan.config, "agent_analyzed_files": agent_analyzed_files}
+                    update_data["config"] = scan_config
+                elif scan:
+                    update_data["config"] = {"agent_analyzed_files": agent_analyzed_files}
 
         await self._update_scan(update_data)
 
@@ -612,7 +707,7 @@ class ProgressBroadcaster:
         event_type: str,
         data: Dict[str, Any],
     ) -> None:
-        """Broadcast a custom event via WebSocket.
+        """Broadcast a custom event via WebSocket and persist to database.
 
         Used for ad-hoc events like adversarial verification rounds,
         agent conversation turns, file progress updates, etc.
@@ -621,6 +716,17 @@ class ProgressBroadcaster:
             event_type: Custom event type string
             data: Event payload
         """
+        # Persist custom event to database (best-effort)
+        try:
+            await self._create_event(
+                event_type=event_type,
+                message=data.get("message") or data.get("finding_title") or f"Event: {event_type}",
+                event_level="info",
+                details=_sanitize_for_json(data),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to persist event '{event_type}': {e}")
+
         await self.event_broadcaster.broadcast_event(
             self.scan_id,
             event_type=event_type,
@@ -828,7 +934,7 @@ class DefaultProgressCallback:
         )
 
     async def on_scan_complete(
-        self, findings_count: int, duration_seconds: float
+        self, findings_count: int, duration_seconds: float, **kwargs: Any
     ) -> None:
         logger.info(
             f"Scan {self.scan_id}: Completed - {findings_count} findings "

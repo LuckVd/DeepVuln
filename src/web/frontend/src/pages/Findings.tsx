@@ -100,7 +100,7 @@ export default function FindingsPage() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-6">
-        <Button variant="outline" size="sm" onClick={() => navigate('/scans')}>
+        <Button variant="outline" size="sm" onClick={() => navigate(`/scans/${id}`)}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           {t('findings.returnToList')}
         </Button>
@@ -134,8 +134,8 @@ export default function FindingsPage() {
       )}
 
       {/* Toolbar */}
-      <Card className="glass-panel mb-6">
-        <div className="flex items-center gap-4 flex-wrap">
+      <Card className="glass-panel mb-6 overflow-visible">
+        <div className="flex items-end gap-4 flex-wrap">
           <CustomSelect
             label={t('findings.status')}
             value={statusFilter || ''}

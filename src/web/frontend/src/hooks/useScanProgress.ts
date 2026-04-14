@@ -13,6 +13,9 @@ interface UseScanProgressOptions {
   onFailed?: (error: string) => void
 }
 
+// 如果 WS 连接后这么久都没收到事件，说明后端进程隔离导致事件无法送达，回退到轮询
+const WS_EVENT_TIMEOUT_MS = 8000
+
 export function useScanProgress(
   scanId: number | null,
   options: UseScanProgressOptions = {}
@@ -38,6 +41,8 @@ export function useScanProgress(
     retryCount: 0,
     isPollingActive: false,
     wsState: 'disconnected' as 'connected' | 'disconnected' | 'error' | 'connecting',
+    lastWsEventAt: 0 as number, // 上次收到 WS 事件的时间戳
+    wsFallbackCheckId: null as NodeJS.Timeout | null, // WS 事件超时检查定时器
   })
 
   // 获取进度数据
@@ -117,11 +122,35 @@ export function useScanProgress(
     poll()
   }
 
+  // 标记收到 WS 事件（用于超时检测）
+  const markWsEvent = () => {
+    stateRef.current.lastWsEventAt = Date.now()
+  }
+
+  // 启动 WS 事件超时检测：如果连接后一段时间没收到事件，自动回退到轮询
+  const startWsFallbackCheck = () => {
+    clearWsFallbackCheck()
+    stateRef.current.wsFallbackCheckId = setTimeout(() => {
+      if (stateRef.current.isComplete) return
+      // WS 连接但超时无事件 → 回退到轮询
+      console.warn('[useScanProgress] No WS events received, falling back to polling')
+      startPolling()
+    }, WS_EVENT_TIMEOUT_MS)
+  }
+
+  const clearWsFallbackCheck = () => {
+    if (stateRef.current.wsFallbackCheckId) {
+      clearTimeout(stateRef.current.wsFallbackCheckId)
+      stateRef.current.wsFallbackCheckId = null
+    }
+  }
+
   // WebSocket 连接状态处理
   const { state: wsState } = useWebSocket(scanId, {
     onProgress: (data) => {
-      setUsingPolling(false)
+      markWsEvent()
       stopPolling()
+      clearWsFallbackCheck()
 
       setProgress((prev) => {
         const updated = prev ? { ...prev, ...data } : null
@@ -129,19 +158,38 @@ export function useScanProgress(
         return updated
       })
     },
+    onPhaseStart: () => {
+      markWsEvent()
+      // 收到事件说明 WS 通道正常，取消 fallback 检查
+      clearWsFallbackCheck()
+    },
     onPhaseComplete: (data) => {
+      markWsEvent()
+      clearWsFallbackCheck()
       // 阶段完成时刷新完整进度
       fetchProgress()
     },
+    onFindingNew: () => {
+      markWsEvent()
+      clearWsFallbackCheck()
+    },
     onScanComplete: (data) => {
+      markWsEvent()
+      clearWsFallbackCheck()
       stateRef.current.isComplete = true
       fetchProgress().then(() => {
         onComplete?.(progress!)
       })
     },
     onScanFailed: (error) => {
+      markWsEvent()
+      clearWsFallbackCheck()
       stateRef.current.isComplete = true
       onFailed?.(error)
+    },
+    onScanPaused: () => {
+      markWsEvent()
+      clearWsFallbackCheck()
     },
   })
 
@@ -158,25 +206,28 @@ export function useScanProgress(
     // 清理函数
     return () => {
       stopPolling()
+      clearWsFallbackCheck()
     }
   }, [scanId, enabled]) // 只依赖 scanId 和 enabled
 
   // 单独处理 WebSocket 状态变化（使用 ref 避免依赖循环）
   useEffect(() => {
-    if (!enabled || !scanId) return
+    if (!enabled || !scanId || stateRef.current.isComplete) return
 
     const currentWsState = stateRef.current.wsState
 
-    // WebSocket 连接成功时停止轮询
+    // WebSocket 连接成功时：停止轮询，但启动超时检测
     if (currentWsState === 'connected') {
       stopPolling()
+      // 如果从未收到过 WS 事件，启动 fallback 检测
+      if (stateRef.current.lastWsEventAt === 0) {
+        startWsFallbackCheck()
+      }
     }
     // WebSocket 失败或断开时启动轮询
     else if (currentWsState === 'disconnected' || currentWsState === 'error') {
-      // 检查是否已完成，避免完成后继续轮询
-      if (!stateRef.current.isComplete) {
-        startPolling()
-      }
+      clearWsFallbackCheck()
+      startPolling()
     }
   }, [wsState]) // 只依赖 wsState，避免触发整个 effect 重跑
 
@@ -213,6 +264,12 @@ export function useScanProgress(
     }
   }
 
+  // 强制刷新：重置完成状态后再获取进度
+  const forceRefresh = async () => {
+    stateRef.current.isComplete = false
+    return fetchProgress()
+  }
+
   return {
     progress,
     status,
@@ -222,5 +279,6 @@ export function useScanProgress(
     resume,
     cancel,
     refresh: fetchProgress,
+    forceRefresh,
   }
 }

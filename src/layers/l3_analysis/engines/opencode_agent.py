@@ -339,6 +339,7 @@ class OpenCodeAgent(BaseEngine):
                     "total_tokens": self._total_tokens,
                     "provider": str(self.llm.provider),
                     "model": self.llm.model,
+                    "analyzed_file_paths": [str(f.relative_to(source_path)) for f in target_files],
                 },
             )
 

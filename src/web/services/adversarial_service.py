@@ -194,16 +194,63 @@ class AdversarialService:
             else:
                 status = AdversarialStatus.UNCERTAIN
 
+        # Serialize full verdict data
+        verdict_obj = result.get("verdict")
+        verdict_data = None
+        if verdict_obj and hasattr(verdict_obj, 'model_dump'):
+            verdict_data = verdict_obj.model_dump()
+            # Convert enums to strings for JSON serialization
+            if 'verdict' in verdict_data and hasattr(verdict_data['verdict'], 'value'):
+                verdict_data['verdict'] = verdict_data['verdict'].value
+        elif verdict_obj and hasattr(verdict_obj, 'value'):
+            verdict_data = {"verdict": verdict_obj.value}
+
+        # Serialize full debate rounds from VerificationResult
+        full_rounds = []
+        debate_rounds = result.get("debate_rounds", [])
+        for dr in debate_rounds:
+            round_data: dict[str, Any] = {
+                "round_number": getattr(dr, 'round_number', 0),
+            }
+            # Attacker argument
+            attacker = getattr(dr, 'attacker_argument', None)
+            if attacker and hasattr(attacker, 'model_dump'):
+                a_data = attacker.model_dump()
+                if 'strength' in a_data and hasattr(a_data['strength'], 'value'):
+                    a_data['strength'] = a_data['strength'].value
+                round_data["attacker_argument"] = a_data
+            # Defender argument
+            defender = getattr(dr, 'defender_argument', None)
+            if defender and hasattr(defender, 'model_dump'):
+                d_data = defender.model_dump()
+                if 'strength' in d_data and hasattr(d_data['strength'], 'value'):
+                    d_data['strength'] = d_data['strength'].value
+                round_data["defender_argument"] = d_data
+            # Arbiter verdict
+            arbiter = getattr(dr, 'arbiter_verdict', None)
+            if arbiter and hasattr(arbiter, 'model_dump'):
+                av_data = arbiter.model_dump()
+                if 'verdict' in av_data and hasattr(av_data['verdict'], 'value'):
+                    av_data['verdict'] = av_data['verdict'].value
+                round_data["arbiter_verdict"] = av_data
+            # Continue info
+            if hasattr(dr, 'continue_debate'):
+                round_data["continue_debate"] = dr.continue_debate
+            if hasattr(dr, 'continue_reason') and dr.continue_reason:
+                round_data["continue_reason"] = dr.continue_reason
+            full_rounds.append(round_data)
+
         return {
             "finding_id": finding_id,
             "status": status.value,
             "confidence": result.get("confidence", 0.5),
-            "rounds": [r.to_dict() for r in rounds],
-            "rounds_count": len(rounds),
-            "verdict": result.get("verdict", AdversarialVerdict.UNCERTAIN).value
-            if result.get("verdict") else None,
+            "rounds": full_rounds if full_rounds else [r.to_dict() for r in rounds],
+            "rounds_count": len(full_rounds) if full_rounds else len(rounds),
+            "verdict": verdict_data,
             "reasoning": result.get("reasoning", ""),
             "timeout": timeout_occurred,
+            "duration_seconds": result.get("duration_seconds", 0),
+            "tokens_used": result.get("tokens_used", 0),
         }
 
     async def _run_verification_with_callbacks(
@@ -224,14 +271,29 @@ class AdversarialService:
         Returns:
             Verification result dict
         """
+        # Resolve actual source file path from finding location
+        actual_file_path = source_path
+        if hasattr(finding, 'location') and finding.location:
+            file_name = getattr(finding.location, 'file', '')
+            if file_name:
+                candidate = Path(source_path) / file_name
+                if candidate.is_file():
+                    actual_file_path = candidate
+                    logger.debug(f"Resolved finding file: {actual_file_path}")
+                else:
+                    # Try without leading slash
+                    candidate2 = Path(source_path) / file_name.lstrip('/')
+                    if candidate2.is_file():
+                        actual_file_path = candidate2
+
         # Extract code context from source file
         code_context = ""
         related_code = ""
 
-        if source_path.exists():
+        if actual_file_path.is_file():
             try:
                 # Read the source file and extract relevant context
-                with open(source_path, 'r', encoding='utf-8') as f:
+                with open(actual_file_path, 'r', encoding='utf-8') as f:
                     file_content = f.read()
 
                 # Get the line number from finding location
@@ -252,7 +314,7 @@ class AdversarialService:
                         # No line number, use entire file
                         code_context = file_content[:5000]  # Limit to 5000 chars
             except Exception as e:
-                logger.warning(f"Failed to read source file {source_path}: {e}")
+                logger.warning(f"Failed to read source file {actual_file_path}: {e}")
                 code_context = finding.location.snippet if hasattr(finding, 'location') and finding.location.snippet else ""
         else:
             # File doesn't exist, use snippet from finding
@@ -412,6 +474,8 @@ class AdversarialService:
             "reasoning": getattr(final_verdict, 'reasoning', '') if final_verdict else "",
             "rounds_completed": getattr(result_obj, 'rounds_completed', 0),
             "duration_seconds": getattr(result_obj, 'duration_seconds', 0),
+            "tokens_used": getattr(result_obj, 'tokens_used', 0),
+            "debate_rounds": getattr(result_obj, 'debate_rounds', []),
         }
 
     async def verify_findings_batch(

@@ -173,7 +173,7 @@ class ScanEventRepository(AsyncRepository[ScanEvent, dict, dict]):
         if event_type:
             query = query.where(ScanEvent.event_type == event_type)
 
-        query = query.order_by(desc(ScanEvent.created_at)).offset(skip).limit(limit)
+        query = query.order_by(ScanEvent.created_at).offset(skip).limit(limit)
         result = await db.execute(query)
         return list(result.scalars().all())
 

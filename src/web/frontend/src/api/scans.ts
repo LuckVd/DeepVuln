@@ -7,6 +7,7 @@ import type {
   Finding,
   FindingSummary,
   FindingStatusUpdate,
+  AdversarialDebateResponse,
 } from '@/types/models'
 
 /**
@@ -138,10 +139,27 @@ export const scansApi = {
   },
 
   /**
+   * 删除扫描
+   */
+  async delete(id: number): Promise<void> {
+    await client.delete(`/scans/${id}`)
+  },
+
+  /**
    * 更新漏洞状态
    */
   async updateFindingStatus(scanId: number, findingId: number, data: FindingStatusUpdate): Promise<Finding> {
     const response = await client.patch(`/scans/${scanId}/findings/${findingId}/status`, data)
+    return response.data
+  },
+
+  /**
+   * 获取对抗性辩论记录
+   */
+  async getAdversarialDebate(scanId: number, findingId?: number): Promise<AdversarialDebateResponse> {
+    const response = await client.get(`/scans/${scanId}/adversarial-debate`, {
+      params: findingId !== undefined ? { finding_id: findingId } : {},
+    })
     return response.data
   },
 }

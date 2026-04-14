@@ -76,6 +76,7 @@ export interface Scan {
   tokens_budget: number | null
   task_id: string | null  // Celery task ID for task control
   config?: ScanConfig
+  agent_analyzed_files?: string[] | null
   created_at: string
   started_at: string | null
   completed_at: string | null
@@ -168,8 +169,111 @@ export interface Finding {
   remediation: string | null
   engine: string
   status: FindingStatus
-  cpg_path: string | null
+  cpg_path: CpgPath | null
+  extra_metadata: FindingExtraMetadata | null
   created_at: string
+}
+
+// Finding extra_metadata 结构
+export interface FindingExtraMetadata {
+  rule_id?: string
+  references?: string[]
+  tags?: string[]
+  fix_suggestion?: string
+  evidence_strength?: string
+  confidence_factors?: Record<string, number>
+  score_detail?: {
+    base_score?: number
+    exploitability_score?: number
+    directory_multiplier?: number
+    final_score?: number
+  }
+  adversarial_verification?: {
+    status?: string
+    confidence?: number
+    rounds_count?: number
+    rounds?: AdversarialRound[]
+    verdict?: AdversarialVerdictData
+    reasoning?: string
+    timeout?: boolean
+  }
+  [key: string]: unknown
+}
+
+// CPG 路径
+export interface CpgPath {
+  source?: { file: string; line: number; description?: string }
+  sink?: { file: string; line: number; description?: string }
+  propagation?: Array<{ file: string; line: number; description?: string }>
+  attack_vector?: string
+  exploitability?: string
+  [key: string]: unknown
+}
+
+// 对抗性辩论轮次
+export interface AdversarialRound {
+  round_number: number
+  attacker_argument?: {
+    claim?: string
+    evidence?: string[]
+    reasoning?: string
+    strength?: string
+    confidence?: number
+    poc_code?: string
+    poc_type?: string
+    exploitation_steps?: string[]
+  }
+  defender_argument?: {
+    claim?: string
+    evidence?: string[]
+    reasoning?: string
+    strength?: string
+    confidence?: number
+    sanitizers_found?: string[]
+    validation_checks?: string[]
+    false_positive_reasons?: string[]
+  }
+  arbiter_verdict?: {
+    verdict?: string
+    confidence?: number
+    reasoning?: string
+    continue_debate?: boolean
+    continue_reason?: string
+  }
+}
+
+// 对抗性判决数据
+export interface AdversarialVerdictData {
+  verdict?: string
+  confidence?: number
+  summary?: string
+  reasoning?: string
+  attacker_strength?: number
+  defender_strength?: number
+  recommended_action?: string
+  priority?: string
+  key_factors?: string[]
+  conditions?: string[]
+}
+
+// 对抗性辩论 API 响应
+export interface AdversarialDebateResponse {
+  scan_id: number
+  total_debates: number
+  debates: AdversarialDebate[]
+}
+
+export interface AdversarialDebate {
+  finding_id: number
+  finding_title: string
+  vuln_type: string
+  status?: string
+  confidence?: number
+  rounds_count: number
+  rounds: AdversarialRound[]
+  verdict?: AdversarialVerdictData
+  reasoning?: string
+  timeout?: boolean
 }
 
 // 漏洞状态更新请求

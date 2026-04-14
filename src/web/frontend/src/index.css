@@ -25,44 +25,8 @@
     overflow-x: hidden;
   }
 
-  /* Scanline overlay effect */
-  body::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0, 0, 0, 0.15) 2px,
-      rgba(0, 0, 0, 0.15) 4px
-    );
-    pointer-events: none;
-    z-index: 9999;
-    opacity: 1;
-  }
-
-  /* Perspective grid background */
-  body::after {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-image:
-      linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
-    background-size: 50px 50px;
-    transform: perspective(500px) rotateX(60deg) scale(2);
-    transform-origin: top center;
-    pointer-events: none;
-    z-index: 0;
-    opacity: 0.5;
-  }
+  /* Scanline overlay effect - lightweight, no GPU-heavy pseudo-elements
+     Moved from body::before/::after to avoid constant GPU recompositing */
 
   /* Ensure content is above background effects */
   > div {
@@ -100,12 +64,11 @@
 }
 
 @layer components {
-  /* Glassmorphism panel */
+  /* Panel style - solid semi-transparent background (no backdrop-filter for GPU performance) */
   .glass-panel {
-    background: rgba(15, 15, 22, 0.8);
-    backdrop-filter: blur(10px);
+    background: #0f0f16;
     border: 1px solid rgba(0, 240, 255, 0.1);
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   }
 
   /* Corner decoration - 45-degree brackets */

@@ -311,6 +311,9 @@ class ScanResponse(BaseModel):
     adversarial_summary: Optional[dict] = None  # P14-04: 对抗性摘要
     incremental_stats: Optional[dict] = None  # P14-06: 增量扫描统计
 
+    # Agent analysis detail
+    agent_analyzed_files: Optional[list[str]] = None
+
     # Timestamps
     created_at: UtcDateTime
     started_at: Optional[UtcDateTime] = None
@@ -364,6 +367,7 @@ class FindingResponse(FindingBase):
     engine: str
     status: str
     cpg_path: Optional[dict] = None
+    extra_metadata: Optional[dict] = None
     created_at: UtcDateTime
 
 

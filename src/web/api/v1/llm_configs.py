@@ -177,8 +177,10 @@ async def update_llm_config(
     # Update config
     update_dict = config_update.model_dump(exclude_unset=True)
 
-    # Skip API key update if it's masked (starts with ***)
-    if "api_key" in update_dict and update_dict["api_key"].startswith("***"):
+    # Skip API key update if it's masked (starts with ***) or empty string
+    if "api_key" in update_dict and (
+        update_dict["api_key"].startswith("***") or update_dict["api_key"] == ""
+    ):
         del update_dict["api_key"]
 
     update_dict["updated_at"] = datetime.utcnow()

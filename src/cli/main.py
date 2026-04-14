@@ -1758,7 +1758,7 @@ async def run_full_security_scan(
             ]
 
             # Apply deduplication and adjudication
-            adjudicated_findings, adjudication_summary = adjudicate_findings(
+            adjudicated_findings, adjudication_summary = await adjudicate_findings(
                 raw_findings,
                 validate=True,
                 strict_consistency=False,  # Don't fail on consistency issues

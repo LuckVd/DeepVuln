@@ -71,11 +71,11 @@ export default {
         'xl': ['1.25rem', { lineHeight: '1.75rem' }],
       },
       boxShadow: {
-        'glow-cyan': '0 0 20px rgba(0, 240, 255, 0.5), 0 0 40px rgba(0, 240, 255, 0.3)',
-        'glow-magenta': '0 0 20px rgba(255, 0, 160, 0.5), 0 0 40px rgba(255, 0, 160, 0.3)',
-        'glow-green': '0 0 20px rgba(57, 255, 20, 0.5), 0 0 40px rgba(57, 255, 20, 0.3)',
-        'glow-critical': '0 0 20px rgba(255, 0, 60, 0.5), 0 0 40px rgba(255, 0, 60, 0.3)',
-        'panel': '0 4px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
+        'glow-cyan': '0 0 10px rgba(0, 240, 255, 0.4), 0 0 20px rgba(0, 240, 255, 0.2)',
+        'glow-magenta': '0 0 10px rgba(255, 0, 160, 0.4), 0 0 20px rgba(255, 0, 160, 0.2)',
+        'glow-green': '0 0 10px rgba(57, 255, 20, 0.4), 0 0 20px rgba(57, 255, 20, 0.2)',
+        'glow-critical': '0 0 10px rgba(255, 0, 60, 0.4), 0 0 20px rgba(255, 0, 60, 0.2)',
+        'panel': '0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.03)',
       },
       backgroundImage: {
         'grid-pattern': `linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px)`,

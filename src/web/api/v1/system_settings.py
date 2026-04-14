@@ -26,6 +26,7 @@ DEFAULT_SETTINGS = {
     # Scan settings
     "scan.timeout": "300",
     "scan.max_concurrent_files": "10",
+    "scan.agent_max_files": "50",
 
     # Threat intelligence
     "threat_intel.github_token": "",
@@ -35,6 +36,7 @@ DEFAULT_SETTINGS = {
 SETTING_DESCRIPTIONS = {
     "scan.timeout": "扫描超时时间（秒）",
     "scan.max_concurrent_files": "最大并发扫描文件数",
+    "scan.agent_max_files": "Agent 最大分析文件数",
     "threat_intel.github_token": "GitHub Personal Access Token (可选)",
     "threat_intel.nvd_api_key": "NVD API Key (可选)",
 }

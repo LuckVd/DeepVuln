@@ -98,8 +98,8 @@ export function LLMConfigForm({ config, onSave, onCancel }: LLMConfigFormProps) 
       setFormData({
         name: config.name,
         provider: config.provider as LLMProvider,
-        // 如果 API Key 是屏蔽格式，清空显示（保持原值不变）
-        api_key: config.api_key?.startsWith('***') ? '' : (config.api_key || ''),
+        // 保留脱敏值，提交时后端会跳过 *** 开头的更新
+        api_key: config.api_key || '',
         base_url: config.base_url || '',
         model: config.model,
         context_size: config.context_size,
@@ -134,29 +134,34 @@ export function LLMConfigForm({ config, onSave, onCancel }: LLMConfigFormProps) 
     setErrors({})
 
     try {
-      // 创建临时配置来获取模型列表
-      const tempConfig: LLMConfigCreate = {
-        name: '_temp',
-        provider: formData.provider || 'openai',
-        api_key: formData.api_key,
-        base_url: formData.base_url,
-        model: 'temp',
-        config_type: formData.config_type || 'both'
-      }
+      const apiKeyMasked = formData.api_key?.startsWith('***')
 
-      // 先创建临时配置
-      const created = await llmConfigApi.create(tempConfig)
+      if (isEdit && config && apiKeyMasked) {
+        // 编辑模式 + API Key 未修改 → 直接用已有配置 ID 获取模型
+        const modelsResult = await llmConfigApi.getModels(config.id)
+        setAvailableModels(modelsResult.models || [])
+        if (modelsResult.models.length === 0) {
+          setErrors({ model: '未获取到模型列表，请手动输入' })
+        }
+      } else {
+        // 新建模式 或 API Key 已修改 → 创建临时配置获取模型
+        const tempConfig: LLMConfigCreate = {
+          name: '_temp',
+          provider: formData.provider || 'openai',
+          api_key: formData.api_key,
+          base_url: formData.base_url,
+          model: 'temp',
+          config_type: formData.config_type || 'both'
+        }
 
-      // 获取模型列表
-      const modelsResult = await llmConfigApi.getModels(created.id)
+        const created = await llmConfigApi.create(tempConfig)
+        const modelsResult = await llmConfigApi.getModels(created.id)
+        setAvailableModels(modelsResult.models || [])
+        await llmConfigApi.delete(created.id)
 
-      setAvailableModels(modelsResult.models || [])
-
-      // 删除临时配置
-      await llmConfigApi.delete(created.id)
-
-      if (modelsResult.models.length === 0) {
-        setErrors({ model: '未获取到模型列表，请手动输入' })
+        if (modelsResult.models.length === 0) {
+          setErrors({ model: '未获取到模型列表，请手动输入' })
+        }
       }
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || '获取模型列表失败'
@@ -185,23 +190,31 @@ export function LLMConfigForm({ config, onSave, onCancel }: LLMConfigFormProps) 
     setErrors({})
 
     try {
-      // 创建临时配置来测试连接
-      const tempConfig: LLMConfigCreate = {
-        name: '_temp_test',
-        provider: formData.provider || 'openai',
-        api_key: formData.api_key,
-        base_url: formData.base_url,
-        model: formData.model || '',
-        temperature: formData.temperature || 0,
-        timeout: formData.timeout || 120,
-        config_type: formData.config_type || 'both'
+      const apiKeyMasked = formData.api_key?.startsWith('***')
+
+      if (isEdit && config && apiKeyMasked) {
+        // 编辑模式 + API Key 未修改 → 直接用已有配置 ID 测试
+        const result = await llmConfigApi.validate(config.id)
+        setTestResult(result)
+      } else {
+        // 新建模式 或 API Key 已修改 → 创建临时配置测试
+        const tempConfig: LLMConfigCreate = {
+          name: '_temp_test',
+          provider: formData.provider || 'openai',
+          api_key: formData.api_key,
+          base_url: formData.base_url,
+          model: formData.model || '',
+          temperature: formData.temperature || 0,
+          timeout: formData.timeout || 120,
+          config_type: formData.config_type || 'both'
+        }
+
+        const created = await llmConfigApi.create(tempConfig)
+        const result = await llmConfigApi.validate(created.id)
+        await llmConfigApi.delete(created.id)
+
+        setTestResult(result)
       }
-
-      const created = await llmConfigApi.create(tempConfig)
-      const result = await llmConfigApi.validate(created.id)
-      await llmConfigApi.delete(created.id)
-
-      setTestResult(result)
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || '测试连接失败'
       setTestResult({

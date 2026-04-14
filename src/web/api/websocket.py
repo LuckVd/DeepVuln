@@ -78,6 +78,7 @@ class ConnectionManager:
         self._redis_publisher = None
         self._redis_subscriber = None
         self._subscriber_task: Optional[asyncio.Task] = None
+        self._running = False
 
     async def connect(self, websocket: WebSocket, scan_id: int) -> None:
         """Connect a WebSocket to a scan.
@@ -269,11 +270,13 @@ class ConnectionManager:
         """
         if self._subscriber_task is not None:
             return
+        self._running = True
         self._subscriber_task = asyncio.create_task(self._redis_subscribe_loop())
         logger.info("Redis subscriber started")
 
     async def stop_redis_subscriber(self) -> None:
         """Stop Redis subscriber. Called during FastAPI shutdown."""
+        self._running = False
         if self._subscriber_task:
             self._subscriber_task.cancel()
             try:

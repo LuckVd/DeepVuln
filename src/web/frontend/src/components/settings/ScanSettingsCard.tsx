@@ -11,6 +11,7 @@ export function ScanSettingsCard({ settings, onUpdate }: ScanSettingsCardProps) 
   const [localSettings, setLocalSettings] = useState({
     'scan.timeout': String(settings['scan.timeout'] || 300),
     'scan.max_concurrent_files': String(settings['scan.max_concurrent_files'] || 10),
+    'scan.agent_max_files': String(settings['scan.agent_max_files'] || 50),
   })
 
   const handleChange = (key: string, value: string) => {
@@ -57,6 +58,23 @@ export function ScanSettingsCard({ settings, onUpdate }: ScanSettingsCardProps) 
           />
           <p className="text-xs text-text-tertiary mt-1">
             同时处理的文件数量
+          </p>
+        </div>
+
+        <div>
+          <label className="text-sm font-medium text-text-secondary mb-2 block">
+            Agent 最大分析文件数
+          </label>
+          <Input
+            type="number"
+            value={localSettings['scan.agent_max_files']}
+            onChange={e => handleChange('scan.agent_max_files', e.target.value)}
+            className="w-32 font-mono"
+            min={1}
+            max={500}
+          />
+          <p className="text-xs text-text-tertiary mt-1">
+            LLM Agent 最多分析的源码文件数量（1-500）
           </p>
         </div>
       </div>

@@ -426,7 +426,7 @@ def validate_no_conflict(finding: Any) -> bool:
     return True
 
 
-def adjudicate_findings(
+async def adjudicate_findings(
     findings: list[Any],
     source_path: Path | None = None,
     validate: bool = True,

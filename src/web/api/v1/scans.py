@@ -2,6 +2,7 @@
 
 import json
 import csv
+import logging
 from datetime import datetime, timezone
 from typing import Annotated
 from io import StringIO
@@ -13,6 +14,8 @@ from sqlalchemy import select, func
 
 from src.web.api.deps import get_db
 from src.web.core.security import require_api_key, optional_api_key
+
+logger = logging.getLogger(__name__)
 from src.web.models.schemas import (
     ScanCreate,
     ScanResponse,
@@ -128,7 +131,7 @@ async def create_scan_from_zip(
         source_type="zip",
         source_path=str(file_path),
         scan_type=scan_type,
-        config=config_dict,
+        config={**config_dict, "original_filename": file.filename},
     )
 
     created = await scan_repo.create(db, obj_in=scan_data)
@@ -189,7 +192,6 @@ async def list_scans(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(20, ge=1, le=1000, description="Number of items per page"),
     status: str | None = Query(None, description="Filter by scan status"),
-    project_id: int | None = Query(None, description="Filter by project ID"),
 ) -> ScanListResponse:
     """
     List all scans with pagination.
@@ -199,7 +201,6 @@ async def list_scans(
         page: Page number (1-indexed)
         page_size: Number of items per page (max 1000)
         status: Optional filter by scan status
-        project_id: Optional filter by project ID
 
     Returns:
         Paginated list of scans with total count
@@ -216,8 +217,6 @@ async def list_scans(
     filters = []
     if status:
         filters.append(Scan.status == status)
-    if project_id is not None:
-        filters.append(Scan.project_id == project_id)
 
     # Apply filters to query
     for filter_expr in filters:
@@ -271,7 +270,11 @@ async def get_scan(
             detail=f"Scan {scan_id} not found"
         )
 
-    return ScanResponse.model_validate(scan)
+    resp = ScanResponse.model_validate(scan)
+    # Extract agent_analyzed_files from scan.config
+    if isinstance(scan.config, dict) and "agent_analyzed_files" in scan.config:
+        resp.agent_analyzed_files = scan.config["agent_analyzed_files"]
+    return resp
 
 
 @router.get("/scans/{scan_id}/progress", response_model=ScanProgressResponse)
@@ -740,6 +743,7 @@ async def get_scan_findings(
                 "engine": f.engine,
                 "status": f.status,
                 "cpg_path": f.cpg_path,
+                "extra_metadata": f.extra_metadata,
                 "created_at": _iso(f.created_at),
             }
             for f in findings
@@ -855,7 +859,7 @@ async def get_scan_report(
 
     return {
         "scan_id": scan_id,
-        "project_id": scan.project_id,
+        "name": scan.name,
         "status": scan.status,
         "scan_type": scan.scan_type,
         "progress_percent": scan.progress_percent,
@@ -1210,6 +1214,29 @@ async def cancel_scan(
     )
 
 
+@router.delete("/scans/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_scan(
+    scan_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(optional_api_key)] = None,
+) -> None:
+    """Delete a scan and all related data (findings, events, phases)."""
+    scan_repo = ScanRepository()
+    scan = await scan_repo.get(db, id=scan_id)
+    if not scan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found",
+        )
+    if scan.status in ("running", "pending", "paused"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete scan in {scan.status} status. Cancel it first.",
+        )
+    await scan_repo.delete(db, id=scan_id)
+    await db.commit()
+
+
 @router.get("/scans/{scan_id}/status", response_model=ScanStatusResponse)
 async def get_scan_control_status(
     scan_id: int,
@@ -1282,7 +1309,7 @@ async def get_adversarial_debate(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[None, Depends(optional_api_key)] = None,
-    finding_id: Annotated[str | None, Query(description="Filter by specific finding ID")] = None,
+    finding_id: Annotated[int | None, Query(description="Filter by specific finding ID")] = None,
 ) -> dict:
     """
     Get adversarial verification debate content (P14-08b).

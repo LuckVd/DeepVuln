@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { Badge, Card, Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui';
-import { Terminal, ChevronDown, ChevronRight, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { Terminal, ChevronDown, ChevronRight, Wifi, WifiOff, Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { getWebSocketClient } from '@/api/websocket';
+import { scansApi } from '@/api/scans';
 import { formatDuration } from '@/utils/format';
 import type { ConnectionState } from '@/types/websocket';
 
@@ -22,7 +23,7 @@ interface LogEntry {
 
 interface LiveTerminalProps {
   scanId: number;
-  scanStatus: string;
+  scanStatus: string | null;
   wsState: ConnectionState;
 }
 
@@ -409,10 +410,12 @@ function ConnectionDot({ state }: { state: ConnectionState }) {
 // LiveTerminal
 // ---------------------------------------------------------------------------
 
-export default function LiveTerminal({ scanId, scanStatus, wsState }: LiveTerminalProps) {
+const LiveTerminalInner = memo(function LiveTerminalInner({ scanId, scanStatus, wsState }: LiveTerminalProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isOpen, setIsOpen] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const lastProgressRef = useRef<number>(0);
 
@@ -658,25 +661,189 @@ export default function LiveTerminal({ scanId, scanStatus, wsState }: LiveTermin
     return () => unsubs.forEach(fn => fn());
   }, [addLog]);
 
-  // --- initial log ---
+  // --- initial log / load historical events for completed scans ---
+  const historyLoadedRef = useRef(false);
   useEffect(() => {
-    if (scanStatus === 'running') {
-      addLog(`◉ 扫描 #${scanId} 进行中...`, 'phase');
-    } else if (scanStatus === 'completed') {
-      addLog(`◉ 扫描 #${scanId} 已完成`, 'success');
-    } else if (scanStatus === 'failed') {
-      addLog(`◉ 扫描 #${scanId} 失败`, 'error');
-    } else if (scanStatus === 'paused') {
-      addLog(`◉ 扫描 #${scanId} 已暂停`, 'warning');
+    if (!scanStatus) return;
+
+    // Running scan: just show initial status
+    if (scanStatus === 'running' || scanStatus === 'pending') {
+      if (logs.length === 0) {
+        addLog(`◉ 扫描 #${scanId} 进行中...`, 'phase');
+      }
+      return;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    if (scanStatus === 'paused') {
+      addLog(`◉ 扫描 #${scanId} 已暂停`, 'warning');
+      return;
+    }
+
+    // Terminal states (completed/failed/cancelled): load history once
+    if (historyLoadedRef.current) return;
+    historyLoadedRef.current = true;
+
+    const loadHistory = async () => {
+      try {
+        const resp = await scansApi.getEvents(scanId, { page_size: 500 });
+        const events = resp.events || [];
+        if (events.length > 0) {
+          // Convert DB events to terminal logs
+          for (const ev of events) {
+            const ts = ev.created_at
+              ? new Date(ev.created_at).toLocaleTimeString('zh-CN', { hour12: false })
+              : timeStr();
+
+            const eventType = ev.event_type || '';
+            const msg = ev.message || '';
+            const details = ev.details || {};
+
+            if (eventType === 'phase_start') {
+              const phaseName = details?.phase || msg;
+              addLog(`▸ 阶段开始: ${phaseLabel(phaseName)}`, 'phase');
+              const desc = PHASE_DESC[phaseName];
+              if (desc) addLog(`  ${desc}`, 'phase');
+            } else if (eventType === 'phase_complete') {
+              const phaseName = details?.phase || msg;
+              const dur = details?.duration_seconds > 0 ? formatDuration(details.duration_seconds) : '0秒';
+              const findStr = details?.findings > 0 ? ` | 发现 ${details.findings} 个漏洞` : '';
+              addLog(`✓ 阶段完成: ${phaseLabel(phaseName)} (${dur}${findStr})`, 'success');
+              const resultLines = formatPhaseResult(phaseName, details);
+              for (const line of resultLines) addLog(line, 'info');
+            } else if (eventType === 'finding') {
+              const sev = (details?.severity || 'info').toLowerCase();
+              const icon = SEVERITY_ICONS[sev] || '⚪';
+              const title = details?.title || details?.vuln_type || msg || '未知漏洞';
+              const engine = details?.engine ? ` [${details.engine}]` : '';
+              const location = details?.file_path ? `${details.file_path}:${details?.line_start || '?'}` : '';
+              addLog(`${icon} [${sev.toUpperCase()}] ${title}${engine}`, 'finding');
+              if (location) addLog(`    ${location}`, 'info');
+            } else if (eventType === 'progress') {
+              if (msg) addLog(`  ${msg}`, 'info');
+            } else if (eventType === 'warning') {
+              addLog(`⚠ ${msg || '警告'}`, 'warning');
+            } else if (eventType === 'scan_complete') {
+              addLog('', 'info');
+              addLog(`══════════════════════════════════════════════`, 'success');
+              addLog(`  ✓ 扫描完成`, 'success');
+              const dur = details?.duration_seconds > 0 ? formatDuration(details.duration_seconds) : '0秒';
+              addLog(`  耗时: ${dur}`, 'success');
+              if (details?.findings_count != null) addLog(`  漏洞: ${details.findings_count} 个`, 'success');
+              if (details?.tokens_used > 0) addLog(`  Token: ${details.tokens_used.toLocaleString()}`, 'success');
+              if (details?.severity_breakdown) {
+                const sb = details.severity_breakdown;
+                addLog(`  严重性分布: 🔴${sb.critical ?? 0} 🟠${sb.high ?? 0} 🟡${sb.medium ?? 0} 🟢${sb.low ?? 0} 🔵${sb.info ?? 0}`, 'info');
+              }
+              addLog(`══════════════════════════════════════════════`, 'success');
+            } else if (eventType === 'engine_start') {
+              const engineName = details?.engine || ev.engine_name || '';
+              if (engineName) {
+                addLog(`⚙ 启动引擎: ${engineName.toUpperCase()}`, 'info');
+              }
+            } else if (eventType === 'engine_complete') {
+              const engineName = details?.engine || ev.engine_name || '';
+              const findingsCount = details?.findings_count ?? 0;
+              const dur = details?.duration_seconds > 0 ? formatDuration(details.duration_seconds) : '';
+              const durStr = dur ? `, ${dur}` : '';
+              if (engineName) {
+                addLog(`✦ ${engineName.toUpperCase()} 完成: ${findingsCount} 个漏洞${durStr}`, 'success');
+              }
+            } else if (eventType === 'engine_failed') {
+              const engineName = details?.engine || ev.engine_name || '';
+              addLog(`✗ 引擎 ${engineName.toUpperCase()} 失败: ${msg}`, 'error');
+            } else if (eventType === 'adversarial_round') {
+              // Reuse the same debate formatting as real-time events
+              if (details) {
+                const findingTitle = details.finding_title || details.vuln_type || `Finding #${details.finding_id}`;
+                const role = details.role || 'unknown';
+                const roundNum = details.round || '?';
+
+                if (role === 'attacker') {
+                  addLog(`\n🗣 辩论漏洞: ${findingTitle} (${details.severity || ''})`, 'debate');
+                }
+
+                const lines = formatDebateRound(details);
+                for (let i = 0; i < lines.length; i++) {
+                  const detail = (i === 0 && details.detail) ? details.detail : undefined;
+                  addLog(lines[i], 'debate', detail);
+                }
+              }
+            } else if (eventType === 'adjudication_result') {
+              if (details) {
+                const icon = details.final_status === 'confirmed' ? '✓' : details.final_status === 'false_positive' ? '✗' : '?';
+                const statusMap: Record<string, string> = {
+                  confirmed: '已确认', false_positive: '误报', conditional: '有条件',
+                  not_exploitable: '不可利用', informational: '信息级',
+                };
+                const statusLabel = statusMap[details.final_status] || details.final_status;
+                addLog(`  ${icon} 裁决: ${details.finding_title || '未知'} → ${statusLabel}`, 'adjudication', details);
+              }
+            } else if (eventType === 'verification_result') {
+              if (details) {
+                const statusMap: Record<string, string> = {
+                  confirmed: '已确认', false_positive: '误报', needs_review: '待审查',
+                  conditional: '有条件', not_exploitable: '不可利用',
+                };
+                const statusLabel = statusMap[details.status] || details.status;
+                const confidence = details.confidence !== undefined ? ` (${(details.confidence * 100).toFixed(0)}%)` : '';
+                addLog(`  🔍 验证: ${details.finding_title || '未知'} → ${statusLabel}${confidence}`, 'verification', details);
+              }
+            } else if (eventType === 'finding_skipped') {
+              if (details) {
+                addLog(`  ⏭ 跳过: ${details.finding_title || '未知'} (${details.reason || '未满足验证条件'})`, 'skip');
+              }
+            } else if (eventType === 'scan_failed') {
+              addLog(`\n✗ 扫描失败: ${details?.error || msg || '未知错误'}`, 'error');
+            } else if (msg) {
+              addLog(`  ${msg}`, 'info');
+            }
+          }
+        } else {
+          // No events in DB, show status-only log
+          if (scanStatus === 'completed') {
+            addLog(`◉ 扫描 #${scanId} 已完成`, 'success');
+          } else if (scanStatus === 'failed') {
+            addLog(`◉ 扫描 #${scanId} 失败`, 'error');
+          } else {
+            addLog(`◉ 扫描 #${scanId} ${scanStatus}`, 'info');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load scan events:', err);
+        // Fallback to status-only log
+        if (scanStatus === 'completed') {
+          addLog(`◉ 扫描 #${scanId} 已完成`, 'success');
+        } else if (scanStatus === 'failed') {
+          addLog(`◉ 扫描 #${scanId} 失败`, 'error');
+        }
+      }
+    };
+    loadHistory();
+  }, [scanStatus]); // re-fire when scanStatus changes
 
   const isActive = scanStatus === 'running' || scanStatus === 'pending' || scanStatus === 'paused';
   const showCursor = scanStatus === 'running' || scanStatus === 'pending';
 
+  // --- fullscreen ---
+  const toggleFullscreen = useCallback(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <Card className="glass-panel overflow-hidden">
+      <Card ref={cardRef} className={`glass-panel overflow-hidden ${isFullscreen ? 'bg-[#080a10]' : ''}`}>
         {/* Header */}
         <CollapsibleTrigger className="w-full">
           <div className="flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors">
@@ -689,6 +856,13 @@ export default function LiveTerminal({ scanId, scanStatus, wsState }: LiveTermin
             </div>
             <div className="flex items-center gap-3">
               <ConnectionDot state={wsState} />
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
+                className="p-1 rounded hover:bg-white/10 transition-colors text-text-secondary hover:text-cyan"
+                title={isFullscreen ? '退出全屏' : '全屏'}
+              >
+                {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </button>
               <ChevronDown className={`h-4 w-4 text-text-secondary transition-transform ${isOpen ? '' : '-rotate-90'}`} />
             </div>
           </div>
@@ -699,7 +873,7 @@ export default function LiveTerminal({ scanId, scanStatus, wsState }: LiveTermin
           <div
             ref={containerRef}
             onScroll={handleScroll}
-            className="bg-[#080a10] border-t border-border font-mono text-sm max-h-96 overflow-y-auto custom-scrollbar relative"
+            className={`bg-[#080a10] border-t border-border font-mono text-sm overflow-y-auto custom-scrollbar relative ${isFullscreen ? 'h-[calc(100vh-52px)]' : 'max-h-96'}`}
           >
             {/* Scanline overlay */}
             <div
@@ -736,4 +910,6 @@ export default function LiveTerminal({ scanId, scanStatus, wsState }: LiveTermin
       </Card>
     </Collapsible>
   );
-}
+});
+
+export default LiveTerminalInner;

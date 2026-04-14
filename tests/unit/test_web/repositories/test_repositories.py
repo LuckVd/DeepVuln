@@ -2,21 +2,9 @@
 
 import pytest
 
-from src.web.repositories.project import ProjectRepository
 from src.web.repositories.scan import ScanRepository
 from src.web.repositories.finding import FindingRepository
 from src.web.repositories.event import ScanPhaseRepository, ScanEventRepository
-
-
-class TestProjectRepository:
-    """Test ProjectRepository."""
-
-    def test_project_repository_initialization(self):
-        """Test that ProjectRepository can be initialized."""
-        repo = ProjectRepository()
-        assert hasattr(repo, "get_by_name")
-        assert hasattr(repo, "get_with_scans")
-        assert hasattr(repo, "list_by_source_type")
 
 
 class TestScanRepository:

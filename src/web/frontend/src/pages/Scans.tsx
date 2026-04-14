@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Plus, Upload, Eye, Folder, GitBranch, Archive, Play, X } from 'lucide-react';
+import { RefreshCw, Plus, Upload, Eye, Folder, GitBranch, Archive, Play, X, Trash2 } from 'lucide-react';
 import { formatDateTime, formatDuration, setTimezone } from '@/utils/format';
 import { systemSettingsApi } from '@/api/system';
 import {
@@ -65,6 +65,7 @@ export default function ScansPage() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isCreating, setIsCreating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
 
   // 上传进度状态
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -233,6 +234,20 @@ export default function ScansPage() {
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0;
   const STATUS_MAP = getStatusMap(t);
 
+  // Handle deleting a scan
+  const handleDeleteScan = async () => {
+    if (!deleteTarget) return;
+    try {
+      await scansApi.delete(deleteTarget.id);
+      setDeleteTarget(null);
+      refetch();
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || '删除失败';
+      alert(msg);
+      setDeleteTarget(null);
+    }
+  };
+
   // Handle starting a scan from the list
   const handleStartScan = async (scanId: number) => {
     try {
@@ -333,7 +348,7 @@ export default function ScansPage() {
               <TableHead className="w-20">{t('scans.table.source')}</TableHead>
               <TableHead className="w-32">{t('scans.table.progress')}</TableHead>
               <TableHead className="w-20">{t('scans.table.vulns')}</TableHead>
-              <TableHead className="w-24">{t('scans.table.analyzed')}</TableHead>
+              <TableHead className="w-24">{t('scans.table.duration')}</TableHead>
               <TableHead className="w-40">{t('scans.table.created')}</TableHead>
               <TableHead className="w-40 text-right">{t('common.actions')}</TableHead>
             </TableRow>
@@ -410,18 +425,34 @@ export default function ScansPage() {
                       <Progress value={scan.progress_percent || 0} variant="cyan" className="h-2 w-full max-w-[120px]" />
                     )}
                   </TableCell>
-                  <TableCell className="text-center">
-                    <Badge
-                      variant={scan.findings_count && scan.findings_count > 0 ? 'critical' : 'info'}
-                      className="min-w-[40px] justify-center"
-                    >
-                      {scan.findings_count || 0}
-                    </Badge>
+                  <TableCell>
+                    <div className="flex items-center gap-1 font-mono text-xs">
+                      {(scan.critical_count || 0) > 0 && (
+                        <span className="text-red-400">{scan.critical_count}C</span>
+                      )}
+                      {(scan.high_count || 0) > 0 && (
+                        <span className="text-orange-400">{scan.high_count}H</span>
+                      )}
+                      {(scan.medium_count || 0) > 0 && (
+                        <span className="text-amber-400">{scan.medium_count}M</span>
+                      )}
+                      {(scan.low_count || 0) > 0 && (
+                        <span className="text-emerald-400">{scan.low_count}L</span>
+                      )}
+                      {(scan.info_count || 0) > 0 && (
+                        <span className="text-slate-400">{scan.info_count}I</span>
+                      )}
+                      {(!scan.findings_count || scan.findings_count === 0) && (
+                        <span className="text-text-tertiary">0</span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="text-text-secondary font-mono text-xs">
-                    {scan.total_files
-                      ? `${scan.analyzed_files || 0} / ${scan.total_files}`
-                      : String(scan.analyzed_files || 0)}
+                    {scan.started_at && scan.completed_at
+                      ? formatDuration((new Date(scan.completed_at).getTime() - new Date(scan.started_at).getTime()) / 1000)
+                      : scan.started_at && scan.status === 'running'
+                        ? formatDuration((Date.now() - new Date(scan.started_at).getTime()) / 1000)
+                        : '--'}
                   </TableCell>
                   <TableCell className="text-text-dim font-mono text-xs">
                     {formatDateTime(scan.created_at)}
@@ -461,6 +492,18 @@ export default function ScansPage() {
                       >
                         查看
                       </Button>
+                      {/* Delete button (only for non-running scans) */}
+                      {!['running', 'pending', 'paused'].includes(scan.status) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setDeleteTarget({ id: scan.id, name: scan.name })}
+                          className="h-5 px-2 text-xs whitespace-nowrap border-critical/50 text-critical hover:bg-critical/10"
+                        >
+                          <Trash2 className="mr-0.5 h-2 w-2" />
+                          删除
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -746,6 +789,32 @@ export default function ScansPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      {deleteTarget && (
+        <Dialog open={true} onOpenChange={() => setDeleteTarget(null)}>
+          <DialogContent className="glass-panel border-critical/30">
+            <DialogHeader>
+              <DialogTitle className="text-critical">确认删除</DialogTitle>
+              <DialogDescription>
+                确定要删除扫描「{deleteTarget.name}」吗？此操作不可撤销，所有相关数据将被永久删除。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+                取消
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleDeleteScan}
+                className="border-critical text-critical hover:bg-critical/10"
+              >
+                确认删除
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -1,5 +1,42 @@
 # Change Log
 
+## 2026-04-14
+
+### Web UI 打磨与功能增强批次 ✅
+
+- **Goal ID**: web-ui-polish-batch
+- **Summary**: Web 前端 UI 打磨与功能增强，涵盖漏洞详情增强、导航修复、全屏终端、扫描队列增强等 10 项改进
+- **影响范围**: 前端 UI、后端 API、扫描列表、扫描详情、漏洞页面
+- **核心变更**:
+  1. **FindingDrawer 漏洞详情增强**: 从 3 Tab 扩展为 5 Tab（概览/代码证据/利用链/LLM 辩论/元数据）
+  2. **Findings 返回按钮修复**: 返回到扫描详情页而非扫描列表
+  3. **LiveTerminal 全屏按钮**: 使用浏览器 Fullscreen API，全屏时自动扩展高度
+  4. **Findings 工具栏修复**: 下拉框溢出裁剪修复 + 控件底部对齐
+  5. **扫描队列移除已分析列**: 移除容易混淆的 analyzed_files 统计
+  6. **扫描详情信息优化**: 扫描对象（原始文件名）与任务名分离显示
+  7. **扫描详情布局调整**: Agent 模型和辩论模型各占一行，"验证模型"改名为"辩论模型"
+  8. **扫描队列删除功能**: 新增后端 DELETE API + 前端删除按钮 + 确认对话框
+  9. **扫描队列耗时列**: 基于 started_at/completed_at 计算并格式化显示
+  10. **扫描队列漏洞分等级显示**: 替换单数字为 Critical/High/Medium/Low/Info 彩色标签
+- **新增 API**:
+  - `DELETE /api/v1/scans/{scan_id}` — 删除已完成/失败/取消的扫描
+- **测试结果**: TypeScript 编译通过，浏览器交互验证
+- **安全扫描**: 无新增安全问题（预存问题不变）
+  - BLOCKER: config.py 硬编码 DB 凭据（预存）
+  - HIGH: WebSocket 无认证（预存）
+  - HIGH: API Key 认证默认禁用（预存）
+- **死代码检测**: 7 项高置信度发现（unused imports/variables/methods）
+  - `event.py`: unused FindingStatus import
+  - `incremental_scan.py`: unused datetime/timezone import
+  - `adversarial_service.py`: unused TriggerConditions/VerificationSession import
+  - `scan_orchestrator.py`: unused VerificationService/AdjudicationService/create_adversarial_service import
+  - `scans.py`: unused completed_engines/running_engines/pending_engines variables
+  - `scan_orchestrator.py`: unused _deduplicate_findings method
+  - `scan_orchestrator.py`: unused _detect_tech_stack method
+- **变更统计**: 29 文件修改, +1868/-306 行
+
+---
+
 ## 2026-04-13 (续)
 
 ### 项目审视问题修复 - 25 个修复点全部完成 ✅

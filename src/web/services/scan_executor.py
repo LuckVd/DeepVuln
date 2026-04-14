@@ -27,7 +27,6 @@ from src.web.models.schemas import (
     CurrentFileResponse,
 )
 from src.web.repositories.scan import ScanRepository
-from src.web.repositories.project import ProjectRepository
 from src.web.repositories.event import ScanEventRepository, ScanPhaseRepository
 from src.web.repositories.finding import FindingRepository
 
@@ -56,7 +55,6 @@ class ScanExecutor:
     def __init__(self):
         """Initialize scan executor."""
         self.scan_repo = ScanRepository()
-        self.project_repo = ProjectRepository()
         self.phase_repo = ScanPhaseRepository()
         self.event_repo = ScanEventRepository()
         self.finding_repo = FindingRepository()
@@ -65,31 +63,24 @@ class ScanExecutor:
 
     async def create_scan(
         self,
-        project_id: int,
         scan_create: ScanCreate,
     ) -> Scan:
         """Create a new scan.
 
         Args:
-            project_id: ID of the project to scan
             scan_create: Scan creation request
 
         Returns:
             Created scan instance
-
-        Raises:
-            ValueError: If project not found or invalid configuration
         """
         session_maker = get_session_local()
         async with session_maker() as db:
-            # Verify project exists
-            project = await self.project_repo.get(db, id=project_id)
-            if project is None:
-                raise ValueError(f"Project {project_id} not found")
-
             # Create scan record
             scan = Scan(
-                project_id=project_id,
+                name=scan_create.name,
+                source_type=scan_create.source_type,
+                source_path=scan_create.source_path,
+                branch=scan_create.branch,
                 scan_type=scan_create.scan_type,
                 config=scan_create.config,
                 status=ScanStatus.PENDING,
@@ -649,12 +640,15 @@ class ScanExecutor:
             from src.web.models.schemas import ScanCreate
 
             scan_create = ScanCreate(
-                project_id=scan.project_id,
+                name=scan.name,
+                source_type=scan.source_type,
+                source_path=scan.source_path,
+                branch=scan.branch,
                 scan_type=scan.scan_type,
                 config=scan.config,
             )
 
-            new_scan = await self.create_scan(scan.project_id, scan_create)
+            new_scan = await self.create_scan(scan_create)
 
             # Start the new scan
             result = await self.start_scan(new_scan.id)
