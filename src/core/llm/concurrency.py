@@ -13,9 +13,11 @@ Key Features:
 """
 
 import asyncio
+import logging
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, TypeVar
@@ -66,6 +68,23 @@ class ConcurrencyStats:
             "rate_limit_hits": self.rate_limit_hits,
             "last_request_time": self.last_request_time.isoformat() if self.last_request_time else None,
         }
+
+
+@dataclass
+class AdaptiveConfig:
+    """Configuration for adaptive concurrency adjustment."""
+
+    min_concurrent: int = 1             # Safety floor
+    max_concurrent: int = 10            # User-configured ceiling
+    decrease_step: int = 1              # How much to decrease per trigger
+    increase_step: int = 1              # How much to increase per recovery
+    recovery_interval: float = 15.0     # Seconds between recovery checks
+    stable_seconds: float = 30.0        # Seconds without 429 before recovery
+    rate_limit_window: float = 60.0     # Sliding window for rate limit counting
+    rate_limit_threshold: int = 2       # 429 count in window to trigger decrease
+
+
+logger = logging.getLogger(__name__)
 
 
 class LLMConcurrencyManager:
@@ -119,6 +138,18 @@ class LLMConcurrencyManager:
         self._stats = ConcurrencyStats()
         self._lock = asyncio.Lock()
 
+        # Adaptive concurrency control
+        self._adaptive_config = AdaptiveConfig(max_concurrent=max_concurrent)
+        self._current_concurrent = max_concurrent
+        self._is_throttled = False
+        self._rate_limit_timestamps: list[float] = []
+        self._last_rate_limit_at: float | None = None
+        self._last_success_at: float | None = None
+        self._recovery_task: asyncio.Task | None = None
+        self._change_callbacks: list[Callable] = []
+        # Track which semaphore each task acquired for safe release
+        self._acquired_semaphores: dict[asyncio.Task, asyncio.Semaphore] = {}
+
     @property
     def max_concurrent(self) -> int:
         """Get the maximum concurrent requests."""
@@ -154,6 +185,11 @@ class LLMConcurrencyManager:
         semaphore = self._ensure_semaphore()
         await semaphore.acquire()
 
+        # Track which semaphore this task acquired (for safe release during adaptive changes)
+        task = asyncio.current_task()
+        if task is not None:
+            self._acquired_semaphores[task] = semaphore
+
         # Update stats
         async with self._lock:
             self._stats.total_requests += 1
@@ -168,12 +204,22 @@ class LLMConcurrencyManager:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit the concurrency context (release semaphore)."""
-        semaphore = self._ensure_semaphore()
+        # Release the SAME semaphore we acquired (handles adaptive changes safely)
+        task = asyncio.current_task()
+        semaphore = self._acquired_semaphores.pop(task, None) or self._ensure_semaphore()
         semaphore.release()
 
         # Update stats
         async with self._lock:
             self._stats.concurrent_requests -= 1
+
+        # Adaptive: detect rate limit errors automatically
+        if exc_type is not None:
+            from src.core.exceptions.llm import LLMRateLimitError
+            if issubclass(exc_type, LLMRateLimitError):
+                self.report_rate_limit()
+        else:
+            self._last_success_at = time.monotonic()
 
     async def execute(self, coro: Callable[[], T]) -> T:
         """
@@ -229,6 +275,142 @@ class LLMConcurrencyManager:
     def reset_stats(self) -> None:
         """Reset concurrency statistics."""
         self._stats = ConcurrencyStats()
+
+    # --- Adaptive concurrency control ---
+
+    @property
+    def current_concurrent(self) -> int:
+        """Get the current effective concurrency (may be lower than max during throttling)."""
+        return self._current_concurrent
+
+    @property
+    def is_throttled(self) -> bool:
+        """Whether the manager is currently in throttled state."""
+        return self._is_throttled
+
+    def report_rate_limit(self) -> None:
+        """Called when a 429 rate limit error is detected.
+
+        Records the timestamp and decreases concurrency if threshold is met.
+        """
+        now = time.monotonic()
+        self._stats.rate_limit_hits += 1
+        self._last_rate_limit_at = now
+
+        # Prune timestamps outside the sliding window
+        window = self._adaptive_config.rate_limit_window
+        self._rate_limit_timestamps = [
+            t for t in self._rate_limit_timestamps if now - t < window
+        ]
+        self._rate_limit_timestamps.append(now)
+
+        # Check threshold
+        if len(self._rate_limit_timestamps) >= self._adaptive_config.rate_limit_threshold:
+            self._decrease_concurrency()
+
+    def _decrease_concurrency(self) -> None:
+        """Decrease current concurrency by one step."""
+        config = self._adaptive_config
+        if self._current_concurrent <= config.min_concurrent:
+            return
+
+        old = self._current_concurrent
+        self._current_concurrent = max(
+            config.min_concurrent,
+            self._current_concurrent - config.decrease_step,
+        )
+        self._is_throttled = True
+
+        # Replace the semaphore (in-flight requests complete on the old one)
+        self._semaphore = asyncio.Semaphore(self._current_concurrent)
+
+        logger.warning(
+            f"Adaptive concurrency decreased: {old} -> {self._current_concurrent} "
+            f"(rate_limit_hits={self._stats.rate_limit_hits})"
+        )
+        self._notify_change(old, self._current_concurrent)
+
+    def _increase_concurrency(self) -> None:
+        """Increase current concurrency by one step (recovery)."""
+        config = self._adaptive_config
+        if self._current_concurrent >= config.max_concurrent:
+            self._is_throttled = False
+            return
+
+        old = self._current_concurrent
+        self._current_concurrent = min(
+            config.max_concurrent,
+            self._current_concurrent + config.increase_step,
+        )
+
+        self._semaphore = asyncio.Semaphore(self._current_concurrent)
+
+        logger.info(
+            f"Adaptive concurrency recovered: {old} -> {self._current_concurrent}"
+        )
+        self._notify_change(old, self._current_concurrent)
+
+        if self._current_concurrent >= config.max_concurrent:
+            self._is_throttled = False
+
+    async def start_recovery_loop(self) -> None:
+        """Start the background recovery check task."""
+        if self._recovery_task is not None:
+            return
+        self._recovery_task = asyncio.create_task(self._recovery_loop())
+
+    async def stop_recovery_loop(self) -> None:
+        """Stop the background recovery task."""
+        if self._recovery_task is not None:
+            self._recovery_task.cancel()
+            try:
+                await self._recovery_task
+            except asyncio.CancelledError:
+                pass
+            self._recovery_task = None
+
+    async def _recovery_loop(self) -> None:
+        """Background task: check if concurrency can be recovered after stable period."""
+        while True:
+            await asyncio.sleep(self._adaptive_config.recovery_interval)
+
+            if not self._is_throttled:
+                continue
+
+            if self._current_concurrent >= self._adaptive_config.max_concurrent:
+                self._is_throttled = False
+                continue
+
+            # Check if stable (no rate limits for stable_seconds)
+            now = time.monotonic()
+            last_limit = self._last_rate_limit_at or 0
+            if (now - last_limit) >= self._adaptive_config.stable_seconds:
+                self._increase_concurrency()
+
+    def on_concurrency_change(self, callback: Callable) -> None:
+        """Register a callback for concurrency changes.
+
+        callback signature: (old_value: int, new_value: int, manager: LLMConcurrencyManager)
+        """
+        self._change_callbacks.append(callback)
+
+    def _notify_change(self, old: int, new: int) -> None:
+        """Notify all registered callbacks."""
+        for cb in self._change_callbacks:
+            try:
+                cb(old, new, self)
+            except Exception as e:
+                logger.warning(f"Concurrency change callback error: {e}")
+
+    def get_adaptive_status(self) -> dict[str, Any]:
+        """Get adaptive status dict suitable for WebSocket transmission."""
+        return {
+            "max_concurrent": self._adaptive_config.max_concurrent,
+            "current_concurrent": self._current_concurrent,
+            "is_throttled": self._is_throttled,
+            "rate_limit_hits": self._stats.rate_limit_hits,
+            "concurrent_requests": self._stats.concurrent_requests,
+        }
 
     @classmethod
     def from_provider(cls, provider: LLMProvider, custom_limit: int | None = None) -> "LLMConcurrencyManager":

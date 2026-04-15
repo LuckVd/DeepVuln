@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useWebSocket } from './useWebSocket'
 import { scansApi } from '@/api/scans'
 import type { ScanProgressResponse, ScanStatus } from '@/types/models'
+import type { ConcurrencyUpdateData } from '@/types/websocket'
 
 interface UseScanProgressOptions {
   enabled?: boolean
@@ -33,6 +34,7 @@ export function useScanProgress(
   const [progress, setProgress] = useState<ScanProgressResponse | null>(null)
   const [status, setStatus] = useState<ScanStatus | null>(null)
   const [usingPolling, setUsingPolling] = useState(false)
+  const [concurrency, setConcurrency] = useState<Record<string, ConcurrencyUpdateData>>({})
 
   // 使用 ref 存储可变状态，避免闭包问题
   const stateRef = useRef({
@@ -191,6 +193,10 @@ export function useScanProgress(
       markWsEvent()
       clearWsFallbackCheck()
     },
+    onConcurrencyUpdate: (data) => {
+      markWsEvent()
+      setConcurrency((prev) => ({ ...prev, [data.manager]: data }))
+    },
   })
 
   // 保存 WebSocket 状态到 ref
@@ -275,6 +281,7 @@ export function useScanProgress(
     status,
     usingPolling,
     wsState,
+    concurrency,
     pause,
     resume,
     cancel,

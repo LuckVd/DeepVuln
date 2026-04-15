@@ -9,6 +9,7 @@ Supports:
 
 import asyncio
 import os
+import random
 import time
 from typing import Any
 
@@ -48,7 +49,7 @@ class OpenAIClient(LLMClient):
         max_tokens: int = 4096,
         temperature: float = 0.1,
         timeout: int = 120,
-        max_retries: int = 3,
+        max_retries: int = 5,
         is_azure: bool = False,
         azure_deployment: str | None = None,
         azure_api_version: str = "2024-02-15-preview",
@@ -258,9 +259,12 @@ class OpenAIClient(LLMClient):
                 if response.status_code == 429:
                     retry_after = response.headers.get("retry-after")
                     retry_seconds = int(retry_after) if retry_after else 60
+                    # Exponential backoff with jitter to avoid thundering herd
+                    backoff = min(retry_seconds * (2 ** attempt), 120)
+                    jitter = random.uniform(0.5, 1.5)
 
                     if attempt < self.max_retries - 1:
-                        await asyncio.sleep(min(retry_seconds, 30))
+                        await asyncio.sleep(backoff * jitter)
                         continue
 
                     raise LLMRateLimitError(

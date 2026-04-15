@@ -160,6 +160,43 @@ class ScanOrchestrator:
         # This enables dynamic weight calculation for optional phases
         self.progress_callback.set_scan_config(self.config)
 
+        # Start adaptive concurrency recovery loops
+        agent_manager = None
+        verify_manager = None
+        try:
+            from src.core.llm import (
+                get_agent_scan_concurrency_manager_from_db,
+                get_verification_concurrency_manager_from_db,
+            )
+            agent_manager = await get_agent_scan_concurrency_manager_from_db(self.db_session_factory)
+            verify_manager = await get_verification_concurrency_manager_from_db(self.db_session_factory)
+            await agent_manager.start_recovery_loop()
+            await verify_manager.start_recovery_loop()
+
+            # Register callbacks for real-time concurrency updates
+            if self.progress_callback:
+                def _make_callback(label: str):
+                    def _on_change(old: int, new: int, mgr):
+                        try:
+                            asyncio.get_running_loop().create_task(
+                                self.progress_callback.broadcast_event(
+                                    event_type="concurrency_update",
+                                    data={
+                                        "manager": label,
+                                        **mgr.get_adaptive_status(),
+                                        "previous_concurrent": old,
+                                    },
+                                )
+                            )
+                        except RuntimeError:
+                            pass
+                    return _on_change
+
+                agent_manager.on_concurrency_change(_make_callback("agent_scan"))
+                verify_manager.on_concurrency_change(_make_callback("verification"))
+        except Exception as e:
+            logger.warning(f"Failed to initialize adaptive concurrency: {e}")
+
         try:
             # Phase 0: L1_Preparation (P14-01 新增)
             # 包含 TechStackDetection + AttackSurfaceDetection
@@ -325,6 +362,14 @@ class ScanOrchestrator:
             }
         finally:
             await self._cleanup()
+            # Stop adaptive concurrency recovery loops
+            try:
+                if agent_manager:
+                    await agent_manager.stop_recovery_loop()
+                if verify_manager:
+                    await verify_manager.stop_recovery_loop()
+            except Exception:
+                pass
 
     # ========================================================================
     # Source Preparation
@@ -1119,10 +1164,12 @@ class ScanOrchestrator:
         # P18: Use concurrency manager with config from database
         from src.core.llm import get_verification_concurrency_manager_from_db
         verification_manager = await get_verification_concurrency_manager_from_db(self.db_session_factory)
+        # Pass concurrency_manager so adversarial service uses adaptive semaphore
+        adversarial_service._concurrency_manager = verification_manager
         verification_results = await adversarial_service.verify_findings_batch(
             findings=findings_to_verify,
             source_path=self.source_path,
-            max_concurrent=verification_manager.max_concurrent,
+            max_concurrent=verification_manager.current_concurrent,
         )
 
         # Track token usage after adversarial verification

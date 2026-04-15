@@ -7,11 +7,11 @@ identifying security controls that may prevent exploitation.
 Enhanced with multi-round debate support (rebuttal capability).
 """
 
-import json
 import logging
 import re
 from typing import Any
 
+from src.core.exceptions.llm import LLMJSONParseError
 from ..llm.client import LLMClient, LLMError
 from ..prompts.adversarial import (
     DEFENDER_SYSTEM_PROMPT,
@@ -236,16 +236,14 @@ class DefenderVerifier:
                 is_rebuttal=False,
             )
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse defender response as JSON: {e}")
-            # Fall back to static analysis results
-            return self._create_fallback_argument(
-                static_defenses=static_defenses,
-                round_number=round_number,
-            )
-
         except LLMError as e:
             logger.error(f"LLM error in defender analysis: {e}")
+            if isinstance(e, LLMJSONParseError):
+                # Fall back to static analysis results
+                return self._create_fallback_argument(
+                    static_defenses=static_defenses,
+                    round_number=round_number,
+                )
             return self._create_error_argument(
                 error_message=str(e),
                 round_number=round_number,
@@ -330,16 +328,14 @@ class DefenderVerifier:
                 is_rebuttal=True,
             )
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse defender rebuttal as JSON: {e}")
-            return self._create_fallback_argument(
-                static_defenses=static_defenses,
-                round_number=round_number,
-                is_rebuttal=True,
-            )
-
         except LLMError as e:
             logger.error(f"LLM error in defender rebuttal: {e}")
+            if isinstance(e, LLMJSONParseError):
+                return self._create_fallback_argument(
+                    static_defenses=static_defenses,
+                    round_number=round_number,
+                    is_rebuttal=True,
+                )
             return self._create_error_argument(
                 error_message=str(e),
                 round_number=round_number,
@@ -363,7 +359,11 @@ class DefenderVerifier:
         except JSONParseError as e:
             logger.warning(f"Failed to parse LLM response: {e}")
             logger.debug(f"Response content: {content[:200]}...")
-            raise
+            raise LLMJSONParseError(
+                message=str(e),
+                parse_error=str(e),
+                response_preview=content[:500],
+            ) from e
 
     def _build_argument(
         self,

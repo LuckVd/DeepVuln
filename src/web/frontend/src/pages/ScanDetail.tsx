@@ -38,6 +38,7 @@ import { scansApi } from '@/api/scans';
 import { systemSettingsApi } from '@/api/system';
 import { formatDateTime, formatDuration, setTimezone } from '@/utils/format';
 import type { ScanStatus } from '@/types/models';
+import type { ConcurrencyUpdateData } from '@/types/websocket';
 
 // Agent analyzed files statistic with expandable file list
 function AgentFilesStatistic({ analyzedFiles, filePaths }: { analyzedFiles: number; filePaths: string[] | null }) {
@@ -161,6 +162,7 @@ export default function ScanDetailPage() {
     status: progressStatus,
     usingPolling,
     wsState,
+    concurrency,
     pause,
     resume,
     cancel,
@@ -514,6 +516,33 @@ export default function ScanDetailPage() {
               value={scan.tokens_used || 0}
               valueClassName="text-success"
             />
+          </div>
+        </Card>
+      )}
+
+      {/* Adaptive Concurrency Indicator */}
+      {Object.keys(concurrency).length > 0 && (
+        <Card className="glass-panel mb-6">
+          <h3 className="text-cyan font-mono font-bold mb-3">{t('scanDetail.concurrency')}</h3>
+          <div className="flex flex-wrap gap-4">
+            {Object.entries(concurrency).map(([key, data]) => (
+              <div key={key} className="flex items-center gap-2 text-sm">
+                <span className="text-text-secondary font-mono">
+                  {data.manager === 'agent_scan' ? 'Agent' : t('scanDetail.verification')}:
+                </span>
+                <span className={`font-mono font-bold ${data.is_throttled ? 'text-warning' : 'text-success'}`}>
+                  {data.current_concurrent}/{data.max_concurrent}
+                </span>
+                {data.is_throttled && (
+                  <Badge variant="high" className="text-xs">{t('scanDetail.throttled')}</Badge>
+                )}
+                {data.rate_limit_hits > 0 && (
+                  <span className="text-text-tertiary text-xs font-mono">
+                    (429: {data.rate_limit_hits})
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
         </Card>
       )}

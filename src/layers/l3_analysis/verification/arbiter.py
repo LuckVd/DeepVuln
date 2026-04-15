@@ -7,10 +7,10 @@ attacker and defender to make a final determination about exploitability.
 Enhanced with multi-round debate support (debate history evaluation).
 """
 
-import json
 import logging
 from typing import Any
 
+from src.core.exceptions.llm import LLMJSONParseError
 from ..llm.client import LLMClient, LLMError
 from ..prompts.adversarial import ARBITER_SYSTEM_PROMPT, get_arbiter_user_prompt, get_system_prompt
 from .models import (
@@ -107,20 +107,6 @@ class ArbiterVerifier:
 
             # Build verdict
             return self._build_verdict(result, round_number=round_number)
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse arbiter response as JSON: {e}")
-            if self.use_heuristic_fallback:
-                return self._heuristic_verdict(
-                    finding=finding,
-                    attacker_argument=attacker_argument,
-                    defender_argument=defender_argument,
-                    round_number=round_number,
-                )
-            return self._create_error_verdict(
-                f"JSON parsing error: {e}",
-                round_number=round_number,
-            )
 
         except LLMError as e:
             logger.error(f"LLM error in arbiter evaluation: {e}")
@@ -222,7 +208,11 @@ class ArbiterVerifier:
         except JSONParseError as e:
             logger.warning(f"Failed to parse LLM response: {e}")
             logger.debug(f"Response content: {content[:200]}...")
-            raise
+            raise LLMJSONParseError(
+                message=str(e),
+                parse_error=str(e),
+                response_preview=content[:500],
+            ) from e
 
     def _build_verdict(
         self,

@@ -7,10 +7,10 @@ constructing proof-of-concept exploits and identifying attack paths.
 Enhanced with multi-round debate support (rebuttal capability).
 """
 
-import json
 import logging
 from typing import Any
 
+from src.core.exceptions.llm import LLMJSONParseError
 from ..llm.client import LLMClient, LLMError
 from ..prompts.adversarial import (
     ATTACKER_SYSTEM_PROMPT,
@@ -99,13 +99,6 @@ class AttackerVerifier:
             # Build argument
             return self._build_argument(result, round_number=round_number, is_rebuttal=False)
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse attacker response as JSON: {e}")
-            return self._create_error_argument(
-                f"LLM response parsing failed: {e}",
-                round_number=round_number,
-            )
-
         except LLMError as e:
             logger.error(f"LLM error in attacker analysis: {e}")
             return self._create_error_argument(
@@ -165,14 +158,6 @@ class AttackerVerifier:
             # Build argument with rebuttal flag
             return self._build_argument(result, round_number=round_number, is_rebuttal=True)
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse attacker rebuttal as JSON: {e}")
-            return self._create_error_argument(
-                f"LLM response parsing failed: {e}",
-                round_number=round_number,
-                is_rebuttal=True,
-            )
-
         except LLMError as e:
             logger.error(f"LLM error in attacker rebuttal: {e}")
             return self._create_error_argument(
@@ -198,7 +183,11 @@ class AttackerVerifier:
         except JSONParseError as e:
             logger.warning(f"Failed to parse LLM response: {e}")
             logger.debug(f"Response content: {content[:200]}...")
-            raise
+            raise LLMJSONParseError(
+                message=str(e),
+                parse_error=str(e),
+                response_preview=content[:500],
+            ) from e
 
     def _build_argument(
         self,

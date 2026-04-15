@@ -11,6 +11,7 @@ interface UseWebSocketOptions {
   onScanComplete?: (data: any) => void
   onScanFailed?: (error: string) => void
   onScanPaused?: (checkpoint_saved: boolean) => void
+  onConcurrencyUpdate?: (data: import('@/types/websocket').ConcurrencyUpdateData) => void
 }
 
 export function useWebSocket(scanId: number | null, options: UseWebSocketOptions = {}) {
@@ -77,6 +78,12 @@ export function useWebSocket(scanId: number | null, options: UseWebSocketOptions
     unsubscribers.push(
       client.on('scan_paused', (event) => {
         optionsRef.current.onScanPaused?.(event.data.checkpoint_saved)
+      })
+    )
+
+    unsubscribers.push(
+      client.on('concurrency_update', (event) => {
+        optionsRef.current.onConcurrencyUpdate?.(event.data)
       })
     )
 

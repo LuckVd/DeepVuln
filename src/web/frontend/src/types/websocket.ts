@@ -14,6 +14,7 @@ export type WebSocketEventType =
   | 'adjudication_result'
   | 'verification_result'
   | 'finding_skipped'
+  | 'concurrency_update'
   | 'ping'
   | 'pong'
 
@@ -102,3 +103,14 @@ export type ConnectionState =
   | 'connecting'
   | 'connected'
   | 'error'
+
+// concurrency_update 事件数据
+export interface ConcurrencyUpdateData {
+  manager: 'agent_scan' | 'verification'
+  max_concurrent: number
+  current_concurrent: number
+  previous_concurrent: number
+  is_throttled: boolean
+  rate_limit_hits: number
+  concurrent_requests: number
+}

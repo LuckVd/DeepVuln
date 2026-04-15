@@ -94,6 +94,7 @@ class AdversarialService:
         round_timeout: int = DEFAULT_ROUND_TIMEOUT,
         progress_callback: Optional[Callable[[str, dict[str, Any]], None]] = None,
         language: str = "zh",
+        concurrency_manager: Any | None = None,
     ):
         """Initialize the adversarial service.
 
@@ -103,12 +104,14 @@ class AdversarialService:
             round_timeout: Timeout per round in seconds (default 180)
             progress_callback: Optional callback for real-time updates
             language: Output language for debate content ("en" or "zh", default "zh")
+            concurrency_manager: Optional LLMConcurrencyManager for adaptive concurrency
         """
         self.llm_client = llm_client
         self.max_rounds = max_rounds
         self.round_timeout = round_timeout
         self.progress_callback = progress_callback
         self.language = language
+        self._concurrency_manager = concurrency_manager
 
         # Create verifier configuration
         self.config = AdversarialVerifierConfig(
@@ -496,27 +499,45 @@ class AdversarialService:
         """
         results = {}
 
-        # Process in batches to control concurrency
-        for i in range(0, len(findings), max_concurrent):
-            batch = findings[i:i + max_concurrent]
-            tasks = [
-                self.verify_finding(f, source_path)
-                for f in batch
-            ]
+        if self._concurrency_manager:
+            # Use adaptive concurrency manager (shared with agent scan)
+            # The manager's semaphore dynamically adjusts on 429 errors
+            manager = self._concurrency_manager
+
+            async def _verify_with_manager(finding: Finding) -> dict[str, Any]:
+                async with manager:
+                    result = await self.verify_finding(finding, source_path)
+                    await asyncio.sleep(1.5)
+                    return result
+
+            tasks = [_verify_with_manager(f) for f in findings]
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        else:
+            # Fallback: standalone semaphore (backward compatible)
+            finding_concurrency = max(1, max_concurrent // 2)
+            llm_semaphore = asyncio.Semaphore(finding_concurrency)
+
+            async def _verify_with_semaphore(finding: Finding) -> dict[str, Any]:
+                async with llm_semaphore:
+                    result = await self.verify_finding(finding, source_path)
+                    await asyncio.sleep(1.5)
+                    return result
+
+            tasks = [_verify_with_semaphore(f) for f in findings]
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for finding, result in zip(batch, batch_results):
-                if isinstance(result, Exception):
-                    logger.error(f"Error verifying finding {finding.id}: {result}")
-                    results[finding.id] = {
-                        "finding_id": finding.id,
-                        "status": AdversarialStatus.UNCERTAIN.value,
-                        "confidence": 0.1,
-                        "error": str(result),
-                        "timeout": False,
-                    }
-                else:
-                    results[finding.id] = result
+        for finding, result in zip(findings, batch_results):
+            if isinstance(result, Exception):
+                logger.error(f"Error verifying finding {finding.id}: {result}")
+                results[finding.id] = {
+                    "finding_id": finding.id,
+                    "status": AdversarialStatus.UNCERTAIN.value,
+                    "confidence": 0.1,
+                    "error": str(result),
+                    "timeout": False,
+                }
+            else:
+                results[finding.id] = result
 
         logger.info(f"Verified {len(results)} findings with adversarial debate")
         return results
@@ -594,8 +615,9 @@ async def create_adversarial_service_from_db(
     max_rounds: int = 5,
     round_timeout: int = 180,
     progress_callback: Optional[Callable[[str, dict[str, Any]], None]] = None,
-    llm_client=None,  # P18-Bugfix: 支持传入现有的 llm_client 以正确统计 token
+    llm_client=None,
     language: str = "zh",
+    concurrency_manager: Any | None = None,
 ) -> Optional[AdversarialService]:
     """Factory function to create an AdversarialService from database config.
 
@@ -630,4 +652,5 @@ async def create_adversarial_service_from_db(
             round_timeout=round_timeout,
             progress_callback=progress_callback,
             language=language,
+            concurrency_manager=concurrency_manager,
         )

@@ -29,8 +29,8 @@ class CelerySettings(BaseSettings):
     task_reject_on_worker_lost: bool = True  # Requeue if worker crashes
 
     # Task timeouts (in seconds)
-    task_soft_time_limit: int = 3600  # 1 hour soft limit
-    task_time_limit: int = 7200  # 2 hours hard limit
+    task_soft_time_limit: int = 82800  # 23 hours soft limit
+    task_time_limit: int = 86400  # 24 hours hard limit
 
     # Task result expiration
     result_expires: int = 86400  # 24 hours
