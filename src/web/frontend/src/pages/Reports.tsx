@@ -11,7 +11,7 @@ import { useScans } from '@/hooks/useApi';
 export default function ReportsPage() {
   const { t } = useLanguage();
   const [selectedScanId, setSelectedScanId] = useState<number | null>(null);
-  const [exportType, setExportType] = useState<'json' | 'csv' | 'pdf'>('json');
+  const [exportType, setExportType] = useState<'json' | 'csv' | 'html'>('json');
   const [isExporting, setIsExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
 
@@ -49,9 +49,9 @@ export default function ReportsPage() {
           reportsApi.downloadBlob(csvData, `${filename}.csv`);
           break;
 
-        case 'pdf':
-          const pdfData = await reportsApi.exportPdf(selectedScanId);
-          reportsApi.downloadBlob(pdfData, `${filename}.pdf`);
+        case 'html':
+          const htmlData = await reportsApi.exportPdf(selectedScanId);
+          reportsApi.downloadBlob(htmlData, `${filename}.html`);
           break;
       }
 
@@ -108,11 +108,11 @@ export default function ReportsPage() {
             </label>
             <CustomSelect
               value={exportType}
-              onChange={(val) => setExportType(val as 'json' | 'csv' | 'pdf')}
+              onChange={(val) => setExportType(val as 'json' | 'csv' | 'html')}
               options={[
                 { value: 'json', label: 'JSON' },
                 { value: 'csv', label: 'CSV' },
-                { value: 'pdf', label: 'PDF' },
+                { value: 'html', label: 'HTML' },
               ]}
               className="w-full"
             />
@@ -186,16 +186,16 @@ export default function ReportsPage() {
 
         <Card
           className={`glass-panel transition-all cursor-pointer ${
-            exportType === 'pdf' ? 'border-cyan shadow-glow-cyan' : 'hover:border-cyan/50'
+            exportType === 'html' ? 'border-cyan shadow-glow-cyan' : 'hover:border-cyan/50'
           }`}
-          onClick={() => setExportType('pdf')}
+          onClick={() => setExportType('html')}
         >
           <div className="text-center py-8">
             <FileText className="h-12 w-12 text-cyan mx-auto mb-4" />
-            <h3 className="text-cyan font-mono font-bold mb-2">{t('reports.pdf')}</h3>
-            <p className="text-text-secondary text-sm mb-4">{t('reports.pdfDesc')}</p>
+            <h3 className="text-cyan font-mono font-bold mb-2">{t('reports.html')}</h3>
+            <p className="text-text-secondary text-sm mb-4">{t('reports.htmlDesc')}</p>
             <div className="text-xs text-text-tertiary font-mono">
-              适合打印和分享
+              浏览器可打印为 PDF
             </div>
           </div>
         </Card>

@@ -67,3 +67,45 @@ FindingDrawer 漏洞详情内容过少，需要显示更多详细内容：发现
 - TypeScript 编译: 本次修改相关文件 0 错误（其他文件 5 个预存错误不影响）
 - Tab 空状态处理: 无数据时显示 Alert 提示
 - 辩论数据加载: 优先从 extra_metadata 读取，缺失时异步调用 API
+
+---
+
+## Feat Record: 2026-04-15 报告导出能力
+
+### 需求描述
+完成报告导出能力。原 PDF 导出是占位实现（返回纯文本），JSON 只返回摘要不含完整发现列表，CSV 缺少关键字段且有 200 字符截断限制。
+
+### 实现方案
+新建 `report_service.py` 服务层，封装三种格式的报告生成逻辑：
+- **JSON**: 补充完整 findings 列表（含 extra_metadata、evidence、remediation、cpg_path），新增 severity summary 统计
+- **CSV**: 新增 Title、Evidence、Remediation 列，移除 description 200 字符截断，正确处理 None 和特殊字符
+- **HTML**（替代 PDF 占位）: 生成带嵌入 CSS 的自包含 HTML 报告，含扫描元数据、严重性分布、完整发现列表和修复建议，支持浏览器打印为 PDF
+
+### 修改文件
+- `src/web/services/report_service.py`: 新建 — 报告生成服务（build_json_report / build_csv_report / build_html_report）
+- `src/web/api/v1/scans.py`: 重写 3 个报告端点，使用 report_service；移除旧的 csv/StringIO 导入
+- `src/web/frontend/src/pages/Reports.tsx`: PDF 改为 HTML 报告，更新类型定义和格式选项
+- `src/web/frontend/src/api/reports.ts`: 无需修改（复用 exportPdf 调用路径）
+- `src/web/frontend/src/i18n/translations.ts`: reports.pdf → reports.html，更新中英文描述
+- `tests/unit/test_web/test_report_service.py`: 新建 — 19 个单元测试覆盖三种格式
+
+### 验证结果
+- report_service 单元测试: 19/19 通过
+- scans API 测试: 9/9 通过（无回归）
+- TypeScript 编译: 本次修改文件 0 错误（5 个预存错误不影响）
+- HTML 报告 XSS 防护: 所有用户输入经 html.escape 处理
+
+---
+
+## 同步状态
+
+- **同步日期**: 2026-04-15
+- **路线图更新**: P12-07a/b/c/d 标记 done, 新增 v1.2 里程碑
+- **变更日志**: 已追加报告导出 feat 记录
+- **待提交文件**:
+  - `src/web/services/report_service.py` (新建)
+  - `src/web/api/v1/scans.py` (重构报告端点)
+  - `src/web/frontend/src/pages/Reports.tsx` (PDF→HTML)
+  - `src/web/frontend/src/i18n/translations.ts` (翻译更新)
+  - `tests/unit/test_web/test_report_service.py` (新建, 19 测试)
+  - `docs/ai/current-goal.md` (同步记录)

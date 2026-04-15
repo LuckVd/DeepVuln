@@ -932,12 +932,9 @@ tests/unit/test_l3/test_pre_filter/
 |v0.8|AST Engine|结构级代码理解 + Code Graph + AI 结构化上下文 + 前置防误报|done|2026-04|
 |v0.9|CPG 基础|完整代码图 + 攻击路径搜索 + Agent 集成|done|2026-04-07|
 |v1.0|Web 基础版|高精度、低误报 + Web UI + 暂停续扫|done|2026-04-09|
-|v1.1|Web 完整能力|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计|in_progress|2026-04-09|
-|v1.5|企业稳定版|CI/CD 集成 + 多租户 + 用户认证 + 报告导出|todo|2026-Q2|
-
----
-
-## Phase 10: Web 服务与持久化存储
+|v1.1|Web 完整能力|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计|done|2026-04-09|
+|v1.2|Web UI 打磨|漏洞详情增强 + 全屏终端 + 扫描队列增强 + 报告导出|done|2026-04-15|
+|v1.5|企业稳定版|CI/CD 集成 + 多租户 + 用户认证 + 报告历史对比/分享|todo|2026-Q2|
 
 > **目标**: 建立完整的 Web 服务，支持项目管理、扫描任务管理和结果持久化
 > **交付物**: FastAPI 后端 + PostgreSQL 数据库 + RESTful API
@@ -1460,11 +1457,11 @@ frontend/
 
 | 任务 | 描述 | 依赖 | 状态 |
 |------|------|------|------|
-| P12-07 | 报告生成功能 | - | todo |
-| P12-07a | Markdown 报告生成 | P12-06 | todo |
-| P12-07b | PDF 报告生成 | P12-07a | todo |
-| P12-07c | 报告模板设计 | P12-07b | todo |
-| P12-07d | 报告导出 API | P12-07a | todo |
+| P12-07 | 报告生成功能 | - | done |
+| P12-07a | JSON 完整报告（含 findings + severity summary） | P12-06 | done |
+| P12-07b | HTML 报告（替代 PDF 占位，支持浏览器打印为 PDF） | P12-07a | done |
+| P12-07c | CSV 增强报告（新增 Title/Evidence/Remediation 列） | P12-07a | done |
+| P12-07d | 报告导出 API 重构（report_service 服务层） | P12-07a | done |
 | P12-07e | 报告历史对比 | P12-07d | todo |
 | P12-07f | 报告分享功能 | P12-07e | todo |
 
@@ -1799,7 +1796,8 @@ incremental_stats: Optional[JSON]       # 增量扫描统计
 |v0.98|漏洞结果界面|列表/详情/代码高亮/状态管理|React + SyntaxHighlighter + 状态 API|done|2026-04-07|
 |v1.0|Web 基础版|高精度、低误报 + Web UI + 暂停续扫|done|2026-04-09|
 |v1.1|Web 完整能力|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|done|2026-04-09|
-|v1.5|企业稳定版|CI/CD 集成 + 多租户 + 用户认证 + 报告导出|todo|2026-Q2|
+|v1.2|Web UI 打磨|漏洞详情增强 + 全屏终端 + 扫描队列增强 + 报告导出|done|2026-04-15|
+|v1.5|企业稳定版|CI/CD 集成 + 多租户 + 用户认证 + 报告历史对比/分享|todo|2026-Q2|
 
 ---
 
@@ -1808,8 +1806,8 @@ incremental_stats: Optional[JSON]       # 增量扫描统计
 |字段|值|
 |---|---|
 |**阶段**|无 - 上一阶段已完成|
-|**上一阶段**|Phase 14 Web 服务完整能力迁移，P14-web-capability-migration (已完成 ✅)|
-|**里程碑**|v1.1 已完成 (Web 完整扫描能力)|
+|**上一阶段**|Web UI 打磨与报告导出，web-ui-polish-batch (已完成 ✅)|
+|**里程碑**|v1.2 已完成 (Web UI 打磨 + 报告导出)|
 
 ---
 

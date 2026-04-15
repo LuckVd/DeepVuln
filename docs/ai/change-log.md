@@ -1,5 +1,30 @@
 # Change Log
 
+## 2026-04-15
+
+### 报告导出能力完成 ✅
+
+- **Goal ID**: web-ui-polish-batch (feat: 报告导出)
+- **Summary**: 完成报告导出能力。原 PDF 导出是占位实现，JSON 只返回摘要，CSV 缺少关键字段。新建 report_service 服务层，重构三种格式的报告生成
+- **影响范围**: 后端报告 API、前端报告页面
+- **核心变更**:
+  1. **report_service.py**: 新建服务层，封装 JSON/CSV/HTML 三种报告生成逻辑
+  2. **JSON 报告增强**: 补充完整 findings 列表（含 extra_metadata、evidence、remediation、cpg_path），新增 severity summary 统计
+  3. **CSV 报告增强**: 新增 Title、Evidence、Remediation 列，移除 description 200 字符截断，正确处理 None 和特殊字符
+  4. **HTML 报告（替代 PDF 占位）**: 生成自包含 HTML 报告，含扫描元数据、严重性分布、完整发现列表和修复建议，支持浏览器打印为 PDF
+  5. **前端 Reports.tsx**: PDF 格式选项改为 HTML，更新翻译
+- **新增文件**:
+  - `src/web/services/report_service.py` — 报告生成服务（build_json_report / build_csv_report / build_html_report）
+  - `tests/unit/test_web/test_report_service.py` — 19 个单元测试覆盖三种格式
+- **修改文件**:
+  - `src/web/api/v1/scans.py` — 重写 3 个报告端点，使用 report_service
+  - `src/web/frontend/src/pages/Reports.tsx` — PDF→HTML 格式选项
+  - `src/web/frontend/src/i18n/translations.ts` — 翻译更新
+- **测试结果**: 19/19 report_service 单元测试通过 ✅
+- **安全**: HTML 报告所有用户输入经 html.escape 处理，无 XSS 风险
+
+---
+
 ## 2026-04-14
 
 ### Web UI 打磨与功能增强批次 ✅

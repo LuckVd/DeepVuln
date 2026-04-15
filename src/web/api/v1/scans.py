@@ -1,11 +1,9 @@
 """Scan management API endpoints."""
 
 import json
-import csv
 import logging
 from datetime import datetime, timezone
 from typing import Annotated
-from io import StringIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, Form
 from fastapi.responses import Response, StreamingResponse
@@ -826,21 +824,22 @@ async def get_scan_report(
     _: Annotated[None, Depends(optional_api_key)] = None,
 ) -> dict:
     """
-    Get scan report.
+    Get scan report as JSON with complete findings list.
 
     Args:
         scan_id: Scan ID
         db: Database session
 
     Returns:
-        Scan report
+        Scan report with full findings
 
     Raises:
         HTTPException 404: If scan not found
     """
-    scan_repo = ScanRepository()
-    finding_repo = FindingRepository()
+    from src.web.services.report_service import build_json_report
+    from src.web.models.finding import Finding as Finding
 
+    scan_repo = ScanRepository()
     scan = await scan_repo.get(db, id=scan_id)
     if scan is None:
         raise HTTPException(
@@ -848,36 +847,15 @@ async def get_scan_report(
             detail=f"Scan {scan_id} not found"
         )
 
-    # Get findings summary
-    summary = await finding_repo.get_summary(db, scan_id=scan_id)
-
-    # Get recent events for timeline
-    event_repo = ScanEventRepository()
-    recent_events = await event_repo.get_recent_by_scan(
-        db, scan_id=scan_id, limit=20
+    # Get all findings for the scan
+    findings_result = await db.execute(
+        select(Finding)
+        .where(Finding.scan_id == scan_id)
+        .order_by(Finding.severity.desc(), Finding.id)
     )
+    findings = findings_result.scalars().all()
 
-    return {
-        "scan_id": scan_id,
-        "name": scan.name,
-        "status": scan.status,
-        "scan_type": scan.scan_type,
-        "progress_percent": scan.progress_percent,
-        "findings": summary,
-        "timeline": [
-            {
-                "timestamp": e.created_at.isoformat() if e.created_at else None,
-                "type": e.event_type,
-                "message": e.message,
-                "details": e.details,
-            }
-            for e in recent_events
-        ],
-        "created_at": _iso(scan.created_at),
-        "started_at": _iso(scan.started_at),
-        "completed_at": _iso(scan.completed_at),
-        "report_path": scan.report_path,
-    }
+    return build_json_report(scan, findings)
 
 
 @router.get("/scans/{scan_id}/report/csv")
@@ -887,7 +865,7 @@ async def export_scan_report_csv(
     _: Annotated[None, Depends(optional_api_key)] = None,
 ) -> StreamingResponse:
     """
-    Export scan report as CSV.
+    Export scan report as CSV with full details.
 
     Args:
         scan_id: Scan ID
@@ -899,9 +877,10 @@ async def export_scan_report_csv(
     Raises:
         HTTPException 404: If scan not found
     """
-    scan_repo = ScanRepository()
-    finding_repo = FindingRepository()
+    from src.web.services.report_service import build_csv_report
+    from src.web.models.finding import Finding as Finding
 
+    scan_repo = ScanRepository()
     scan = await scan_repo.get(db, id=scan_id)
     if scan is None:
         raise HTTPException(
@@ -909,7 +888,7 @@ async def export_scan_report_csv(
             detail=f"Scan {scan_id} not found"
         )
 
-    # Get findings
+    # Get all findings
     findings_result = await db.execute(
         select(Finding)
         .where(Finding.scan_id == scan_id)
@@ -917,46 +896,15 @@ async def export_scan_report_csv(
     )
     findings = findings_result.scalars().all()
 
-    # Create CSV
-    output = StringIO()
-    writer = csv.writer(output)
+    csv_bytes = build_csv_report(scan, findings)
 
-    # Header
-    writer.writerow([
-        "ID", "Severity", "Confidence", "Vulnerability Type",
-        "File Path", "Line Start", "Line End", "Function",
-        "Engine", "Status", "Description", "Created At"
-    ])
-
-    # Rows
-    for finding in findings:
-        writer.writerow([
-            finding.id,
-            finding.severity,
-            f"{finding.confidence:.2f}",
-            finding.vuln_type,
-            finding.file_path,
-            finding.line_start or "",
-            finding.line_end or "",
-            finding.function_name or "",
-            finding.engine,
-            finding.status,
-            (finding.description or "")[:200],  # Truncate long descriptions
-            _iso(finding.created_at) or "",
-        ])
-
-    # Generate filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"deepvuln_scan_{scan_id}_{timestamp}.csv"
 
-    output.seek(0)
-
     return StreamingResponse(
-        iter([output.getvalue().encode('utf-8')]),
+        iter([csv_bytes]),
         media_type="text/csv",
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}"
-        }
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
 
@@ -967,24 +915,22 @@ async def export_scan_report_pdf(
     _: Annotated[None, Depends(optional_api_key)] = None,
 ) -> Response:
     """
-    Export scan report as PDF (placeholder).
-
-    Note: This is a placeholder implementation. For production use,
-    consider using libraries like reportlab, weasyprint, or
-    a dedicated PDF generation service.
+    Export scan report as styled HTML (print-friendly, can be saved as PDF).
 
     Args:
         scan_id: Scan ID
         db: Database session
 
     Returns:
-        PDF file (placeholder)
+        HTML report
 
     Raises:
         HTTPException 404: If scan not found
     """
-    scan_repo = ScanRepository()
+    from src.web.services.report_service import build_html_report
+    from src.web.models.finding import Finding as Finding
 
+    scan_repo = ScanRepository()
     scan = await scan_repo.get(db, id=scan_id)
     if scan is None:
         raise HTTPException(
@@ -992,8 +938,7 @@ async def export_scan_report_pdf(
             detail=f"Scan {scan_id} not found"
         )
 
-    # Get findings
-    finding_repo = FindingRepository()
+    # Get all findings
     findings_result = await db.execute(
         select(Finding)
         .where(Finding.scan_id == scan_id)
@@ -1001,60 +946,15 @@ async def export_scan_report_pdf(
     )
     findings = findings_result.scalars().all()
 
-    # Create a simple text-based report as PDF placeholder
-    # In production, use a proper PDF library
-    lines = [
-        f"DeepVuln Security Scan Report",
-        f"=" * 50,
-        f"",
-        f"Scan ID: {scan_id}",
-        f"Scan Name: {scan.name}",
-        f"Status: {scan.status}",
-        f"Created: {scan.created_at.isoformat() if scan.created_at else 'N/A'}",
-        f"",
-        f"Findings Summary",
-        f"-" * 50,
-        f"Total Findings: {len(findings)}",
-        f"",
-    ]
+    html = build_html_report(scan, findings)
 
-    # Group by severity
-    severity_counts = {}
-    for finding in findings:
-        severity_counts[finding.severity] = severity_counts.get(finding.severity, 0) + 1
-
-    for severity, count in sorted(severity_counts.items(), reverse=True):
-        lines.append(f"{severity.upper()}: {count}")
-
-    lines.append("")
-    lines.append("Detailed Findings")
-    lines.append("-" * 50)
-
-    for i, finding in enumerate(findings[:50], 1):  # Limit to 50 findings
-        lines.extend([
-            f"",
-            f"#{i}. {finding.vuln_type}",
-            f"   Severity: {finding.severity}",
-            f"   Location: {finding.file_path}:{finding.line_start}",
-            f"   Engine: {finding.engine}",
-            f"   Status: {finding.status}",
-        ])
-        if finding.description:
-            lines.append(f"   Description: {finding.description[:100]}")
-
-    report_text = "\n".join(lines)
-
-    # Generate filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"deepvuln_scan_{scan_id}_{timestamp}.txt"
+    filename = f"deepvuln_scan_{scan_id}_{timestamp}.html"
 
-    # Return as text file (PDF placeholder)
     return Response(
-        content=report_text.encode('utf-8'),
-        media_type="text/plain",
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}"
-        }
+        content=html.encode("utf-8"),
+        media_type="text/html",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
 
