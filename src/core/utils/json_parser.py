@@ -331,8 +331,13 @@ def fix_chinese_punctuation(json_str: str) -> str:
     Handles:
     - Chinese colon (：) -> ASCII colon (:)
     - Chinese comma (，) -> ASCII comma (,)
-    - Chinese quotes ("") -> ASCII quotes ("")
+    - Chinese quotes ("") -> ASCII quotes ("")  — ONLY outside JSON strings
     - Chinese brackets (【】) -> ASCII brackets ([])
+
+    IMPORTANT: Chinese quote replacement is restricted to positions outside
+    JSON string values to avoid breaking string boundaries.  Structural
+    punctuation (：，【】) is replaced globally because it should never appear
+    inside valid JSON strings.
 
     Args:
         json_str: JSON string with potential Chinese punctuation.
@@ -340,25 +345,62 @@ def fix_chinese_punctuation(json_str: str) -> str:
     Returns:
         JSON string with ASCII punctuation.
     """
-    # Replace Chinese punctuation
-    replacements = {
+    # Structural replacements — safe to do globally
+    global_replacements = {
         "：": ":",  # Chinese colon
         "，": ",",  # Chinese comma
-        """: '"',  # Chinese left quote
-        """: '"',  # Chinese right quote
         "【": "[",  # Chinese left bracket
         "】": "]",  # Chinese right bracket
-        "「": '"',  # Chinese corner bracket
-        "」": '"',  # Chinese corner bracket
-        "『": '"',  # Chinese double corner bracket
-        "』": '"',  # Chinese double corner bracket
     }
 
     result = json_str
-    for ch_char, ascii_char in replacements.items():
+    for ch_char, ascii_char in global_replacements.items():
         result = result.replace(ch_char, ascii_char)
 
-    return result
+    # Quote replacements — must skip inside JSON string values
+    # to avoid breaking string boundaries
+    quote_replacements = {
+        "\u201c": '"',  # Chinese left quote "
+        "\u201d": '"',  # Chinese right quote "
+        "\u300c": '"',  # Chinese corner bracket 「
+        "\u300d": '"',  # Chinese corner bracket 」
+        "\u300e": '"',  # Chinese double corner bracket 『
+        "\u300f": '"',  # Chinese double corner bracket 』
+    }
+
+    # Only replace quote-like chars outside JSON strings
+    rebuilt = []
+    in_string = False
+    escape_next = False
+
+    for char in result:
+        if escape_next:
+            rebuilt.append(char)
+            escape_next = False
+            continue
+
+        if char == "\\" and in_string:
+            rebuilt.append(char)
+            escape_next = True
+            continue
+
+        if char == '"':
+            in_string = not in_string
+            rebuilt.append(char)
+            continue
+
+        if in_string:
+            # Inside a JSON string value — keep Chinese quotes as-is
+            rebuilt.append(char)
+            continue
+
+        # Outside a JSON string — replace Chinese quotes
+        if char in quote_replacements:
+            rebuilt.append(quote_replacements[char])
+        else:
+            rebuilt.append(char)
+
+    return "".join(rebuilt)
 
 
 def remove_text_before_json(text: str) -> str:
@@ -494,6 +536,101 @@ def fix_newlines_in_strings(json_str: str) -> str:
     return "".join(result)
 
 
+def fix_missing_commas(json_str: str) -> str:
+    """Insert missing commas between JSON elements.
+
+    LLMs (especially in Chinese mode) sometimes omit commas between:
+    - Key-value pairs:  {"a": 1 "b": 2}
+    - Array elements:   [1 2 3]
+    - After closing brackets:  } "key": ...
+
+    This function scans the JSON and inserts commas where they are missing.
+
+    Args:
+        json_str: JSON string with potentially missing commas.
+
+    Returns:
+        JSON string with commas inserted.
+    """
+    result = []
+    i = 0
+    in_string = False
+    escape_next = False
+    length = len(json_str)
+
+    while i < length:
+        char = json_str[i]
+
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+
+        if char == "\\" and in_string:
+            result.append(char)
+            escape_next = True
+            i += 1
+            continue
+
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+
+        if in_string:
+            result.append(char)
+            i += 1
+            continue
+
+        # Skip whitespace between tokens
+        if char in " \t\n\r":
+            # Look ahead: if the next non-whitespace char is a token-start
+            # and the last non-whitespace char was a token-end, insert comma
+            j = i
+            while j < length and json_str[j] in " \t\n\r":
+                j += 1
+
+            if j < length and result:
+                # Find last meaningful character
+                last = result[-1] if result else None
+                # Strip trailing whitespace in result to find actual last char
+                for k in range(len(result) - 1, -1, -1):
+                    if result[k] not in " \t\n\r":
+                        last = result[k]
+                        break
+
+                next_char = json_str[j]
+
+                # Token-end chars: " } ] digit true/false/null
+                # Token-start chars: " { [ digit letter
+                token_end = last in ('"', '}', ']', 'e', 'l', 't')  # e=lse, l=null, t=rue
+                # More robust: last char ends a value
+                value_end = last in ('"', '}', ']') or (
+                    last is not None and last.isdigit()
+                )
+                value_start = next_char in ('"', '{', '[') or (
+                    next_char.isalpha() or next_char.isdigit()
+                )
+
+                # Insert comma between two adjacent values/elements
+                if value_end and value_start:
+                    # Extra check: don't insert before colon (that's key: value)
+                    # Don't insert after opening bracket
+                    if next_char not in (':',) and last not in ('{', '[', ',', ':'):
+                        result.append(',')
+
+            result.append(char)
+            i += 1
+            continue
+
+        result.append(char)
+        i += 1
+
+    return "".join(result)
+
+
 def robust_json_loads(
     text: str,
     fix_comments: bool = True,
@@ -588,6 +725,13 @@ def robust_json_loads(
             return json.loads(json_str)
         except json.JSONDecodeError:
             pass
+
+    # Strategy 7.5: Fix missing commas (insert commas between elements)
+    json_str = fix_missing_commas(json_str)
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        pass
 
     # Strategy 8: Fix single quotes
     if fix_quotes:

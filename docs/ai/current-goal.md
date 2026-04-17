@@ -1,111 +1,105 @@
 # Current Goal
 
 > **状态**: 已完成 ✅
-> **目标**: Web UI 打磨与功能增强批次（10 项改进）
-> **Goal ID**: web-ui-polish-batch
-> **完成日期**: 2026-04-14
+> **目标**: LLM 稳定性增强 — 动态并发自适应 + 429限频修复 + JSON解析增强 + 漏洞列表服务端排序/分页
+> **Goal ID**: feat-llm-stability
+> **完成日期**: 2026-04-17
 
 ---
 
-## 执行结果
+## 核心变更
 
-所有 6 个批次已独立提交完成：
+### 1. 动态并发自适应 + 429 限频修复
 
-| 批次 | 描述 | 修复点 | Commit |
-|------|------|--------|--------|
-| 1 | Critical 运行时崩溃修复 | Fix-01~05 | `6506f39` |
-| 2 | 安全漏洞修复 | Fix-06~09 | `efd9dc4` |
-| 3 | 后端逻辑修复 | Fix-10~15 | `e6f21af` |
-| 4 | 前端 Bug 修复 | Fix-16~19 | `127a8ee` |
-| 5 | 代码质量改进 | Fix-20~23 | `9dfdeb7` |
-| 6 | 低优先级清理 | Fix-24~25 | `57a858a` |
+- `concurrency.py`: 新增 `_register_rate_limit_callback()` 将并发管理器的 `report_rate_limit` 注册为 OpenAI 客户端的 429 回调
+- `openai_client.py`: 新增模块级 `_on_rate_limit_callback` + `set_rate_limit_callback()`；在 429 重试时立即通知并发管理器（不再等 `__aexit__`）
+- `openai_client.py`: `max_tokens` 默认值 4096 → 16384，`json_mode` 参数支持 `response_format: {"type": "json_object"}`
+- `openai_client.py`: `finish_reason="length"` 现在抛出 `LLMTruncatedResponseError`（截断 JSON 不再静默传递）
+- `llm_config.py`: `context_size` 默认 4096 → 8192, `max_tokens` 默认 4096 → 16384；`to_client_kwargs()` 新增 `json_mode` 字段
+- `llm_config_service.py`: 构建 OpenAIClient 时传入 `json_mode`
 
-## 安全扫描结果
+### 2. JSON 解析增强
 
-| 级别 | 发现 | 是否本次引入 |
-|------|------|-------------|
-| BLOCKER | `config.py` 硬编码 DB 凭据 | 否（预存问题） |
-| HIGH | `main.py` 日志输出 DB URL 明文 | 否（预存问题） |
-| MEDIUM | WebSocket 端点无认证 | 否（预存问题） |
+- `json_parser.py`: `fix_chinese_punctuation()` 重写 — 中文引号仅在 JSON 字符串外替换（防止破坏字符串边界）
+- `json_parser.py`: 新增 `fix_missing_commas()` — 修复 LLM 输出中遗漏的逗号（键值对之间、数组元素之间）
+- `json_parser.py`: `robust_json_loads` 管线中集成 `fix_missing_commas`
+- `__init__.py`: 导出新增 `fix_missing_commas`
+- 测试: 61/61 json_parser 测试通过（含 23 个新增测试）
 
-## 死代码检测
+### 3. 验证器 JSON 提取修复
 
-- **可安全清理**: 5 项（SecurityDepends 类、get_event_broadcaster、_detect_tech_stack wrapper、_deduplicate_findings、create_scan_orchestrator）
-- **延后清理**: 4 项（get_quick_assessment x2、get_verdict_explanation、__all__ re-exports）
-- **Bug 待修**: 1 项（websocket.py `_running` 属性未初始化）
+- `attacker.py`, `defender.py`, `arbiter.py`: 移除手写的 `split("```json")` 代码块提取（会因嵌套 ``` 而截断），统一使用 `robust_json_loads` 的正则提取
+- `adversarial.py`: `LLMRateLimitError` 现在正确传播到并发管理器的 `__aexit__`（先记录 fallback verdict 再 re-raise）
 
-## 后续建议
+### 4. 对抗性验证超时保护
 
-1. 清理安全扫描发现的 4 个预存安全问题
-2. 清理 5 项高置信度死代码
-3. 修复 websocket.py `_running` 属性 bug
+- `adversarial_service.py`: 新增 `per_finding_timeout=300s`，使用 `asyncio.wait_for` 防止单个 finding 卡死整个阶段
+- 超时结果标记 `timeout: true` 而非普通 error
+- 新增 `progress_callback("finding_verified")` 通知
 
----
+### 5. 扫描进度 API 增强
 
-## Feat Record: 2026-04-14 漏洞详情增强
+- `scans.py`: 已完成扫描的 severity counts 改为从 Finding 表实时计算（修复旧 limit=100 缓存不准确问题）
+- `scans.py`: 列表 API 批量查询 severity（一次 round-trip 替代逐条查询）
+- `scans.py`: 进度 API 新增 `concurrency` 字段（从 `concurrency_update` 事件获取最新并发状态）
+- `scans.py`: 阶段去重（同 phase_name 保留最新记录）
+- `schemas.py`: `ScanProgressResponse` 新增 `concurrency` 字段
+- `scans.py`: findings 端点新增 `engine`, `sort_field`, `sort_dir` 查询参数
+- `finding.py`: Repository 支持服务端排序（severity 权重、confidence、engine）和 engine 过滤
 
-### 需求描述
-FindingDrawer 漏洞详情内容过少，需要显示更多详细内容：发现点代码片段、漏洞利用链、LLM 辩论详细内容和结果、引擎相关信息等。
+### 6. 前端增强
 
-### 实现方案
-将 FindingDrawer 从 3 Tab 扩展为 5 Tab 结构：
-- **概览 Tab** (增强): 新增 rule_id、evidence_strength、references 链接、tags 标签、fix_suggestion 修复建议
-- **代码证据 Tab** (不变): 已有完善
-- **利用链 Tab** (新增): 结构化展示 CPG 攻击路径 Source → Propagation → Sink，显示攻击向量和可利用性评级
-- **LLM 辩论 Tab** (新增): 从 API 加载对抗性验证数据，按轮次展示 Attacker/Defender/Arbiter 论点、PoC 代码、利用步骤、过滤措施等
-- **元数据 Tab** (增强): 新增评分详情卡片、置信度因子条形图
+- `FindingList.tsx`: 客户端排序改为服务端排序，新增 `SortHead` 可点击列头组件（severity/confidence/engine）
+- `FindingList.tsx`: 分页从 ←/→ 改为数字页码（最多显示 7 页 + 省略号）
+- `Findings.tsx`: 集成 `sortField/sortDir` 状态，传递给 API 和 FindingList
+- `useFindings.ts`: 支持新查询参数（engine, sort_field, sort_dir）
+- `useScanProgress.ts`: 支持 concurrency 状态显示
+- `LiveTerminal.tsx`: 进度回调小优化
+- `scans.ts`: API 类型新增 engine/sort_field/sort_dir 参数
+- `models.ts`: FindingListResponse 新增 engine 字段
 
-### 修改文件
-- `src/web/models/schemas.py`: FindingResponse 新增 extra_metadata 字段
-- `src/web/api/v1/scans.py`: findings 列表 API 返回 extra_metadata
-- `src/web/frontend/src/types/models.ts`: 扩展 Finding 类型，新增 CpgPath、AdversarialRound、AdversarialVerdictData、AdversarialDebate 等类型
-- `src/web/frontend/src/api/scans.ts`: 新增 getAdversarialDebate API 调用
-- `src/web/frontend/src/i18n/translations.ts`: 新增 ~40 条中英文翻译
-- `src/web/frontend/src/components/finding/FindingDrawer.tsx`: 完全重构为 5 Tab 结构，新增 VerdictSummary、DebateRoundCard、ArgumentCard、ScoreCard 子组件
+### 7. 进度广播增强
 
-### 验证结果
-- TypeScript 编译: 本次修改相关文件 0 错误（其他文件 5 个预存错误不影响）
-- Tab 空状态处理: 无数据时显示 Alert 提示
-- 辩论数据加载: 优先从 extra_metadata 读取，缺失时异步调用 API
+- `progress_broadcaster.py`: 新增并发状态事件广播（`concurrency_update`）
+- `scan_orchestrator.py`: 在并发管理器调整时广播并发状态
+- `scan_tasks.py`: 新增 `concurrency_update` 事件存储到 ScanEvent 表
 
 ---
 
-## Feat Record: 2026-04-15 报告导出能力
+## 测试结果
 
-### 需求描述
-完成报告导出能力。原 PDF 导出是占位实现（返回纯文本），JSON 只返回摘要不含完整发现列表，CSV 缺少关键字段且有 200 字符截断限制。
+| 测试套件 | 结果 | 备注 |
+|----------|------|------|
+| test_json_parser | 61/61 ✅ | 含 23 个新增测试 |
+| test_llm_client | 5/6 ✅ | 1 个预存失败（`test_is_available_without_key`） |
+| test_l3 (完整) | 2131/2145 ✅ | 14 个预存失败（adjudication/deduplicator/ast_framework 等，均非本次引入） |
+| test_web | 收集错误 | 3 个预存 ModuleNotFoundError（`src.web.models.project`） |
 
-### 实现方案
-新建 `report_service.py` 服务层，封装三种格式的报告生成逻辑：
-- **JSON**: 补充完整 findings 列表（含 extra_metadata、evidence、remediation、cpg_path），新增 severity summary 统计
-- **CSV**: 新增 Title、Evidence、Remediation 列，移除 description 200 字符截断，正确处理 None 和特殊字符
-- **HTML**（替代 PDF 占位）: 生成带嵌入 CSS 的自包含 HTML 报告，含扫描元数据、严重性分布、完整发现列表和修复建议，支持浏览器打印为 PDF
+**结论**: 本次变更未引入新的测试失败。修复了 1 个由 max_tokens 默认值变更导致的测试（`test_default_init`）。
 
-### 修改文件
-- `src/web/services/report_service.py`: 新建 — 报告生成服务（build_json_report / build_csv_report / build_html_report）
-- `src/web/api/v1/scans.py`: 重写 3 个报告端点，使用 report_service；移除旧的 csv/StringIO 导入
-- `src/web/frontend/src/pages/Reports.tsx`: PDF 改为 HTML 报告，更新类型定义和格式选项
-- `src/web/frontend/src/api/reports.ts`: 无需修改（复用 exportPdf 调用路径）
-- `src/web/frontend/src/i18n/translations.ts`: reports.pdf → reports.html，更新中英文描述
-- `tests/unit/test_web/test_report_service.py`: 新建 — 19 个单元测试覆盖三种格式
+## 安全扫描
 
-### 验证结果
-- report_service 单元测试: 19/19 通过
-- scans API 测试: 9/9 通过（无回归）
-- TypeScript 编译: 本次修改文件 0 错误（5 个预存错误不影响）
-- HTML 报告 XSS 防护: 所有用户输入经 html.escape 处理
+**结论: ✅ 无新增安全问题。** 所有 12 个安全发现均为预存问题。
+
+## 死代码
+
+本次变更未产生新的死代码。`_register_rate_limit_callback` 使用 `__import__('logging')` 模式与文件其他部分一致。
 
 ---
 
 ## 同步状态
 
-- **同步日期**: 2026-04-15
-- **路线图更新**: P12-07a/b/c/d 标记 done, 新增 v1.2 里程碑
-- **变更日志**: 已追加报告导出 feat 记录
-- **待提交文件**:
-  - `src/web/services/report_service.py` (新建)
-  - `src/web/api/v1/scans.py` (重构报告端点)
-  - `src/web/frontend/src/pages/Reports.tsx` (PDF→HTML)
-  - `src/web/frontend/src/i18n/translations.ts` (翻译更新)
-  - `tests/unit/test_web/test_report_service.py` (新建, 19 测试)
-  - `docs/ai/current-goal.md` (同步记录)
+- **同步日期**: 2026-04-17
+- **路线图更新**: 新增 v1.3 里程碑
+- **变更日志**: 待追加
+
+---
+
+## 前一目标
+
+| 字段 | 值 |
+|------|-----|
+| Goal ID | web-ui-polish-batch |
+| 标题 | Web UI 打磨与功能增强批次 |
+| 状态 | 已完成 ✅ |
+| Commit | 57a858a (最终批次) |

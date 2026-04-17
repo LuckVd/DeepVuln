@@ -29,6 +29,21 @@ from src.layers.l3_analysis.llm.client import (
     TokenUsage,
 )
 
+# Module-level callback: invoked on every 429 so that the adaptive
+# concurrency manager can react immediately, even when the client
+# is still retrying internally.
+_on_rate_limit_callback = None
+
+
+def set_rate_limit_callback(callback) -> None:
+    """Register a callable to be invoked whenever a 429 is received.
+
+    The callback receives no arguments and should be cheap (e.g.
+    ``manager.report_rate_limit``).
+    """
+    global _on_rate_limit_callback
+    _on_rate_limit_callback = callback
+
 
 class OpenAIClient(LLMClient):
     """
@@ -46,13 +61,14 @@ class OpenAIClient(LLMClient):
         api_key: str | None = None,
         base_url: str | None = None,
         organization: str | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 16384,
         temperature: float = 0.1,
         timeout: int = 120,
         max_retries: int = 5,
         is_azure: bool = False,
         azure_deployment: str | None = None,
         azure_api_version: str = "2024-02-15-preview",
+        json_mode: bool = False,
     ):
         """
         Initialize the OpenAI client.
@@ -70,6 +86,7 @@ class OpenAIClient(LLMClient):
             is_azure: Whether to use Azure OpenAI format.
             azure_deployment: Azure deployment name (required for Azure).
             azure_api_version: Azure API version.
+            json_mode: If True, requests JSON-only output via response_format.
         """
         # P18: Config file reading removed, use provided model or default
         if model is None:
@@ -83,6 +100,7 @@ class OpenAIClient(LLMClient):
             max_retries=max_retries,
         )
 
+        self.json_mode = json_mode
         self.is_azure = is_azure
         self.azure_deployment = azure_deployment
         self.azure_api_version = azure_api_version
@@ -215,6 +233,10 @@ class OpenAIClient(LLMClient):
         if not self.is_azure:
             body["model"] = self.model
 
+        # Request JSON-only output when json_mode is enabled
+        if self.json_mode:
+            body["response_format"] = {"type": "json_object"}
+
         # Add optional parameters
         if "stop" in options:
             body["stop"] = options["stop"]
@@ -262,6 +284,13 @@ class OpenAIClient(LLMClient):
                     # Exponential backoff with jitter to avoid thundering herd
                     backoff = min(retry_seconds * (2 ** attempt), 120)
                     jitter = random.uniform(0.5, 1.5)
+
+                    # Notify adaptive concurrency manager immediately
+                    if _on_rate_limit_callback is not None:
+                        try:
+                            _on_rate_limit_callback()
+                        except Exception:
+                            pass  # never let the callback break the request flow
 
                     if attempt < self.max_retries - 1:
                         await asyncio.sleep(backoff * jitter)
@@ -400,9 +429,27 @@ class OpenAIClient(LLMClient):
                     },
                 )
 
-            # Note: finish_reason="length" means response was truncated due to max_tokens
-            # but the content may still be valid. We don't raise an error here;
-            # instead, we return the response with finish_reason set so callers can decide.
+            # finish_reason="length" means response was truncated due to max_tokens.
+            # Truncated JSON is almost always invalid — raise a retriable error so
+            # the caller (e.g. adversarial verifier) can retry with a fresh request
+            # rather than passing garbage into the JSON parser.
+            if finish_reason == "length" and content:
+                raise LLMTruncatedResponseError(
+                    message=(
+                        f"Response truncated at {usage.completion_tokens}/{self.max_tokens} tokens "
+                        f"(model={self.model}). Consider increasing max_tokens."
+                    ),
+                    finish_reason=finish_reason,
+                    token_usage={
+                        "prompt_tokens": usage.prompt_tokens,
+                        "completion_tokens": usage.completion_tokens,
+                        "total_tokens": usage.total_tokens,
+                    },
+                    context={
+                        "model": self.model,
+                        "max_tokens": self.max_tokens,
+                    },
+                )
 
             # Update cumulative usage
             self._update_usage(usage)

@@ -212,8 +212,13 @@ class AdversarialVerifier:
             )
 
         except Exception as e:
+            # LLMRateLimitError must propagate so the concurrency manager's
+            # __aexit__ can call report_rate_limit() and trigger adaptive
+            # backoff.  We still record a fallback verdict first.
+            from src.core.exceptions.llm import LLMRateLimitError
+
             logger.error(f"Verification failed for {finding_id}: {e}")
-            # Create error verdict
+
             result.verdict = AdversarialVerdict(
                 verdict=VerdictType.NEEDS_REVIEW,
                 confidence=0.0,
@@ -222,6 +227,9 @@ class AdversarialVerifier:
                 recommended_action="review",
                 priority="medium",
             )
+
+            if isinstance(e, LLMRateLimitError):
+                raise
 
         # Record timing
         end_time = datetime.now(UTC)

@@ -182,6 +182,17 @@ class ProgressBroadcaster:
         # Track completed phases for cumulative progress
         self._completed_phases: set = set()
 
+        # Fine-grained phase-internal progress tracking.
+        # Maps phase_name -> float (0.0 ~ 1.0) representing how far
+        # the *current* phase has progressed internally.
+        self._phase_internal_progress: Dict[str, float] = {}
+
+        # Counters used to derive internal progress for specific phases
+        self._engines_started: int = 0
+        self._engines_completed: int = 0
+        self._adversarial_findings_total: int = 0
+        self._adversarial_findings_done: int = 0
+
     def _get_db_session(self) -> AsyncSession:
         """Get a new database session."""
         return self.db_session_factory()
@@ -415,6 +426,12 @@ class ProgressBroadcaster:
 
     async def on_engine_start(self, engine_name: str) -> None:
         """Handle engine start event."""
+        self._engines_started += 1
+        # Update engine_execution internal progress
+        if self._engines_started > 0:
+            self._phase_internal_progress["engine_execution"] = (
+                self._engines_completed / self._engines_started
+            )
         # Create event in database
         await self._create_event(
             event_type="engine_start",
@@ -438,6 +455,13 @@ class ProgressBroadcaster:
 
         Updates real-time statistics including findings count and tokens used.
         """
+        self._engines_completed += 1
+        # Update engine_execution internal progress
+        if self._engines_started > 0:
+            self._phase_internal_progress["engine_execution"] = (
+                self._engines_completed / self._engines_started
+            )
+
         # Get all stats in a single DB session (consolidated from 3 queries to 1 session)
         stats = await self._get_engine_complete_stats()
 
@@ -549,9 +573,29 @@ class ProgressBroadcaster:
         )
 
     async def on_progress(
-        self, progress_percent: int, message: Optional[str] = None
+        self,
+        progress_percent: int,
+        message: Optional[str] = None,
+        phase_name: Optional[str] = None,
     ) -> None:
-        """Handle progress update event."""
+        """Handle progress update event.
+
+        Args:
+            progress_percent: Overall progress 0-100, or phase-internal 0-100
+                when *phase_name* is given.
+            message: Optional status message.
+            phase_name: If given, treat progress_percent as the internal
+                progress (0-100) for this specific phase rather than the
+                overall scan progress.
+        """
+        if phase_name:
+            # Store as phase-internal progress (0.0 ~ 1.0)
+            self._phase_internal_progress[phase_name] = min(
+                progress_percent / 100.0, 1.0
+            )
+            # Recalculate overall progress from weights + internal progress
+            progress_percent = self._calculate_progress()
+
         # Update scan record
         await self._update_scan({"progress_percent": progress_percent})
 
@@ -563,18 +607,43 @@ class ProgressBroadcaster:
         )
 
     async def _calculate_severity_stats(self) -> Dict[str, int]:
-        """Calculate severity statistics from findings in the database."""
-        from src.web.repositories.finding import FindingRepository
-        finding_repo = FindingRepository()
+        """Calculate severity statistics from findings in the database.
+
+        Uses COUNT+GROUP BY to avoid the default limit=100 in
+        FindingRepository.get_by_scan(), ensuring all findings are counted.
+        """
+        from sqlalchemy import select, func
+
+        stats: Dict[str, int] = {
+            "critical": 0, "high": 0, "medium": 0, "low": 0,
+            "info": 0, "verified": 0, "false_positive": 0,
+        }
         async with self._get_db_session() as db:
-            findings = await finding_repo.get_by_scan(db, scan_id=self.scan_id)
-        stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0, "verified": 0, "false_positive": 0}
-        for f in findings:
-            sev = (f.severity or "info").lower()
-            if sev in stats:
-                stats[sev] += 1
-            else:
-                stats["info"] += 1
+            sev_result = await db.execute(
+                select(Finding.severity, func.count(Finding.id))
+                .where(Finding.scan_id == self.scan_id)
+                .group_by(Finding.severity)
+            )
+            for severity, count in sev_result.all():
+                sev_lower = (severity or "info").lower()
+                if sev_lower in stats:
+                    stats[sev_lower] += count
+                else:
+                    stats["info"] += count
+
+            # Count verified / false_positive by status
+            status_result = await db.execute(
+                select(Finding.status, func.count(Finding.id))
+                .where(Finding.scan_id == self.scan_id)
+                .group_by(Finding.status)
+            )
+            for status_val, count in status_result.all():
+                status_lower = (status_val or "").lower()
+                if status_lower == "verified":
+                    stats["verified"] += count
+                elif status_lower == "false_positive":
+                    stats["false_positive"] += count
+
         return stats
 
     async def _get_total_tokens_used(self) -> int:
@@ -787,10 +856,12 @@ class ProgressBroadcaster:
             return created_event
 
     def _calculate_progress(self) -> int:
-        """Calculate overall progress based on completed phases.
+        """Calculate overall progress based on completed phases and internal progress.
 
         Uses dynamic weights that adjust based on which optional phases
-        are enabled in the scan configuration.
+        are enabled in the scan configuration.  For the currently running
+        phase the internal progress (0.0-1.0) is used instead of a
+        hardcoded 50%.
 
         Returns:
             Progress percentage (0-100)
@@ -822,9 +893,10 @@ class ProgressBroadcaster:
             if phase in self._completed_phases:
                 completed_weight += self.phase_weights.get(phase, 0)
             elif phase == self.current_phase:
-                # Current phase gets partial progress
-                # For simplicity, assume 50% of current phase completed
-                completed_weight += self.phase_weights.get(phase, 0) * 0.5
+                # Use fine-grained internal progress if available,
+                # otherwise fall back to a conservative 10%
+                internal = self._phase_internal_progress.get(phase, 0.1)
+                completed_weight += self.phase_weights.get(phase, 0) * internal
                 break
 
         return int((completed_weight / total_weight * 100)) if total_weight > 0 else 0

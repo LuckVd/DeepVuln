@@ -94,7 +94,7 @@ class TestOpenAIClientInit:
         """Test default initialization."""
         client = OpenAIClient(api_key="test-key")
         assert client.model == "gpt-4"
-        assert client.max_tokens == 4096
+        assert client.max_tokens == 16384
         assert client.temperature == 0.1
         assert client.timeout == 120
 

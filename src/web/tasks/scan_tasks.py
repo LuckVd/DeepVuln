@@ -177,6 +177,36 @@ async def _execute_scan_async(
         await engine.dispose()
 
 
+def _emergency_mark_scan_failed(scan_id: int, error_message: str) -> None:
+    """Synchronously mark a scan as failed using a fresh DB connection.
+
+    This is a last-resort fallback when the async event loop is dead
+    (e.g. SoftTimeLimitExceeded) and the normal async DB update cannot run.
+    """
+    from sqlalchemy import create_engine, text
+    from src.web.core.config import get_database_settings
+
+    try:
+        settings = get_database_settings()
+        # Convert async URL to sync (asyncpg -> psycopg2 or similar)
+        sync_url = settings.url.replace("+asyncpg", "+psycopg2").replace("+aiosqlite", "")
+        sync_engine = create_engine(sync_url, isolation_level="AUTOCOMMIT")
+        with sync_engine.connect() as conn:
+            conn.execute(
+                text(
+                    "UPDATE scans SET status = 'failed', "
+                    "error_message = :err, "
+                    "completed_at = NOW() "
+                    "WHERE id = :sid AND status IN ('running', 'pending')"
+                ),
+                {"err": error_message[:500], "sid": scan_id},
+            )
+        sync_engine.dispose()
+        logger.info(f"Emergency DB update: scan {scan_id} marked as failed")
+    except Exception as e:
+        logger.error(f"Emergency DB update also failed for scan {scan_id}: {e}")
+
+
 @celery_app.task(bind=True, name="execute_scan_task")
 def execute_scan_task(
     self: Task,
@@ -207,6 +237,9 @@ def execute_scan_task(
         return result
     except Exception as e:
         logger.exception(f"Scan task failed for scan {scan_id}: {e}")
+        # Async event loop may be dead (SoftTimeLimitExceeded etc.),
+        # use synchronous DB update as fallback to fix zombie status
+        _emergency_mark_scan_failed(scan_id, str(e))
         return {
             "success": False,
             "scan_id": scan_id,

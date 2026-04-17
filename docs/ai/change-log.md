@@ -1,5 +1,29 @@
 # Change Log
 
+## 2026-04-17
+
+### LLM 稳定性增强 — 动态并发自适应 + 429限频修复 + JSON解析增强 + 前端排序分页 ✅
+
+- **Goal ID**: feat-llm-stability
+- **Summary**: 全面增强 LLM 调用链路稳定性：429 限频即时回调、JSON 解析容错增强、验证器 JSON 提取修复、对抗性验证超时保护、漏洞列表服务端排序分页
+- **影响范围**: LLM 客户端、并发管理器、JSON 解析器、三个验证器、对抗性服务、扫描 API、前端 Findings 页面
+- **核心变更**:
+  1. **429 即时回调**: OpenAI 客户端收到 429 时立即通知并发管理器（不再等 `__aexit__`），实现更快的自适应降速
+  2. **JSON 解析增强**: `fix_chinese_punctuation` 安全处理字符串内中文引号；新增 `fix_missing_commas` 修复 LLM 输出遗漏逗号（+23 测试）
+  3. **验证器提取修复**: attacker/defender/arbiter 移除手写 `split("```json")` 代码块提取（会因嵌套 ``` 截断），统一用 `robust_json_loads`
+  4. **截断响应处理**: `finish_reason="length"` 抛出 `LLMTruncatedResponseError`（截断 JSON 不再静默传递给解析器）
+  5. **超时保护**: 对抗性验证每个 finding 300s 超时（`asyncio.wait_for`），防止单个卡死
+  6. **扫描 API 增强**: severity counts 实时计算（修复旧缓存不准确）、并发状态暴露、服务端排序
+  7. **前端排序分页**: Findings 列表改为服务端排序（severity 权重/confidence/engine），数字分页
+  8. **模型参数调整**: max_tokens 4096→16384, context_size 4096→8192, 新增 json_mode 支持
+- **新增测试**: json_parser 23 个（总计 61/61 通过）
+- **修改文件**: 25 个（后端 16 + 前端 8 + 测试 1）
+- **测试结果**: 零新增失败 ✅（预存 14 失败 + 3 收集错误均非本次引入）
+- **安全**: 无新增安全问题（12 个预存发现不变）
+- **变更统计**: +1018/-149 行
+
+---
+
 ## 2026-04-15
 
 ### 报告导出能力完成 ✅

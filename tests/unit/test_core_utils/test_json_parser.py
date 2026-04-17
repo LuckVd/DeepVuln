@@ -8,8 +8,10 @@ from src.core.utils import (
     extract_json_from_markdown,
     fix_incomplete_json,
     fix_json_comments,
+    fix_missing_commas,
     fix_single_quotes,
     fix_trailing_commas,
+    fix_chinese_punctuation,
     robust_json_loads,
     safe_json_loads,
 )
@@ -388,3 +390,125 @@ Let me know if you need more details.'''
         text = '{"entry_points": []}'
         result = robust_json_loads(text)
         assert result == {"entry_points": []}
+
+
+class TestFixMissingCommas:
+    """Tests for fix_missing_commas function."""
+
+    def test_missing_comma_between_kv_pairs(self):
+        """Insert comma between key-value pairs."""
+        json_str = '{"a": 1 "b": 2}'
+        result = fix_missing_commas(json_str)
+        parsed = __import__("json").loads(result)
+        assert parsed == {"a": 1, "b": 2}
+
+    def test_missing_comma_between_array_elements(self):
+        """Insert comma between array elements."""
+        json_str = '[1 2 3]'
+        result = fix_missing_commas(json_str)
+        parsed = __import__("json").loads(result)
+        assert parsed == [1, 2, 3]
+
+    def test_missing_comma_with_newlines(self):
+        """Insert comma with newlines between elements."""
+        json_str = '{\n"a": 1\n"b": 2\n}'
+        result = fix_missing_commas(json_str)
+        parsed = __import__("json").loads(result)
+        assert parsed == {"a": 1, "b": 2}
+
+    def test_no_change_when_commas_present(self):
+        """Leave valid JSON unchanged."""
+        json_str = '{"a": 1, "b": 2}'
+        result = fix_missing_commas(json_str)
+        assert result == '{"a": 1, "b": 2}'
+
+    def test_missing_comma_nested_objects(self):
+        """Insert comma between nested object closing and next key."""
+        json_str = '{"inner": {"x": 1} "outer": 2}'
+        result = fix_missing_commas(json_str)
+        parsed = __import__("json").loads(result)
+        assert parsed == {"inner": {"x": 1}, "outer": 2}
+
+    def test_preserves_strings(self):
+        """Don't insert commas inside string values."""
+        json_str = '{"msg": "hello world"}'
+        result = fix_missing_commas(json_str)
+        parsed = __import__("json").loads(result)
+        assert parsed["msg"] == "hello world"
+
+    def test_missing_comma_real_world_llm_output(self):
+        """Fix real-world LLM output with missing commas."""
+        json_str = '{"claim": "这是一个漏洞" "confidence": 0.9 "evidence": ["a", "b"]}'
+        result = robust_json_loads(json_str)
+        assert result["confidence"] == 0.9
+        assert len(result["evidence"]) == 2
+
+
+class TestFixChinesePunctuationSafeQuotes:
+    """Tests for fix_chinese_punctuation preserving string contents."""
+
+    def test_chinese_colon_in_structure(self):
+        """Replace Chinese colon in JSON structure."""
+        result = fix_chinese_punctuation('{"key"："value"}')
+        assert ':' in result
+        assert '：' not in result
+
+    def test_chinese_comma_in_structure(self):
+        """Replace Chinese comma in JSON structure."""
+        result = fix_chinese_punctuation('{"a": 1，"b": 2}')
+        assert ',' in result
+
+    def test_chinese_quotes_outside_strings(self):
+        """Replace Chinese quotes in JSON structure (key positions)."""
+        result = fix_chinese_punctuation('\u201ckey\u201d: "value"')
+        assert result == '"key": "value"'
+
+    def test_chinese_quotes_inside_strings_preserved(self):
+        """Chinese quotes inside string values are NOT replaced."""
+        input_str = '"reasoning": "攻击者使用了\u201c单引号\u201d绕过防御"'
+        result = fix_chinese_punctuation(input_str)
+        # The Chinese quotes inside the string should be preserved
+        assert '\u201c' in result
+        assert '\u201d' in result
+
+    def test_real_world_adversarial_response(self):
+        """Handle real-world adversarial verification JSON with Chinese."""
+        input_str = (
+            '{"claim": "这是一个SSTI漏洞"'
+            ' "confidence": 0.95'
+            ' "reasoning": "使用了\u201c反射\u201d技术"}'
+        )
+        result = robust_json_loads(input_str)
+        assert result["confidence"] == 0.95
+        assert "反射" in result["reasoning"]
+
+
+class TestRobustJsonLoadsMissingCommas:
+    """Integration tests: robust_json_loads with missing commas."""
+
+    def test_missing_comma_simple(self):
+        """Parse JSON with missing commas between kv pairs."""
+        text = '{"a": 1 "b": "two" "c": true}'
+        result = robust_json_loads(text)
+        assert result == {"a": 1, "b": "two", "c": True}
+
+    def test_missing_comma_in_array(self):
+        """Parse JSON array with missing commas."""
+        text = '["first" "second" "third"]'
+        result = robust_json_loads(text)
+        assert result == ["first", "second", "third"]
+
+    def test_missing_comma_with_nested_code_block(self):
+        """JSON in markdown with inner code block and missing commas."""
+        text = '''```json
+{"claim": "SSTI漏洞" "confidence": 0.9 "poc_code": "GET /test?x={{7*7}}"}
+```'''
+        result = robust_json_loads(text)
+        assert result["confidence"] == 0.9
+        assert "{{7*7}}" in result["poc_code"]
+
+    def test_missing_comma_with_chinese_text(self):
+        """Parse Chinese JSON with missing commas and Chinese punctuation."""
+        text = '{"漏洞类型"："SSTI" "严重等级"："Critical" "置信度"：0.95}'
+        result = robust_json_loads(text)
+        assert result["置信度"] == 0.95

@@ -2,12 +2,22 @@
 
 from typing import Optional
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.web.models.finding import Finding
 from src.web.models.schemas import FindingCreate, FindingUpdate
 from src.web.repositories.base import AsyncRepository
+
+# Severity weight mapping for proper numeric ordering
+_SEVERITY_WEIGHT = case(
+    (Finding.severity == "critical", 5),
+    (Finding.severity == "high", 4),
+    (Finding.severity == "medium", 3),
+    (Finding.severity == "low", 2),
+    (Finding.severity == "info", 1),
+    else_=0,
+)
 
 
 class FindingRepository(
@@ -27,7 +37,10 @@ class FindingRepository(
         skip: int = 0,
         limit: int = 100,
         severity: Optional[str] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        engine: Optional[str] = None,
+        sort_field: Optional[str] = None,
+        sort_dir: Optional[str] = None,
     ) -> list[Finding]:
         """
         Get findings for a scan.
@@ -39,6 +52,9 @@ class FindingRepository(
             limit: Maximum number of records to return
             severity: Optional severity filter
             status: Optional status filter
+            engine: Optional engine filter
+            sort_field: Sort field (severity, confidence, engine)
+            sort_dir: Sort direction (asc, desc)
 
         Returns:
             List of findings
@@ -49,11 +65,25 @@ class FindingRepository(
             query = query.where(Finding.severity == severity)
         if status:
             query = query.where(Finding.status == status)
+        if engine:
+            query = query.where(Finding.engine == engine)
 
-        query = query.order_by(
-            Finding.severity.desc(),
-            Finding.line_start.asc()
-        ).offset(skip).limit(limit)
+        # Build ORDER BY clauses
+        order_clauses = []
+        desc = sort_dir != "asc"
+
+        if sort_field == "severity":
+            order_clauses.append(_SEVERITY_WEIGHT.desc() if desc else _SEVERITY_WEIGHT.asc())
+        elif sort_field == "confidence":
+            order_clauses.append(Finding.confidence.desc() if desc else Finding.confidence.asc())
+        elif sort_field == "engine":
+            order_clauses.append(Finding.engine.desc() if desc else Finding.engine.asc())
+        else:
+            # Default: severity (numeric weight) desc, then line_start asc
+            order_clauses.append(_SEVERITY_WEIGHT.desc())
+            order_clauses.append(Finding.line_start.asc())
+
+        query = query.order_by(*order_clauses).offset(skip).limit(limit)
 
         result = await db.execute(query)
         return list(result.scalars().all())

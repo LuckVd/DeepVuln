@@ -86,6 +86,9 @@ export const scansApi = {
     page_size?: number
     severity?: string
     status?: string
+    engine?: string
+    sort_field?: string
+    sort_dir?: string
   }): Promise<{
     scan_id: number
     total: number

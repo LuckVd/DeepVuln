@@ -232,8 +232,42 @@ async def list_scans(
     count_result = await db.execute(count_query)
     total = count_result.scalar_one() or 0
 
+    # Build response list, fixing stale severity counts for completed scans
+    from src.web.models.finding import Finding as FindingModel
+    resp_items: list[ScanResponse] = []
+    completed_ids = [item.id for item in items if item.status in ("completed", "failed", "cancelled") and (item.findings_count or 0) > 0]
+
+    # Batch query severity counts for all completed scans in one round-trip
+    severity_cache: dict[int, dict] = {}
+    if completed_ids:
+        sev_rows = await db.execute(
+            select(FindingModel.scan_id, FindingModel.severity, func.count(FindingModel.id))
+            .where(FindingModel.scan_id.in_(completed_ids))
+            .group_by(FindingModel.scan_id, FindingModel.severity)
+        )
+        for sid, sev, cnt in sev_rows.all():
+            severity_cache.setdefault(sid, {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0, "_total": 0})
+            sev_lower = (sev or "info").lower()
+            severity_cache[sid].setdefault(sev_lower, 0)
+            severity_cache[sid][sev_lower] += cnt
+            severity_cache[sid]["_total"] += cnt
+
+    for item in items:
+        resp = ScanResponse.model_validate(item)
+        if isinstance(item.config, dict) and "agent_analyzed_files" in item.config:
+            resp.agent_analyzed_files = item.config["agent_analyzed_files"]
+        if item.id in severity_cache:
+            sc = severity_cache[item.id]
+            resp.findings_count = sc["_total"]
+            resp.critical_count = sc.get("critical", 0)
+            resp.high_count = sc.get("high", 0)
+            resp.medium_count = sc.get("medium", 0)
+            resp.low_count = sc.get("low", 0)
+            resp.info_count = sc.get("info", 0)
+        resp_items.append(resp)
+
     return ScanListResponse(
-        items=[ScanResponse.model_validate(item) for item in items],
+        items=resp_items,
         total=total,
         page=page,
         page_size=page_size,
@@ -272,6 +306,30 @@ async def get_scan(
     # Extract agent_analyzed_files from scan.config
     if isinstance(scan.config, dict) and "agent_analyzed_files" in scan.config:
         resp.agent_analyzed_files = scan.config["agent_analyzed_files"]
+
+    # For completed scans, recalculate severity counts from Finding table
+    # to fix stale cached values written by the old limit=100 bug.
+    if scan.status in ("completed", "failed", "cancelled") and (scan.findings_count or 0) > 0:
+        from src.web.models.finding import Finding as FindingModel
+        severity_map: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        actual_total = 0
+        sev_rows = await db.execute(
+            select(FindingModel.severity, func.count(FindingModel.id))
+            .where(FindingModel.scan_id == scan_id)
+            .group_by(FindingModel.severity)
+        )
+        for sev, cnt in sev_rows.all():
+            sev_lower = (sev or "info").lower()
+            severity_map.setdefault(sev_lower, 0)
+            severity_map[sev_lower] += cnt
+            actual_total += cnt
+        resp.findings_count = actual_total
+        resp.critical_count = severity_map.get("critical", 0)
+        resp.high_count = severity_map.get("high", 0)
+        resp.medium_count = severity_map.get("medium", 0)
+        resp.low_count = severity_map.get("low", 0)
+        resp.info_count = severity_map.get("info", 0)
+
     return resp
 
 
@@ -296,6 +354,7 @@ async def get_scan_progress(
     """
     scan_repo = ScanRepository()
     phase_repo = ScanPhaseRepository()
+    event_repo = ScanEventRepository()
 
     scan = await scan_repo.get(db, id=scan_id)
     if scan is None:
@@ -304,8 +363,14 @@ async def get_scan_progress(
             detail=f"Scan {scan_id} not found"
         )
 
-    # Get phases
-    phases = await phase_repo.get_by_scan(db, scan_id=scan_id)
+    # Get phases (deduplicate by name — keep latest occurrence)
+    raw_phases = await phase_repo.get_by_scan(db, scan_id=scan_id)
+    seen_names: dict[str, int] = {}
+    for i, phase in enumerate(raw_phases):
+        seen_names.setdefault(phase.phase_name, i)
+    # Keep only the last occurrence of each phase name
+    dedup_indices = set(seen_names.values())
+    phases = [p for i, p in enumerate(raw_phases) if i in dedup_indices]
 
     # Build phase info list
     phase_info_list = []
@@ -351,18 +416,83 @@ async def get_scan_progress(
     )
 
     # Build findings summary
-    findings_summary = FindingSummary(
-        total=scan.findings_count or 0,
-        verified=scan.verified_count or 0,
-        false_positive=scan.false_positive_count or 0,
-        by_severity={
-            "critical": scan.critical_count or 0,
-            "high": scan.high_count or 0,
-            "medium": scan.medium_count or 0,
-            "low": scan.low_count or 0,
-            "info": scan.info_count or 0,
-        }
-    )
+    # For completed scans, recalculate severity counts from the Finding table
+    # to ensure accuracy even if cached columns were written incorrectly.
+    if scan.status in ("completed", "failed", "cancelled") and (scan.findings_count or 0) > 0:
+        from src.web.models.finding import Finding as FindingModel
+        actual_total = 0
+        severity_map: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        sev_rows = await db.execute(
+            select(FindingModel.severity, func.count(FindingModel.id))
+            .where(FindingModel.scan_id == scan_id)
+            .group_by(FindingModel.severity)
+        )
+        for sev, cnt in sev_rows.all():
+            sev_lower = (sev or "info").lower()
+            severity_map.setdefault(sev_lower, 0)
+            severity_map[sev_lower] += cnt
+            actual_total += cnt
+        findings_summary = FindingSummary(
+            total=actual_total,
+            verified=scan.verified_count or 0,
+            false_positive=scan.false_positive_count or 0,
+            by_severity={
+                "critical": severity_map.get("critical", 0),
+                "high": severity_map.get("high", 0),
+                "medium": severity_map.get("medium", 0),
+                "low": severity_map.get("low", 0),
+                "info": severity_map.get("info", 0),
+            }
+        )
+    else:
+        findings_summary = FindingSummary(
+            total=scan.findings_count or 0,
+            verified=scan.verified_count or 0,
+            false_positive=scan.false_positive_count or 0,
+            by_severity={
+                "critical": scan.critical_count or 0,
+                "high": scan.high_count or 0,
+                "medium": scan.medium_count or 0,
+                "low": scan.low_count or 0,
+                "info": scan.info_count or 0,
+            }
+        )
+
+    # Get latest concurrency status from events
+    concurrency_data: dict[str, dict] = {}
+    try:
+        concurrency_events = await event_repo.get_by_scan(
+            db, scan_id=scan_id, event_type="concurrency_update", limit=10
+        )
+        # Take the latest event per manager type (reverse to get newest first)
+        seen_managers: set[str] = set()
+        for ev in reversed(concurrency_events):
+            details = ev.details or {}
+            manager = details.get("manager", "")
+            if manager and manager not in seen_managers:
+                seen_managers.add(manager)
+                concurrency_data[manager] = details
+    except Exception:
+        pass
+
+    # For running scans with no concurrency events, provide defaults from system settings
+    if not concurrency_data and scan.status in ("running", "pending"):
+        try:
+            from src.core.llm import (
+                get_agent_scan_concurrency_manager,
+                get_verification_concurrency_manager,
+            )
+            for label, get_mgr in [
+                ("agent_scan", get_agent_scan_concurrency_manager),
+                ("verification", get_verification_concurrency_manager),
+            ]:
+                mgr = get_mgr()
+                concurrency_data[label] = {
+                    "manager": label,
+                    **mgr.get_adaptive_status(),
+                }
+        except Exception:
+            pass
 
     return ScanProgressResponse(
         scan_id=scan.id,
@@ -379,6 +509,7 @@ async def get_scan_progress(
         tokens=tokens,
         findings=findings_summary,
         phases=phase_info_list,
+        concurrency=concurrency_data,
         started_at=scan.started_at,
     )
 
@@ -681,6 +812,9 @@ async def get_scan_findings(
     page_size: int = Query(20, ge=1, le=1000),
     severity: str | None = Query(None, description="Filter by severity"),
     status: str | None = Query(None, description="Filter by status"),
+    engine: str | None = Query(None, description="Filter by engine"),
+    sort_field: str | None = Query(None, description="Sort by field (severity, confidence, engine)"),
+    sort_dir: str | None = Query(None, description="Sort direction (asc, desc)"),
 ) -> dict:
     """
     Get findings for a scan.
@@ -692,6 +826,7 @@ async def get_scan_findings(
         page_size: Page size
         severity: Optional severity filter
         status: Optional status filter
+        engine: Optional engine filter
 
     Returns:
         Paginated list of findings
@@ -712,7 +847,9 @@ async def get_scan_findings(
 
     skip = (page - 1) * page_size
     findings = await finding_repo.get_by_scan(
-        db, scan_id=scan_id, skip=skip, limit=page_size, severity=severity, status=status
+        db, scan_id=scan_id, skip=skip, limit=page_size,
+        severity=severity, status=status, engine=engine,
+        sort_field=sort_field, sort_dir=sort_dir,
     )
 
     # Get summary

@@ -40,9 +40,9 @@ class LLMConfig(Base):
     model: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Model parameters
-    context_size: Mapped[int] = mapped_column(Integer, default=4096)
+    context_size: Mapped[int] = mapped_column(Integer, default=8192)
     temperature: Mapped[float] = mapped_column(Float, default=0)
-    max_tokens: Mapped[int] = mapped_column(Integer, default=4096)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=16384)
     timeout: Mapped[int] = mapped_column(Integer, default=120)
 
     # Advanced LLM settings
@@ -75,4 +75,5 @@ class LLMConfig(Base):
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "timeout": self.timeout,
+            "json_mode": self.config_type in ("verification", "both"),
         }

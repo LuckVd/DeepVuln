@@ -471,6 +471,17 @@ class AdversarialService:
 
         # Build result from VerificationResult
         final_verdict = getattr(result_obj, 'verdict', None)
+
+        # Notify progress callback that this finding is done
+        if self.progress_callback:
+            try:
+                self.progress_callback("finding_verified", {
+                    "finding_id": finding.id or "unknown",
+                    "status": str(getattr(final_verdict, 'verdict', 'unknown')),
+                })
+            except Exception:
+                pass
+
         return {
             "verdict": final_verdict,
             "confidence": getattr(final_verdict, 'confidence', 0.5) if final_verdict else 0.5,
@@ -499,6 +510,10 @@ class AdversarialService:
         """
         results = {}
 
+        # Per-finding timeout: prevent a single stuck LLM call from blocking
+        # the entire adversarial verification phase.  Default 300s per finding.
+        per_finding_timeout = getattr(self, '_per_finding_timeout', 300)
+
         if self._concurrency_manager:
             # Use adaptive concurrency manager (shared with agent scan)
             # The manager's semaphore dynamically adjusts on 429 errors
@@ -506,7 +521,10 @@ class AdversarialService:
 
             async def _verify_with_manager(finding: Finding) -> dict[str, Any]:
                 async with manager:
-                    result = await self.verify_finding(finding, source_path)
+                    result = await asyncio.wait_for(
+                        self.verify_finding(finding, source_path),
+                        timeout=per_finding_timeout,
+                    )
                     await asyncio.sleep(1.5)
                     return result
 
@@ -519,7 +537,10 @@ class AdversarialService:
 
             async def _verify_with_semaphore(finding: Finding) -> dict[str, Any]:
                 async with llm_semaphore:
-                    result = await self.verify_finding(finding, source_path)
+                    result = await asyncio.wait_for(
+                        self.verify_finding(finding, source_path),
+                        timeout=per_finding_timeout,
+                    )
                     await asyncio.sleep(1.5)
                     return result
 
@@ -528,13 +549,20 @@ class AdversarialService:
 
         for finding, result in zip(findings, batch_results):
             if isinstance(result, Exception):
-                logger.error(f"Error verifying finding {finding.id}: {result}")
+                is_timeout = isinstance(result, asyncio.TimeoutError)
+                if is_timeout:
+                    logger.warning(
+                        f"Finding {finding.id} verification timed out "
+                        f"(limit={per_finding_timeout}s), marking as uncertain"
+                    )
+                else:
+                    logger.error(f"Error verifying finding {finding.id}: {result}")
                 results[finding.id] = {
                     "finding_id": finding.id,
                     "status": AdversarialStatus.UNCERTAIN.value,
                     "confidence": 0.1,
                     "error": str(result),
-                    "timeout": False,
+                    "timeout": is_timeout,
                 }
             else:
                 results[finding.id] = result

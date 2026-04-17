@@ -56,21 +56,31 @@ export function useScanProgress(
       setProgress(data)
       setStatus(data.status)
 
+      // Populate concurrency from progress API (for page reload / re-enter)
+      if (data.concurrency && Object.keys(data.concurrency).length > 0) {
+        setConcurrency((prev) => {
+          const merged = { ...prev, ...data.concurrency }
+          return Object.keys(merged).length === Object.keys(prev).length
+            ? prev // no change
+            : merged
+        })
+      }
+
       // 重置重试计数
       stateRef.current.retryCount = 0
 
       onProgressChange?.(data)
 
       // 检查是否完成
-      if (data.status === 'completed') {
+      if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
         stateRef.current.isComplete = true
-        onComplete?.(data)
-        return false // 停止轮询
-      }
-
-      if (data.status === 'failed') {
-        stateRef.current.isComplete = true
-        onFailed?.('扫描失败')
+        // Clear concurrency state when scan is no longer running
+        setConcurrency({})
+        if (data.status === 'completed') {
+          onComplete?.(data)
+        } else {
+          onFailed?.(data.status === 'cancelled' ? '扫描已取消' : '扫描失败')
+        }
         return false // 停止轮询
       }
 

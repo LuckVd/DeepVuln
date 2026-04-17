@@ -1,4 +1,5 @@
 // 模型类型定义
+import type { ConcurrencyUpdateData } from './websocket'
 
 // 来源类型
 export type SourceType = 'local' | 'git' | 'zip'
@@ -141,6 +142,7 @@ export interface ScanProgressResponse {
   tokens: TokenInfo
   findings: FindingSummary
   phases: PhaseInfo[]
+  concurrency: Record<string, ConcurrencyUpdateData>
   started_at: string | null
 }
 

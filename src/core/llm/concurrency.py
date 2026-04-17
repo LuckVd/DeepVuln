@@ -470,6 +470,7 @@ def get_verification_concurrency_manager() -> LLMConcurrencyManager:
         except Exception:
             pass
         _verification_manager = LLMConcurrencyManager(max_concurrent=max_concurrent)
+        _register_rate_limit_callback(_verification_manager)
     return _verification_manager
 
 
@@ -617,6 +618,26 @@ def with_concurrency_control(func: Callable[..., T]) -> Callable[..., T]:
 
 
 # =============================================================================
+# Rate-limit callback wiring
+# =============================================================================
+
+
+def _register_rate_limit_callback(manager: LLMConcurrencyManager) -> None:
+    """Register *manager.report_rate_limit* as the 429 callback in OpenAIClient.
+
+    This ensures the adaptive concurrency manager is notified on every 429,
+    even when the client is still retrying internally and the exception never
+    reaches ``__aexit__``.
+    """
+    try:
+        from src.layers.l3_analysis.llm.openai_client import set_rate_limit_callback
+        set_rate_limit_callback(manager.report_rate_limit)
+        logger.info("Registered rate-limit callback with OpenAIClient")
+    except ImportError:
+        pass
+
+
+# =============================================================================
 # P18: Async functions to get concurrency managers from database
 # =============================================================================
 
@@ -678,7 +699,9 @@ async def get_verification_concurrency_manager_from_db(
                 max_concurrent = verify_config.max_concurrent_requests
                 logger = __import__('logging').getLogger(__name__)
                 logger.info(f"Using verification concurrency from DB: max_concurrent={max_concurrent}")
-                return LLMConcurrencyManager(max_concurrent=max_concurrent)
+                manager = LLMConcurrencyManager(max_concurrent=max_concurrent)
+                _register_rate_limit_callback(manager)
+                return manager
     except Exception as e:
         logger = __import__('logging').getLogger(__name__)
         logger.warning(f"Failed to get verification concurrency from DB: {e}, using default")

@@ -197,12 +197,8 @@ class ArbiterVerifier:
 
         content = content.strip()
 
-        # Try to extract JSON from markdown code blocks
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
-
+        # Delegate Markdown extraction to robust_json_loads which uses
+        # regex-based extraction (no naive split that breaks on nested ```).
         try:
             return robust_json_loads(content)
         except JSONParseError as e:

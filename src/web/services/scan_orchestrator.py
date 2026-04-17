@@ -163,6 +163,8 @@ class ScanOrchestrator:
         # Start adaptive concurrency recovery loops
         agent_manager = None
         verify_manager = None
+        _concurrency_broadcast_stop = None
+        _concurrency_task = None
         try:
             from src.core.llm import (
                 get_agent_scan_concurrency_manager_from_db,
@@ -194,6 +196,55 @@ class ScanOrchestrator:
 
                 agent_manager.on_concurrency_change(_make_callback("agent_scan"))
                 verify_manager.on_concurrency_change(_make_callback("verification"))
+
+                # Broadcast initial concurrency state so the frontend can display it
+                # even before any throttling/recovery events occur
+                if self.progress_callback:
+                    for label, mgr in [("agent_scan", agent_manager), ("verification", verify_manager)]:
+                        try:
+                            await self.progress_callback.broadcast_event(
+                                event_type="concurrency_update",
+                                data={
+                                    "manager": label,
+                                    **mgr.get_adaptive_status(),
+                                    "previous_concurrent": mgr.get_adaptive_status()["current_concurrent"],
+                                },
+                            )
+                        except Exception:
+                            pass
+
+                # Periodically broadcast concurrency status (every 30s) so frontend
+                # always has fresh data, not only when throttling/recovery occurs.
+                _concurrency_broadcast_stop = asyncio.Event()
+
+                async def _periodic_concurrency_broadcast():
+                    while not _concurrency_broadcast_stop.is_set():
+                        try:
+                            await asyncio.wait_for(
+                                _concurrency_broadcast_stop.wait(), timeout=30.0
+                            )
+                        except asyncio.TimeoutError:
+                            pass  # timeout means 30s elapsed, broadcast now
+                        if _concurrency_broadcast_stop.is_set():
+                            break
+                        if self.progress_callback:
+                            for label, mgr in [
+                                ("agent_scan", agent_manager),
+                                ("verification", verify_manager),
+                            ]:
+                                try:
+                                    await self.progress_callback.broadcast_event(
+                                        event_type="concurrency_update",
+                                        data={
+                                            "manager": label,
+                                            **mgr.get_adaptive_status(),
+                                            "previous_concurrent": mgr.get_adaptive_status()["current_concurrent"],
+                                        },
+                                    )
+                                except Exception:
+                                    pass
+
+                _concurrency_task = asyncio.create_task(_periodic_concurrency_broadcast())
         except Exception as e:
             logger.warning(f"Failed to initialize adaptive concurrency: {e}")
 
@@ -362,6 +413,13 @@ class ScanOrchestrator:
             }
         finally:
             await self._cleanup()
+            # Stop periodic concurrency broadcast
+            try:
+                _concurrency_broadcast_stop.set()
+                if _concurrency_task and not _concurrency_task.done():
+                    _concurrency_task.cancel()
+            except Exception:
+                pass
             # Stop adaptive concurrency recovery loops
             try:
                 if agent_manager:
@@ -973,6 +1031,7 @@ class ScanOrchestrator:
 
         # Apply verification results to findings
         verified_count = 0
+        total_to_verify = len(verification_results)
         for finding in all_findings:
             if finding.id not in verification_results:
                 continue
@@ -992,6 +1051,15 @@ class ScanOrchestrator:
                 "confidence": result.confidence,
                 "reasoning": getattr(result, 'reasoning', '') or '',
             })
+
+            # Push fine-grained progress
+            if total_to_verify > 0:
+                pct = int(verified_count / total_to_verify * 100)
+                await self.progress_callback.on_progress(
+                    pct,
+                    f"可利用性验证 {verified_count}/{total_to_verify}",
+                    phase_name="exploitability_verification",
+                )
 
             logger.debug(
                 f"Finding {finding.id}: {result.status.value} "
@@ -1164,12 +1232,35 @@ class ScanOrchestrator:
         # P18: Use concurrency manager with config from database
         from src.core.llm import get_verification_concurrency_manager_from_db
         verification_manager = await get_verification_concurrency_manager_from_db(self.db_session_factory)
+
+        # Adversarial verification spawns multiple LLM calls per finding
+        # (attacker + defender can run in parallel, then arbiter).
+        # Divide the DB's max_concurrent by the inner parallelism so the
+        # actual concurrent LLM requests stay within the intended limit.
+        inner_llm_parallelism = 2  # attacker + defender run concurrently
+        finding_concurrency = max(
+            1,
+            verification_manager.current_concurrent // inner_llm_parallelism,
+        )
+        logger.info(
+            f"Adversarial finding-level concurrency: {finding_concurrency} "
+            f"(DB max_concurrent={verification_manager.current_concurrent} / {inner_llm_parallelism})"
+        )
         # Pass concurrency_manager so adversarial service uses adaptive semaphore
         adversarial_service._concurrency_manager = verification_manager
+
+        # Set total for fine-grained progress tracking
+        self._adversarial_total = len(findings_to_verify)
+        self._adversarial_done = 0
+
+        await self.progress_callback.on_progress(
+            0, "开始对抗性验证...", phase_name="adversarial_verification"
+        )
+
         verification_results = await adversarial_service.verify_findings_batch(
             findings=findings_to_verify,
             source_path=self.source_path,
-            max_concurrent=verification_manager.current_concurrent,
+            max_concurrent=finding_concurrency,
         )
 
         # Track token usage after adversarial verification
@@ -1239,6 +1330,24 @@ class ScanOrchestrator:
             data: Event data
         """
         try:
+            # Track finding-level progress for fine-grained progress bar
+            if event_type == "finding_verified" and hasattr(self, "_adversarial_total"):
+                self._adversarial_done = getattr(self, "_adversarial_done", 0) + 1
+                total = max(self._adversarial_total, 1)
+                pct = int(self._adversarial_done / total * 100)
+                # Schedule progress update (fire-and-forget)
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(
+                        self.progress_callback.on_progress(
+                            pct,
+                            f"对抗性验证 {self._adversarial_done}/{total}",
+                            phase_name="adversarial_verification",
+                        )
+                    )
+                except Exception:
+                    pass
+
             if hasattr(self.progress_callback, "broadcast_event"):
                 # Schedule the async broadcast in the running event loop
                 loop = asyncio.get_running_loop()

@@ -8,6 +8,9 @@ interface UseFindingsParams {
   page_size?: number
   severity?: SeverityLevel
   status?: FindingStatus
+  engine?: string
+  sort_field?: string
+  sort_dir?: string
   enabled?: boolean
 }
 
@@ -34,19 +37,25 @@ export function useFindings({
   page_size = 20,
   severity,
   status,
+  engine,
+  sort_field,
+  sort_dir,
   enabled = true,
 }: UseFindingsParams) {
   const queryClient = useQueryClient()
 
   // 获取漏洞列表
   const findingsQuery = useQuery({
-    queryKey: ['findings', scanId, page, page_size, severity, status],
+    queryKey: ['findings', scanId, page, page_size, severity, status, engine, sort_field, sort_dir],
     queryFn: () =>
       scansApi.getFindings(scanId, {
         page,
         page_size,
         severity,
         status,
+        engine,
+        sort_field,
+        sort_dir,
       }),
     enabled: enabled && !!scanId,
   })

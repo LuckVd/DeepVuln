@@ -108,6 +108,7 @@ class LLMConfigService:
                 temperature=config.temperature,
                 timeout=config.timeout,
                 max_retries=getattr(config, 'max_retries', 3),
+                json_mode=config.config_type in ("verification", "both"),
             )
         elif config.provider == "ollama":
             return OllamaClient(

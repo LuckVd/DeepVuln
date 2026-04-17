@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card,
@@ -30,9 +30,12 @@ export default function FindingsPage() {
   const [pageSize] = useState(20);
   const [statusFilter, setStatusFilter] = useState<FindingStatus | undefined>();
   const [severityFilter, setSeverityFilter] = useState<SeverityLevel | undefined>();
+  const [engineFilter, setEngineFilter] = useState<string | undefined>();
   const [searchText, setSearchText] = useState('');
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sortField, setSortField] = useState<'severity' | 'confidence' | 'engine' | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   // Dynamic options with translations
   const STATUS_OPTIONS = useMemo(() => [
@@ -62,8 +65,20 @@ export default function FindingsPage() {
     page_size: pageSize,
     status: statusFilter,
     severity: severityFilter,
+    engine: engineFilter,
+    sort_field: sortField || undefined,
+    sort_dir: sortField ? sortDir : undefined,
     enabled: !isNaN(id),
   });
+
+  // Collect unique engines from current data for the filter dropdown
+  const engineOptions = useMemo(() => {
+    const engines = new Set<string>();
+    data?.findings.forEach(f => { if (f.engine) engines.add(f.engine) });
+    // Also add known engines
+    ['agent', 'semgrep', 'codeql', 'ast'].forEach(e => engines.add(e));
+    return Array.from(engines).sort();
+  }, [data?.findings]);
 
   // Filter results (client-side search)
   const filteredFindings = data?.findings.filter((finding) => {
@@ -77,9 +92,25 @@ export default function FindingsPage() {
     );
   }) || [];
 
-  const handlePageChange = (newPage: number, newPageSize?: number) => {
-    setPage(newPage);
+  // Sorting is now handled by the backend — no client-side re-sort needed
+  const sortedFindings = filteredFindings;
+
+  const toggleSort = (field: 'severity' | 'confidence' | 'engine') => {
+    if (sortField === field) {
+      setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortField(field);
+      setSortDir('desc');
+    }
   };
+
+  const scrollRef = useRef<number>(0);
+
+  const handlePageChange = useCallback((newPage: number, newPageSize?: number) => {
+    scrollRef.current = window.scrollY;
+    setPage(newPage);
+    requestAnimationFrame(() => window.scrollTo(0, scrollRef.current));
+  }, []);
 
   const handleViewDetail = (finding: Finding) => {
     setSelectedFinding(finding);
@@ -156,6 +187,16 @@ export default function FindingsPage() {
             ]}
             className="w-40"
           />
+          <CustomSelect
+            label="引擎"
+            value={engineFilter || ''}
+            onChange={(val) => setEngineFilter(val || undefined)}
+            options={[
+              { value: '', label: '全部引擎' },
+              ...engineOptions.map((e) => ({ value: e, label: e.toUpperCase() })),
+            ]}
+            className="w-36"
+          />
           <div className="flex-1 min-w-[200px]">
             <Input
               placeholder={t('findings.searchPlaceholder')}
@@ -174,13 +215,16 @@ export default function FindingsPage() {
       {/* Findings List */}
       <Card className="glass-panel">
         <FindingList
-          findings={filteredFindings}
+          findings={sortedFindings}
           loading={isLoading}
-          total={searchText ? filteredFindings.length : data?.total || 0}
+          total={searchText ? sortedFindings.length : data?.total || 0}
           page={page}
           pageSize={pageSize}
           onPageChange={handlePageChange}
           onViewDetail={handleViewDetail}
+          sortField={sortField}
+          sortDir={sortDir}
+          onSort={toggleSort}
         />
       </Card>
 

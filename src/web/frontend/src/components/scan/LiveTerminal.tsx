@@ -661,25 +661,20 @@ const LiveTerminalInner = memo(function LiveTerminalInner({ scanId, scanStatus, 
     return () => unsubs.forEach(fn => fn());
   }, [addLog]);
 
-  // --- initial log / load historical events for completed scans ---
+  // --- initial log / load historical events ---
   const historyLoadedRef = useRef(false);
+  // Track the last loaded event ID so WS events after this point are not duplicated
+  const lastLoadedEventIdRef = useRef<number>(0);
   useEffect(() => {
     if (!scanStatus) return;
 
-    // Running scan: just show initial status
-    if (scanStatus === 'running' || scanStatus === 'pending') {
-      if (logs.length === 0) {
-        addLog(`◉ 扫描 #${scanId} 进行中...`, 'phase');
-      }
-      return;
-    }
-
+    // All non-paused active states: load history once, then rely on WS for new events
     if (scanStatus === 'paused') {
       addLog(`◉ 扫描 #${scanId} 已暂停`, 'warning');
       return;
     }
 
-    // Terminal states (completed/failed/cancelled): load history once
+    // Load history once for any status (running/pending/completed/failed/cancelled)
     if (historyLoadedRef.current) return;
     historyLoadedRef.current = true;
 
@@ -799,8 +794,10 @@ const LiveTerminalInner = memo(function LiveTerminalInner({ scanId, scanStatus, 
             }
           }
         } else {
-          // No events in DB, show status-only log
-          if (scanStatus === 'completed') {
+          // No events in DB
+          if (scanStatus === 'running' || scanStatus === 'pending') {
+            addLog(`◉ 扫描 #${scanId} 进行中...`, 'phase');
+          } else if (scanStatus === 'completed') {
             addLog(`◉ 扫描 #${scanId} 已完成`, 'success');
           } else if (scanStatus === 'failed') {
             addLog(`◉ 扫描 #${scanId} 失败`, 'error');
@@ -808,10 +805,16 @@ const LiveTerminalInner = memo(function LiveTerminalInner({ scanId, scanStatus, 
             addLog(`◉ 扫描 #${scanId} ${scanStatus}`, 'info');
           }
         }
+        // Record the highest event ID so we can skip already-loaded events from WS replay
+        if (events.length > 0) {
+          lastLoadedEventIdRef.current = events[events.length - 1].id || 0;
+        }
       } catch (err) {
         console.error('Failed to load scan events:', err);
         // Fallback to status-only log
-        if (scanStatus === 'completed') {
+        if (scanStatus === 'running' || scanStatus === 'pending') {
+          addLog(`◉ 扫描 #${scanId} 进行中...`, 'phase');
+        } else if (scanStatus === 'completed') {
           addLog(`◉ 扫描 #${scanId} 已完成`, 'success');
         } else if (scanStatus === 'failed') {
           addLog(`◉ 扫描 #${scanId} 失败`, 'error');

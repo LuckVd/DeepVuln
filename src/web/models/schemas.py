@@ -211,6 +211,9 @@ class ScanProgressResponse(BaseModel):
     # Phase details
     phases: list[PhaseInfo] = Field(default_factory=list)
 
+    # Concurrency status (populated from latest concurrency_update events)
+    concurrency: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
     # Time information
     started_at: Optional[UtcDateTime] = None
     estimated_completion: Optional[UtcDateTime] = None
