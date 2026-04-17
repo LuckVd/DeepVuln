@@ -94,30 +94,37 @@ export default function DashboardPage() {
               {activity.items.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center justify-between p-3 rounded bg-background-tertiary border border-border hover:border-cyan/50 transition-colors cursor-pointer"
+                  className="flex items-center p-3 rounded bg-background-tertiary border border-border hover:border-cyan/50 transition-colors cursor-pointer"
                   onClick={() => navigate(`/scans/${item.id}`)}
                 >
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 mr-3">
                     <div className="font-mono text-cyan text-sm truncate">#{String(item.id).padStart(4, '0')}</div>
                     <div className="text-text-primary text-sm truncate">{item.name}</div>
+                    {item.created_at && (
+                      <div className="text-text-tertiary font-mono text-xs mt-0.5">
+                        {new Date(item.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
                   </div>
-                  <Badge
-                    variant={
-                      item.status === 'running' ? 'running' :
-                      item.status === 'completed' ? 'completed' :
-                      item.status === 'failed' ? 'failed' : 'pending'
-                    }
-                    className="min-w-[90px] justify-center"
-                  >
-                    {item.status === 'running' ? t('status.scanning').toUpperCase() :
-                     item.status === 'completed' ? t('status.complete').toUpperCase() :
-                     item.status === 'failed' ? t('status.failed').toUpperCase() :
-                     item.status === 'paused' ? t('status.paused').toUpperCase() :
-                     t('status.waiting').toUpperCase()}
-                  </Badge>
-                  {item.findings_count > 0 && (
-                    <span className="text-critical font-mono text-sm ml-2">{item.findings_count}</span>
-                  )}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <Badge
+                      variant={
+                        item.status === 'running' ? 'running' :
+                        item.status === 'completed' ? 'completed' :
+                        item.status === 'failed' ? 'failed' : 'pending'
+                      }
+                      className="min-w-[80px] justify-center whitespace-nowrap"
+                    >
+                      {item.status === 'running' ? t('status.scanning').toUpperCase() :
+                       item.status === 'completed' ? t('status.complete').toUpperCase() :
+                       item.status === 'failed' ? t('status.failed').toUpperCase() :
+                       item.status === 'paused' ? t('status.paused').toUpperCase() :
+                       t('status.waiting').toUpperCase()}
+                    </Badge>
+                    <span className="text-critical font-mono text-sm whitespace-nowrap w-16 text-right">
+                      {item.findings_count > 0 ? `${item.findings_count} 漏洞` : ''}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>

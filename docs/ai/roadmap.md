@@ -29,6 +29,7 @@
 |Phase 6.6|Readiness Gate 自动修复|尽量构建环境而非跳过|done|2026-04|
 |Phase 7|CodeQL 智能构建|LLM 语言决策 + 分语言构建编排 + 多语言构建成功率提升|done|2026-04|
 |Phase 14|Web 完整能力迁移|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|done|2026-04-09|
+|Phase 15|Web 安全与体验增强|JWT 登录认证 + HTML 报告赛博风重设计 + UI 修复|done|2026-04-17|
 
 ---
 
@@ -1993,6 +1994,7 @@ incremental_stats: Optional[JSON]       # 增量扫描统计
 |Phase 6.6|Readiness Gate 自动修复|尽量构建环境而非跳过|done|2026-04|
 |Phase 7|CodeQL 智能构建|LLM 语言决策 + 分语言构建编排 + 多语言构建成功率提升|done|2026-04|
 |Phase 14|Web 完整能力迁移|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|done|2026-04-09|
+|Phase 15|Web 安全与体验增强|JWT 登录认证 + HTML 报告赛博风重设计 + UI 修复|done|2026-04-17|
 |Phase 15|代码质量改进|修复跨层依赖 + 清理死代码 + 修复假测试|done|2026-04-09|
 |Phase 16|Web 前端重构|赛博朋克风格 UI + 自建组件库 + 国际化 + 流式交互|done|2026-04|
 |Phase 17|LLM 配置管理|多配置支持 + UI 管理|done|2026-04|
@@ -2085,6 +2087,7 @@ incremental_stats: Optional[JSON]       # 增量扫描统计
 |Phase 6.6|Readiness Gate 自动修复|尽量构建环境而非跳过|done|2026-04|
 |Phase 7|CodeQL 智能构建|LLM 语言决策 + 分语言构建编排 + 多语言构建成功率提升|done|2026-04|
 |Phase 14|Web 完整能力迁移|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|done|2026-04-09|
+|Phase 15|Web 安全与体验增强|JWT 登录认证 + HTML 报告赛博风重设计 + UI 修复|done|2026-04-17|
 |Phase 15|代码质量改进|修复跨层依赖 + 清理死代码 + 修复假测试|done|2026-04-09|
 |Phase 16|Web 前端重构|赛博朋克风格 UI + 自建组件库 + 国际化 + 流式交互|done|2026-04|
 |Phase 17|LLM 配置管理|多配置支持 + UI 管理|done|2026-04|

@@ -342,15 +342,15 @@ export default function ScansPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-20 text-cyan">{t('common.id')}</TableHead>
-              <TableHead>{t('scans.table.taskName')}</TableHead>
-              <TableHead className="w-28">{t('scans.table.status')}</TableHead>
-              <TableHead className="w-20">{t('scans.table.source')}</TableHead>
-              <TableHead className="w-32">{t('scans.table.progress')}</TableHead>
-              <TableHead className="w-20">{t('scans.table.vulns')}</TableHead>
-              <TableHead className="w-24">{t('scans.table.duration')}</TableHead>
-              <TableHead className="w-40">{t('scans.table.created')}</TableHead>
-              <TableHead className="w-40 text-right">{t('common.actions')}</TableHead>
+              <TableHead className="w-20 text-cyan whitespace-nowrap">{t('common.id')}</TableHead>
+              <TableHead className="whitespace-nowrap">{t('scans.table.taskName')}</TableHead>
+              <TableHead className="w-32 whitespace-nowrap">{t('scans.table.status')}</TableHead>
+              <TableHead className="w-16 whitespace-nowrap">{t('scans.table.source')}</TableHead>
+              <TableHead className="w-28 whitespace-nowrap">{t('scans.table.progress')}</TableHead>
+              <TableHead className="w-36 whitespace-nowrap">{t('scans.table.vulns')}</TableHead>
+              <TableHead className="w-32 whitespace-nowrap">{t('scans.table.duration')}</TableHead>
+              <TableHead className="w-44 whitespace-nowrap">{t('scans.table.created')}</TableHead>
+              <TableHead className="w-36 text-right whitespace-nowrap">{t('common.actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -389,9 +389,9 @@ export default function ScansPage() {
                 <TableRow key={scan.id}>
                   <TableCell className="font-mono text-cyan">#{String(scan.id).padStart(4, '0')}</TableCell>
                   <TableCell className="font-medium text-text-primary">{scan.name}</TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <div className="flex items-center gap-2">
-                      <Badge variant={STATUS_MAP[scan.status].variant} className="min-w-[100px] justify-center">
+                      <Badge variant={STATUS_MAP[scan.status].variant} className="min-w-[100px] justify-center whitespace-nowrap">
                         {scan.status === 'running' ? (
                           <>
                             <span className="w-2 h-2 bg-cyan rounded-full animate-pulse mr-2" />
@@ -416,7 +416,7 @@ export default function ScansPage() {
                       {SOURCE_ICONS[scan.source_type]}
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     {scan.status === 'completed' ? (
                       <Badge variant="completed">100%</Badge>
                     ) : scan.status === 'failed' || scan.status === 'cancelled' ? (
@@ -425,7 +425,7 @@ export default function ScansPage() {
                       <Progress value={scan.progress_percent || 0} variant="cyan" className="h-2 w-full max-w-[120px]" />
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <div className="flex items-center gap-1 font-mono text-xs">
                       {(scan.critical_count || 0) > 0 && (
                         <span className="text-red-400">{scan.critical_count}C</span>
@@ -447,14 +447,14 @@ export default function ScansPage() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-text-secondary font-mono text-xs">
+                  <TableCell className="text-text-secondary font-mono text-xs whitespace-nowrap">
                     {scan.started_at && scan.completed_at
                       ? formatDuration((new Date(scan.completed_at).getTime() - new Date(scan.started_at).getTime()) / 1000)
                       : scan.started_at && scan.status === 'running'
                         ? formatDuration((Date.now() - new Date(scan.started_at).getTime()) / 1000)
                         : '--'}
                   </TableCell>
-                  <TableCell className="text-text-dim font-mono text-xs">
+                  <TableCell className="text-text-dim font-mono text-xs whitespace-nowrap">
                     {formatDateTime(scan.created_at)}
                   </TableCell>
                   <TableCell className="text-right">

@@ -80,7 +80,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Export Configuration */}
-      <Card className="glass-panel mb-6">
+      <Card className="glass-panel mb-6 overflow-visible">
         <h3 className="text-cyan font-mono font-bold mb-4">{t('reports.generate')}</h3>
 
         <div className="grid grid-cols-2 gap-4 mb-6">

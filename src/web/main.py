@@ -39,6 +39,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await init_db(db_settings.url)
         logger.info("Database initialized")
 
+        # Seed default admin user
+        try:
+            from src.web.services.auth_service import seed_default_user
+            from src.web.models.database import get_session_local
+            session_local = get_session_local()
+            async with session_local() as session:
+                await seed_default_user(session)
+        except Exception as e:
+            logger.warning("Failed to seed default user: %s", e)
+
         # Start Redis pub/sub subscriber for cross-process WS relay
         from src.web.api.websocket import get_connection_manager
         manager = get_connection_manager()

@@ -2,6 +2,26 @@
 
 ## 2026-04-17
 
+### Web 安全与体验增强 — JWT 登录认证 + HTML 报告重设计 + UI 修复 ✅
+
+- **Goal ID**: feat-jwt-auth
+- **Summary**: 实现 JWT 登录认证系统（默认账户 admin/deepvuln + 首次登录强制改密），重设计 HTML 报告为赛博深色主题，修复多个 UI 问题
+- **影响范围**: 后端认证全链路、前端登录/路由守卫、报告导出服务、扫描列表和仪表盘 UI
+- **核心变更**:
+  1. **JWT 登录认证**: 新增 User 模型 + auth_service + auth API（login/change-password/me），bcrypt 哈希，JWT HS256 24h 过期
+  2. **启动种子**: 应用启动时自动创建 admin/deepvuln 默认用户（must_change_password=True）
+  3. **前端登录系统**: Login 页面 + AuthContext + AuthGuard 路由守卫 + ChangePasswordModal 强制改密弹窗
+  4. **axios 拦截器**: 自动注入 Bearer token，401 自动跳转 /login
+  5. **HTML 报告重设计**: 白底平铺 → 深色赛博风，ASCII Art Logo、横向条形图 severity 分布、卡片式 findings、description CSS 折叠可展开
+  6. **API Key 并行**: JWT 为主认证，保留 API Key 供 CI/CD 调用
+  7. **UI 修复**: Reports 页下拉框被遮挡（Card overflow-hidden → overflow-visible）；扫描列表列宽和换行；仪表盘最近扫描对齐+创建时间+漏洞标签
+- **新增文件**: 9 个（后端 3 + 前端 5 + 测试 1）
+- **修改文件**: 11 个（后端 6 + 前端 5）
+- **测试**: 37/37 通过（18 auth + 19 report），零回归
+- **安全**: 无新增安全问题，XSS 转义正常
+
+---
+
 ### LLM 稳定性增强 — 动态并发自适应 + 429限频修复 + JSON解析增强 + 前端排序分页 ✅
 
 - **Goal ID**: feat-llm-stability

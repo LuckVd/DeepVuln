@@ -7,10 +7,12 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  LogOut,
 } from 'lucide-react';
 import { cn } from '@/shared/utils/cn';
 import { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AppLayout() {
   const navigate = useNavigate();
@@ -18,6 +20,7 @@ export default function AppLayout() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [uptime, setUptime] = useState('--:--:--');
   const { t } = useLanguage();
+  const { user, logout } = useAuth();
 
   // Update uptime every second
   useEffect(() => {
@@ -102,6 +105,17 @@ export default function AppLayout() {
               <div className="text-text-tertiary">
                 v2.0.4 | {t('layout.uptime')}: <span className="text-cyan">{uptime}</span>
               </div>
+            </div>
+            {/* User info + Logout */}
+            <div className="mt-2 flex items-center justify-between rounded bg-background-tertiary px-3 py-2">
+              <span className="font-mono text-xs text-cyan">{user?.username || 'admin'}</span>
+              <button
+                onClick={() => { logout(); navigate('/login', { replace: true }); }}
+                className="p-1 rounded hover:bg-critical/20 text-text-tertiary hover:text-critical transition-colors"
+                title="退出登录"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
             </div>
           </div>
         )}

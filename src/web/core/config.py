@@ -148,6 +148,25 @@ class SecuritySettings(BaseSettings):
         description="Environment variable containing comma-separated API keys"
     )
 
+    # JWT Authentication
+    jwt_secret: str = Field(
+        default="deepvuln-jwt-secret-change-in-production",
+        description="Secret key for JWT token signing"
+    )
+    jwt_algorithm: str = Field(
+        default="HS256",
+        description="JWT signing algorithm"
+    )
+    jwt_expire_minutes: int = Field(
+        default=1440,
+        ge=1,
+        description="JWT token expiration time in minutes"
+    )
+    auth_enabled: bool = Field(
+        default=True,
+        description="Enable JWT authentication (disable for development)"
+    )
+
     # Rate limiting
     rate_limit_enabled: bool = Field(
         default=False,

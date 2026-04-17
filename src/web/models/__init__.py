@@ -4,6 +4,7 @@ from src.web.models.database import Base, get_db, init_db, close_db
 from src.web.models.scan import Scan, ScanPhase, ScanEvent
 from src.web.models.finding import Finding
 from src.web.models.checkpoint import ScanFile, ApiKey
+from src.web.models.user import User
 from src.web.models.schemas import *
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "Finding",
     "ScanFile",
     "ApiKey",
+    "User",
     # Schemas (Pydantic)
     "ScanCreate",
     "ScanResponse",

@@ -12,11 +12,16 @@ const client: AxiosInstance = axios.create({
   },
 })
 
-// 请求拦截器 - 添加认证头
+// Token key - must match AuthContext
+const TOKEN_KEY = 'deepvuln_token'
+
+// 请求拦截器 - 注入 JWT token
 client.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    // 开发环境无需 API Key
-    // 生产环境可从 localStorage 或环境变量获取
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
     return config
   },
   (error) => {
@@ -35,8 +40,13 @@ client.interceptors.response.use(
 
       switch (status) {
         case 401:
-          // 未授权 - 清除 API Key
-          localStorage.removeItem('deepvuln_api_key')
+          // 未授权 - 清除 token
+          localStorage.removeItem(TOKEN_KEY)
+          localStorage.removeItem('deepvuln_user')
+          // 如果不在登录页，跳转
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login'
+          }
           break
         case 403:
           console.error('权限不足:', data?.detail || '禁止访问')

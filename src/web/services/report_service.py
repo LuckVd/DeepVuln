@@ -181,14 +181,14 @@ def build_csv_report(scan: Any, findings: list) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# HTML report (print-friendly, can be saved as PDF from browser)
+# HTML report (cyberpunk dark theme, print-friendly)
 # ---------------------------------------------------------------------------
 
 def build_html_report(scan: Any, findings: list) -> str:
     """Build a self-contained HTML report with embedded CSS.
 
-    The HTML is designed to be print-friendly so users can Ctrl+P to save
-    as PDF directly from the browser.
+    Cyberpunk dark theme with print-friendly fallback.
+    Ctrl+P to save as PDF — auto switches to light theme.
     """
     severity_counts = _count_by_severity(findings)
     sorted_findings = sorted(findings, key=lambda f: _severity_sort_key(f.severity), reverse=True)
@@ -208,46 +208,59 @@ def build_html_report(scan: Any, findings: list) -> str:
     else:
         duration = "N/A"
 
-    # Build severity badges in summary
-    severity_badges = ""
+    total = len(findings)
+
+    # Build severity distribution bars
+    severity_bars = ""
+    max_count = max(severity_counts.values()) if total > 0 else 1
     for sev in _SEVERITY_ORDER:
         count = severity_counts.get(sev, 0)
         color = _SEVERITY_COLORS.get(sev, "#6b7280")
-        severity_badges += (
-            f'<div class="sev-badge" style="border-left:4px solid {color}">'
-            f'<span class="sev-label">{sev.upper()}</span>'
-            f'<span class="sev-count">{count}</span>'
-            f"</div>\n"
+        pct = (count / max_count * 100) if max_count > 0 else 0
+        severity_bars += (
+            f'<div class="sev-row">'
+            f'<span class="sev-label" style="color:{color}">{sev.upper()}</span>'
+            f'<div class="sev-bar-track">'
+            f'<div class="sev-bar-fill" style="width:{pct:.0f}%;background:{color}"></div>'
+            f'</div>'
+            f'<span class="sev-num">{count}</span>'
+            f'</div>\n'
         )
 
-    # Build findings rows
-    finding_rows = ""
+    # Critical + High percentage
+    crit_high = severity_counts.get("critical", 0) + severity_counts.get("high", 0)
+    crit_high_pct = (crit_high / total * 100) if total > 0 else 0
+
+    # Build finding cards
+    finding_cards = ""
     if not sorted_findings:
-        finding_rows = '<tr><td colspan="7" class="empty">No findings discovered during this scan.</td></tr>'
+        finding_cards = '<div class="empty-state">No findings discovered during this scan.</div>'
     else:
         for idx, f in enumerate(sorted_findings, 1):
             color = _SEVERITY_COLORS.get(f.severity.lower(), "#6b7280")
-            desc = escape((f.description or "")[:300])
+            desc = escape(f.description or "")
             remediation_html = escape(f.remediation or "")
             location = escape(f.file_path)
             if f.line_start:
                 location += f":{f.line_start}"
 
-            finding_rows += f"""<tr>
-    <td class="center">{idx}</td>
-    <td><span class="sev-tag" style="background:{color}">{escape(f.severity.upper())}</span></td>
-    <td>{escape(f.vuln_type)}</td>
-    <td class="mono">{location}</td>
-    <td>{desc}</td>
-    <td class="center">{escape(f.engine)}</td>
-    <td class="center">{escape(f.status)}</td>
-</tr>
+            # Confidence display
+            conf = f.confidence
+            conf_str = f"{conf:.0%}" if conf is not None else "—"
+
+            finding_cards += f"""<div class="finding-card" style="border-left-color:{color}">
+<div class="finding-header">
+  <span class="finding-idx">#{idx}</span>
+  <span class="sev-tag" style="background:{color}">{escape(f.severity.upper())}</span>
+  <span class="finding-vuln">{escape(f.vuln_type)}</span>
+  <span class="finding-meta">{escape(f.engine)} · {escape(f.status)} · conf {conf_str}</span>
+</div>
+<div class="finding-location">{location}</div>
+<div class="finding-desc">{desc}</div>
 """
             if remediation_html:
-                finding_rows += f"""<tr class="remediation-row">
-    <td></td><td colspan="6"><strong>Remediation:</strong> {remediation_html}</td>
-</tr>
-"""
+                finding_cards += f"""<div class="finding-remediation"><span class="remediation-label">REMEDIATION</span>{remediation_html}</div>\n"""
+            finding_cards += "</div>\n"
 
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -258,85 +271,194 @@ def build_html_report(scan: Any, findings: list) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DeepVuln Report - {scan_name}</title>
 <style>
+/* ===== Reset & Base ===== */
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #1a1a2e; background: #fff; line-height: 1.6; padding: 40px; max-width: 1200px; margin: 0 auto; }}
-h1 {{ font-size: 28px; margin-bottom: 4px; color: #0f172a; }}
-h2 {{ font-size: 20px; margin: 32px 0 16px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }}
-.subtitle {{ color: #64748b; font-size: 14px; margin-bottom: 24px; }}
-.meta-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }}
-.meta-item {{ background: #f8fafc; border-radius: 6px; padding: 12px 16px; }}
-.meta-item .label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 2px; }}
-.meta-item .value {{ font-size: 14px; font-weight: 600; color: #1e293b; }}
-.sev-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 24px; }}
-.sev-badge {{ background: #f8fafc; border-radius: 6px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }}
-.sev-label {{ font-size: 12px; font-weight: 700; text-transform: uppercase; }}
-.sev-count {{ font-size: 24px; font-weight: 800; }}
-table {{ width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 32px; }}
-th {{ background: #0f172a; color: #fff; text-align: left; padding: 10px 12px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }}
-td {{ padding: 10px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }}
-tr:nth-child(even) {{ background: #fafbfc; }}
-tr:hover {{ background: #f1f5f9; }}
-.center {{ text-align: center; }}
-.mono {{ font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace; font-size: 12px; }}
-.sev-tag {{ color: #fff; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 3px; text-transform: uppercase; }}
-.remediation-row td {{ background: #f0fdf4; font-size: 12px; padding: 8px 12px 8px 48px; }}
-.empty {{ text-align: center; color: #94a3b8; padding: 40px 12px; font-style: italic; }}
-.footer {{ margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }}
+body {{
+  font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, "Courier New", monospace;
+  color: #c8d6e5; background: #0a0e1a; line-height: 1.65;
+  padding: 0; max-width: 1200px; margin: 0 auto;
+}}
+
+/* ===== Header ===== */
+.report-header {{
+  background: linear-gradient(135deg, #0a0e1a 0%, #0d1526 100%);
+  border-bottom: 1px solid rgba(0,229,255,0.15);
+  padding: 40px 48px 32px;
+}}
+.logo {{ color: #00e5ff; font-size: 11px; line-height: 1.2; margin-bottom: 16px; white-space: pre; letter-spacing: 0; }}
+.report-title {{ font-size: 24px; font-weight: 700; color: #fff; letter-spacing: 2px; margin-bottom: 4px; }}
+.report-subtitle {{ color: #4a90b8; font-size: 13px; letter-spacing: 1px; }}
+
+/* ===== Sections ===== */
+.section {{ padding: 32px 48px; }}
+.section-title {{
+  font-size: 12px; font-weight: 700; color: #00e5ff;
+  text-transform: uppercase; letter-spacing: 3px;
+  margin-bottom: 20px; padding-bottom: 8px;
+  border-bottom: 1px solid rgba(0,229,255,0.2);
+}}
+
+/* ===== Meta Grid ===== */
+.meta-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }}
+.meta-item {{
+  background: #111827; border-radius: 4px; padding: 14px 16px;
+  border: 1px solid #1e293b;
+}}
+.meta-item .label {{ font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; color: #4a5568; margin-bottom: 6px; }}
+.meta-item .value {{ font-size: 14px; font-weight: 600; color: #e2e8f0; }}
+
+/* ===== Severity Distribution ===== */
+.sev-chart {{ margin-bottom: 20px; }}
+.sev-row {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }}
+.sev-label {{ width: 72px; font-size: 11px; font-weight: 700; text-align: right; flex-shrink: 0; }}
+.sev-bar-track {{ flex: 1; height: 20px; background: #111827; border-radius: 2px; overflow: hidden; border: 1px solid #1e293b; }}
+.sev-bar-fill {{ height: 100%; border-radius: 1px; transition: width 0.3s; opacity: 0.85; }}
+.sev-num {{ width: 36px; font-size: 14px; font-weight: 800; color: #e2e8f0; text-align: right; }}
+.sev-total-row {{
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid #1e293b;
+}}
+.sev-total-label {{ font-size: 12px; color: #4a5568; letter-spacing: 2px; text-transform: uppercase; }}
+.sev-total-num {{ font-size: 28px; font-weight: 900; color: #00e5ff; }}
+.sev-crit-high {{ font-size: 11px; color: #ea580c; margin-top: 8px; letter-spacing: 1px; }}
+
+/* ===== Finding Cards ===== */
+.findings-grid {{ display: flex; flex-direction: column; gap: 12px; }}
+.finding-card {{
+  background: #111827; border-radius: 4px; padding: 16px 20px;
+  border: 1px solid #1e293b; border-left: 4px solid;
+  page-break-inside: avoid;
+}}
+.finding-header {{ display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }}
+.finding-idx {{ font-size: 12px; color: #4a5568; font-weight: 700; }}
+.sev-tag {{
+  color: #fff; font-size: 9px; font-weight: 800;
+  padding: 2px 8px; border-radius: 2px;
+  text-transform: uppercase; letter-spacing: 1px;
+}}
+.finding-vuln {{ font-size: 14px; font-weight: 700; color: #e2e8f0; }}
+.finding-meta {{ font-size: 11px; color: #4a5568; margin-left: auto; }}
+.finding-location {{
+  font-size: 12px; color: #00e5ff; margin-bottom: 10px;
+  background: rgba(0,229,255,0.06); display: inline-block;
+  padding: 2px 8px; border-radius: 2px;
+}}
+.finding-desc {{
+  font-size: 12.5px; color: #94a3b8; line-height: 1.7;
+  max-height: 4.4em; overflow: hidden; position: relative;
+  cursor: pointer;
+}}
+.finding-desc.expanded {{ max-height: none; }}
+.finding-desc:not(.expanded)::after {{
+  content: ""; position: absolute; bottom: 0; left: 0; right: 0;
+  height: 2em;
+  background: linear-gradient(transparent, #111827);
+  pointer-events: none;
+}}
+.finding-remediation {{
+  margin-top: 10px; padding: 10px 14px;
+  background: rgba(0, 229, 255, 0.04); border-radius: 3px;
+  border: 1px solid rgba(0, 229, 255, 0.1);
+  font-size: 12px; color: #64748b; line-height: 1.7;
+}}
+.remediation-label {{
+  display: inline-block; font-size: 9px; font-weight: 800;
+  color: #00e5ff; letter-spacing: 2px; margin-right: 8px;
+  text-transform: uppercase;
+}}
+.empty-state {{ text-align: center; color: #4a5568; padding: 60px 20px; font-size: 14px; font-style: italic; }}
+
+/* ===== Footer ===== */
+.report-footer {{
+  padding: 24px 48px; border-top: 1px solid #1e293b;
+  font-size: 10px; color: #334155; letter-spacing: 1px;
+  display: flex; justify-content: space-between;
+}}
+
+/* ===== Print ===== */
 @media print {{
-    body {{ padding: 20px; font-size: 11px; }}
-    h1 {{ font-size: 22px; }}
-    th {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-    .sev-tag {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-    table {{ font-size: 10px; }}
-    tr {{ page-break-inside: avoid; }}
+  body {{ background: #fff; color: #1a1a2e; font-size: 10px; padding: 0; }}
+  .report-header {{ background: #fff; border-bottom: 2px solid #0f172a; padding: 20px 24px; }}
+  .logo {{ color: #0f172a; }}
+  .report-title {{ color: #0f172a; }}
+  .section {{ padding: 16px 24px; }}
+  .meta-item {{ background: #f8fafc; border: 1px solid #e2e8f0; }}
+  .meta-item .value {{ color: #0f172a; }}
+  .finding-card {{ background: #fff; border: 1px solid #e2e8f0; }}
+  .finding-vuln {{ color: #0f172a; }}
+  .finding-location {{ color: #0369a1; background: #f0f9ff; }}
+  .finding-desc {{ color: #334155; max-height: none; -webkit-line-clamp: unset; }}
+  .finding-desc::after {{ display: none; }}
+  .finding-remediation {{ background: #f0fdf4; border-color: #bbf7d0; color: #166534; }}
+  .sev-bar-track {{ background: #f1f5f9; border-color: #e2e8f0; }}
+  .report-footer {{ border-top-color: #e2e8f0; color: #94a3b8; }}
+  .sev-tag, .sev-bar-fill {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
 }}
 </style>
 </head>
 <body>
-<h1>DeepVuln Security Scan Report</h1>
-<p class="subtitle">Scan #{scan_id} &middot; {scan_name}</p>
 
-<h2>Scan Information</h2>
-<div class="meta-grid">
-  <div class="meta-item"><div class="label">Status</div><div class="value">{status}</div></div>
-  <div class="meta-item"><div class="label">Scan Type</div><div class="value">{scan_type}</div></div>
-  <div class="meta-item"><div class="label">Created</div><div class="value">{created}</div></div>
-  <div class="meta-item"><div class="label">Started</div><div class="value">{started}</div></div>
-  <div class="meta-item"><div class="label">Completed</div><div class="value">{completed}</div></div>
-  <div class="meta-item"><div class="label">Duration</div><div class="value">{duration}</div></div>
-  <div class="meta-item"><div class="label">Files Scanned</div><div class="value">{scan.files_scanned}</div></div>
-  <div class="meta-item"><div class="label">Tokens Used</div><div class="value">{scan.tokens_used:,}</div></div>
+<!-- Header -->
+<div class="report-header">
+<pre class="logo">  ██████╗ ███████╗██████╗ ██╗   ██╗██╗     ██╗   ██╗███╗   ██╗██████╗
+ ██╔══██╗██╔════╝██╔══██╗╚██╗ ██╔╝██║     ██║   ██║████╗  ██║██╔══██╗
+ ██║  ██║█████╗  ██████╔╝ ╚████╔╝ ██║     ██║   ██║██╔██╗ ██║██║  ██║
+ ██║  ██║██╔══╝  ██╔══██╗  ╚██╔╝  ██║     ██║   ██║██║╚██╗██║██║  ██║
+ ██████╔╝███████╗██║  ██║   ██║   ███████╗╚██████╔╝██║ ╚████║██████╔╝
+ ╚═════╝ ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝</pre>
+  <div class="report-title">SECURITY SCAN REPORT</div>
+  <div class="report-subtitle">Scan #{scan_id} &middot; {scan_name}</div>
 </div>
 
-<h2>Findings Summary</h2>
-<div class="sev-grid">
-{severity_badges}
-  <div class="sev-badge" style="border-left:4px solid #0f172a">
-    <span class="sev-label">TOTAL</span>
-    <span class="sev-count">{len(findings)}</span>
+<!-- Scan Information -->
+<div class="section">
+  <div class="section-title">Scan Information</div>
+  <div class="meta-grid">
+    <div class="meta-item"><div class="label">Status</div><div class="value">{status}</div></div>
+    <div class="meta-item"><div class="label">Scan Type</div><div class="value">{scan_type}</div></div>
+    <div class="meta-item"><div class="label">Duration</div><div class="value">{duration}</div></div>
+    <div class="meta-item"><div class="label">Files Scanned</div><div class="value">{scan.files_scanned}</div></div>
+    <div class="meta-item"><div class="label">Created</div><div class="value">{created}</div></div>
+    <div class="meta-item"><div class="label">Started</div><div class="value">{started}</div></div>
+    <div class="meta-item"><div class="label">Completed</div><div class="value">{completed}</div></div>
+    <div class="meta-item"><div class="label">Tokens Used</div><div class="value">{scan.tokens_used:,}</div></div>
   </div>
 </div>
 
-<h2>Detailed Findings</h2>
-<table>
-<thead>
-<tr>
-  <th>#</th>
-  <th>Severity</th>
-  <th>Vulnerability</th>
-  <th>Location</th>
-  <th>Description</th>
-  <th>Engine</th>
-  <th>Status</th>
-</tr>
-</thead>
-<tbody>
-{finding_rows}
-</tbody>
-</table>
-
-<div class="footer">
-  Generated by DeepVuln &middot; {generated}
+<!-- Findings Summary -->
+<div class="section">
+  <div class="section-title">Findings Summary</div>
+  <div class="sev-chart">
+{severity_bars}
+    <div class="sev-total-row">
+      <span class="sev-total-label">Total Findings</span>
+      <span class="sev-total-num">{total}</span>
+    </div>
+    <div class="sev-crit-high">{crit_high_pct:.0f}% CRITICAL + HIGH ({crit_high}/{total})</div>
+  </div>
 </div>
+
+<!-- Detailed Findings -->
+<div class="section">
+  <div class="section-title">Detailed Findings</div>
+  <div class="findings-grid">
+{finding_cards}
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="report-footer">
+  <span>Generated by DeepVuln</span>
+  <span>{generated}</span>
+</div>
+
+<script>
+document.querySelectorAll('.finding-desc').forEach(function(el) {{
+  if (el.scrollHeight > el.clientHeight + 4) {{
+    el.addEventListener('click', function() {{ el.classList.toggle('expanded'); }});
+  }}
+}});
+</script>
 </body>
 </html>"""
