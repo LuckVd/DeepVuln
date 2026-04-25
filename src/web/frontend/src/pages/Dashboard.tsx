@@ -1,5 +1,6 @@
 import { Card, Statistic, Badge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui';
 import { Activity, ShieldAlert, TrendingUp, AlertTriangle, Clock } from 'lucide-react';
+import React from 'react';
 import { useDashboardStats, useRecentActivity } from '@/hooks/useDashboard';
 import { LoadingPage } from '@/components/ui';
 import { useNavigate } from 'react-router-dom';
@@ -122,7 +123,7 @@ export default function DashboardPage() {
                        t('status.waiting').toUpperCase()}
                     </Badge>
                     <span className="text-critical font-mono text-sm whitespace-nowrap w-16 text-right">
-                      {item.findings_count > 0 ? `${item.findings_count} 漏洞` : ''}
+                      {item.findings_count > 0 ? `${item.findings_count} ${t('p16.vulnFindings')}` : ''}
                     </span>
                   </div>
                 </div>
@@ -166,7 +167,7 @@ export default function DashboardPage() {
 }
 
 // Statistic Card Component
-function StatisticCard({
+const StatisticCard = React.memo(function StatisticCard({
   title,
   value,
   icon,
@@ -210,10 +211,10 @@ function StatisticCard({
       </div>
     </Card>
   );
-}
+});
 
 // Severity Stat Component
-function SeverityStat({
+const SeverityStat = React.memo(function SeverityStat({
   label,
   count,
   color,
@@ -240,10 +241,10 @@ function SeverityStat({
       </div>
     </div>
   );
-}
+});
 
 // Quick Action Component
-function QuickAction({
+const QuickAction = React.memo(function QuickAction({
   title,
   description,
   onClick,
@@ -261,4 +262,4 @@ function QuickAction({
       <div className="text-text-secondary text-sm">{description}</div>
     </button>
   );
-}
+});

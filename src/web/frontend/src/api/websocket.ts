@@ -50,7 +50,12 @@ export class WebSocketClient {
     this.setState('connecting')
 
     try {
-      this.ws = new WebSocket(`${this.url}/${scanId}`)
+      // Include JWT token as query parameter for authentication
+      const token = localStorage.getItem('deepvuln_token')
+      const wsUrl = token
+        ? `${this.url}/${scanId}?token=${encodeURIComponent(token)}`
+        : `${this.url}/${scanId}`
+      this.ws = new WebSocket(wsUrl)
 
       this.ws.onopen = () => {
         console.log(`[WebSocket] Connected to scan ${scanId}`)

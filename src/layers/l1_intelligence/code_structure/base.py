@@ -230,6 +230,15 @@ class CodeStructureParser:
         except ImportError:
             pass
 
+        try:
+            from .languages.js_ts_parser import JsTsStructureParser
+
+            parser = JsTsStructureParser(self.options)
+            for ext in parser.extensions:
+                self._parsers[ext] = parser
+        except ImportError:
+            pass
+
     def get_parser(self, file_path: Path) -> LanguageParser | None:
         """Get the appropriate parser for a file.
 

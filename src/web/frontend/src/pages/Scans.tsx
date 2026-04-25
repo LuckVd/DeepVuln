@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Plus, Upload, Eye, Folder, GitBranch, Archive, Play, X, Trash2 } from 'lucide-react';
-import { formatDateTime, formatDuration, setTimezone } from '@/utils/format';
-import { systemSettingsApi } from '@/api/system';
+import { formatDateTime, formatDuration } from '@/utils/format';
+import { useSystemSettings } from '@/hooks/useSystemSettings';
 import {
   Button,
   Card,
@@ -80,21 +80,8 @@ export default function ScansPage() {
 
   const createMutation = useCreateScan();
 
-  // 加载系统时区设置
-  useEffect(() => {
-    const loadTimezone = async () => {
-      try {
-        const response = await systemSettingsApi.get();
-        const tz = response.categories?.general?.['general.timezone'];
-        if (tz && typeof tz === 'string') {
-          setTimezone(tz);
-        }
-      } catch (error) {
-        console.error('Failed to load timezone setting:', error);
-      }
-    };
-    loadTimezone();
-  }, []);
+  // 加载系统时区设置 (cached via React Query with 5-min staleTime)
+  useSystemSettings();
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -109,7 +96,7 @@ export default function ScansPage() {
       newErrors.file = t('scans.dialog.error.file');
     }
     if (formData.engines.length === 0) {
-      newErrors.engines = '至少选择一个引擎';
+      newErrors.engines = t('p16.selectOneEngine');
     }
 
     setErrors(newErrors);
@@ -234,6 +221,16 @@ export default function ScansPage() {
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0;
   const STATUS_MAP = getStatusMap(t);
 
+  // Stable particle positions so they don't re-randomize on every render
+  const particles = useMemo(() =>
+    Array.from({ length: 10 }).map(() => ({
+      left: `${Math.random() * 100}%`,
+      animationDelay: `${Math.random() * 15}s`,
+      animationDuration: `${15 + Math.random() * 10}s`,
+    })),
+    []
+  );
+
   // Handle deleting a scan
   const handleDeleteScan = async () => {
     if (!deleteTarget) return;
@@ -242,7 +239,7 @@ export default function ScansPage() {
       setDeleteTarget(null);
       refetch();
     } catch (error: any) {
-      const msg = error?.response?.data?.detail || '删除失败';
+      const msg = error?.response?.data?.detail || t('p16.deleteFailed');
       alert(msg);
       setDeleteTarget(null);
     }
@@ -265,7 +262,7 @@ export default function ScansPage() {
   const handleRetryScan = async (scan: any) => {
     try {
       const retryData = {
-        name: `${scan.name} (重试)`,
+        name: `${scan.name} (${t('p16.retry')})`,
         source_type: scan.source_type,
         source_path: scan.source_path,
         branch: scan.branch || undefined,
@@ -274,6 +271,7 @@ export default function ScansPage() {
       };
       const newScan = await scansApi.create(retryData);
       refetch();
+      navigate(`/scans/${newScan.id}`);
     } catch (error) {
       console.error('Failed to retry scan:', error);
     }
@@ -282,15 +280,11 @@ export default function ScansPage() {
   return (
     <div className="p-6">
       {/* Ambient particles */}
-      {Array.from({ length: 10 }).map((_, i) => (
+      {particles.map((style, i) => (
         <div
           key={i}
           className="particle"
-          style={{
-            left: `${Math.random() * 100}%`,
-            animationDelay: `${Math.random() * 15}s`,
-            animationDuration: `${15 + Math.random() * 10}s`,
-          }}
+          style={style}
         />
       ))}
 
@@ -338,7 +332,7 @@ export default function ScansPage() {
       </div>
 
       {/* Scan Tasks Table */}
-      <Card className="overflow-hidden">
+      <Card>
         <Table>
           <TableHeader>
             <TableRow>
@@ -468,7 +462,7 @@ export default function ScansPage() {
                           className="h-5 px-2 text-xs whitespace-nowrap"
                         >
                           <Play className="mr-0.5 h-2 w-2" />
-                          启动
+                          {t('p16.start')}
                         </Button>
                       )}
                       {/* Failed: Retry button */}
@@ -480,7 +474,7 @@ export default function ScansPage() {
                           className="h-5 px-2 text-xs whitespace-nowrap border-warning text-warning hover:bg-warning/10"
                         >
                           <Play className="mr-0.5 h-2 w-2" />
-                          重试
+                          {t('p16.retry')}
                         </Button>
                       )}
                       {/* View button */}
@@ -490,7 +484,7 @@ export default function ScansPage() {
                         onClick={() => navigate(`/scans/${scan.id}`)}
                         className="h-5 px-2 text-xs whitespace-nowrap"
                       >
-                        查看
+                        {t('p16.view')}
                       </Button>
                       {/* Delete button (only for non-running scans) */}
                       {!['running', 'pending', 'paused'].includes(scan.status) && (
@@ -501,7 +495,7 @@ export default function ScansPage() {
                           className="h-5 px-2 text-xs whitespace-nowrap border-critical/50 text-critical hover:bg-critical/10"
                         >
                           <Trash2 className="mr-0.5 h-2 w-2" />
-                          删除
+                          {t('p16.delete')}
                         </Button>
                       )}
                     </div>
@@ -632,7 +626,7 @@ export default function ScansPage() {
                   <div className="mt-3 p-3 rounded bg-cyan/5 border border-cyan/20">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs text-text-secondary font-mono">
-                        上传中...
+                        {t('p16.uploading')}
                       </span>
                       <span className="text-xs text-cyan font-mono">
                         {uploadProgress}%
@@ -644,7 +638,7 @@ export default function ScansPage() {
                         {uploadSpeed > 0 ? `${(uploadSpeed / 1024).toFixed(1)} KB/s` : ''}
                       </span>
                       <span>
-                        {uploadEta > 0 ? `预计剩余 ${formatDuration(uploadEta)}` : ''}
+                        {uploadEta > 0 ? `${t('p16.etaRemaining').replace('{time}', formatDuration(uploadEta))}` : ''}
                       </span>
                     </div>
                   </div>
@@ -664,7 +658,7 @@ export default function ScansPage() {
                     const allEngines = ['semgrep', 'codeql', 'agent', 'ast'] as const;
                     setFormData({
                       ...formData,
-                      engines: formData.engines.length === allEngines.length ? [] : allEngines,
+                      engines: formData.engines.length === allEngines.length ? [] : [...allEngines],
                     });
                   }}
                   className="text-xs text-cyan hover:text-cyan/80 font-mono transition-colors"
@@ -748,14 +742,14 @@ export default function ScansPage() {
                 </button>
               </div>
               {formData.engines.length === 0 && (
-                <p className="text-xs text-critical font-mono">⚠ 至少选择一个引擎</p>
+                <p className="text-xs text-critical font-mono">⚠ {t('p16.selectOneEngine')}</p>
               )}
             </div>
 
             <div className="p-4 rounded-md bg-cyan/5 border border-cyan/20">
               <Switch
-                label="启用对抗性验证"
-                description="使用多轮LLM辩论验证漏洞，提高检测准确性（耗时较长）"
+                label={t('p16.enableAdversarial')}
+                description={t('p16.adversarialDesc')}
                 checked={formData.enable_adversarial}
                 onChange={(e) => setFormData({ ...formData, enable_adversarial: e.target.checked })}
               />
@@ -795,21 +789,21 @@ export default function ScansPage() {
         <Dialog open={true} onOpenChange={() => setDeleteTarget(null)}>
           <DialogContent className="glass-panel border-critical/30">
             <DialogHeader>
-              <DialogTitle className="text-critical">确认删除</DialogTitle>
+              <DialogTitle className="text-critical">{t('p16.confirmDelete')}</DialogTitle>
               <DialogDescription>
-                确定要删除扫描「{deleteTarget.name}」吗？此操作不可撤销，所有相关数据将被永久删除。
+                {t('p16.confirmDeleteMsg').replace('{name}', deleteTarget.name)}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDeleteTarget(null)}>
-                取消
+                {t('common.cancel')}
               </Button>
               <Button
                 variant="outline"
                 onClick={handleDeleteScan}
                 className="border-critical text-critical hover:bg-critical/10"
               >
-                确认删除
+                {t('p16.confirmDeleteBtn')}
               </Button>
             </DialogFooter>
           </DialogContent>

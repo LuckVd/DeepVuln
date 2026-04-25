@@ -32,17 +32,36 @@ import {
 } from 'lucide-react';
 import { useScan, useScanFindings } from '@/hooks/useApi';
 import { useScanProgress } from '@/hooks/useScanProgress';
+import { useSystemSettings } from '@/hooks/useSystemSettings';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { LiveTerminal } from '@/components/scan';
 import { scansApi } from '@/api/scans';
-import { systemSettingsApi } from '@/api/system';
-import { formatDateTime, formatDuration, setTimezone } from '@/utils/format';
+import { formatDateTime, formatDuration } from '@/utils/format';
 import type { ScanStatus } from '@/types/models';
 import type { ConcurrencyUpdateData } from '@/types/websocket';
+
+// Token usage interface from API response
+interface TokenUsageDetail {
+  agent_scan_tokens?: number;
+  adversarial_tokens?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  estimated_cost?: number;
+}
+
+// Scan config with optional extra fields from backend
+interface ScanConfigDetail {
+  engines?: string[];
+  adversarial?: boolean;
+  original_filename?: string;
+  [key: string]: unknown;
+}
 
 // Agent analyzed files statistic with expandable file list
 function AgentFilesStatistic({ analyzedFiles, filePaths }: { analyzedFiles: number; filePaths: string[] | null }) {
   const [expanded, setExpanded] = useState(false);
+  const { t } = useLanguage();
   return (
     <div>
       <div
@@ -50,13 +69,13 @@ function AgentFilesStatistic({ analyzedFiles, filePaths }: { analyzedFiles: numb
         onClick={() => filePaths && filePaths.length > 0 && setExpanded(!expanded)}
       >
         <Statistic
-          title="Agent 分析"
+          title={t('p16.agentAnalyzed')}
           value={analyzedFiles}
           valueClassName="text-cyan"
         />
         {filePaths && filePaths.length > 0 && (
           <span className="text-xs text-text-tertiary font-mono ml-1">
-            {expanded ? '▲' : '▼'} 查看文件
+            {expanded ? '▲' : '▼'} {t('p16.viewFiles')}
           </span>
         )}
       </div>
@@ -103,32 +122,32 @@ const getPhaseName = (phase: string, t: (key: string) => string): string => {
   return key ? t(key) : phase;
 };
 
-const getShortPhaseName = (phase: string): string => {
+const getShortPhaseName = (phase: string, t: (key: string) => string): string => {
   const shortMap: Record<string, string> = {
-    l1_preparation: 'L1准备',
-    source_preparation: '源码准备',
-    engine_selection: '引擎选择',
-    engine_execution: '引擎执行',
-    l1_attack_surface: '攻击面',
-    L1_preparation: 'L1准备',
-    L1_attack_surface: 'L1攻击面',
+    l1_preparation: `L1${t('phase.l1_preparation').replace('L1 ', '').replace('L1', '')}`,
+    source_preparation: t('phase.source_preparation'),
+    engine_selection: t('phase.engine_selection'),
+    engine_execution: t('phase.engine_execution'),
+    l1_attack_surface: t('phase.l1_attack_surface'),
+    L1_preparation: `L1${t('phase.l1_preparation').replace('L1 ', '').replace('L1', '')}`,
+    L1_attack_surface: `L1${t('phase.l1_attack_surface').replace('L1 ', '').replace('L1', '')}`,
     L2_semgrep: 'Semgrep',
     L2_codeql: 'CodeQL',
-    L3_agent: 'Agent审计',
-    L3_adjudication: '裁决',
-    result_merging: '结果合并',
-    token_statistics: 'Token统计',
-    exploitability_verification: '可利用性验证',
-    deduplication_adjudication: '去重裁决',
-    adversarial_verification: '对抗性验证',
-    report_generation: '报告生成',
+    L3_agent: `Agent ${t('phase.adversarial_verification').split(' ').slice(-1)[0]}`,
+    L3_adjudication: t('phase.deduplication_adjudication').split(' ').slice(-1)[0],
+    result_merging: t('phase.result_merging'),
+    token_statistics: t('phase.token_statistics'),
+    exploitability_verification: t('phase.exploitability_verification'),
+    deduplication_adjudication: t('phase.deduplication_adjudication'),
+    adversarial_verification: t('phase.adversarial_verification'),
+    report_generation: t('phase.result_merging'),
   };
   return shortMap[phase] || phase.replace(/_/g, ' ');
 };
 
 const formatPhaseDuration = (seconds: number | null | undefined): string => {
   if (seconds === null || seconds === undefined) return '';
-  if (seconds <= 0) return '0秒';
+  if (seconds <= 0) return '0s';
   return formatDuration(seconds);
 };
 
@@ -141,21 +160,8 @@ export default function ScanDetailPage() {
 
   const { data: scan, isLoading, error, refetch } = useScan(scanId);
 
-  // 加载系统时区设置
-  useEffect(() => {
-    const loadTimezone = async () => {
-      try {
-        const response = await systemSettingsApi.get();
-        const tz = response.categories?.general?.['general.timezone'];
-        if (tz && typeof tz === 'string') {
-          setTimezone(tz);
-        }
-      } catch (error) {
-        console.error('Failed to load timezone setting:', error);
-      }
-    };
-    loadTimezone();
-  }, []);
+  // 加载系统时区设置 (cached via React Query with 5-min staleTime)
+  useSystemSettings();
 
   const {
     progress,
@@ -323,7 +329,7 @@ export default function ScanDetailPage() {
             {canRetry && (
               <Button variant="outline" size="sm" onClick={handleRetry} className="border-warning text-warning hover:bg-warning/10">
                 <Play className="mr-2 h-4 w-4" />
-                重新扫描
+                {t('p16.rescan')}
               </Button>
             )}
             {canPause && (
@@ -369,7 +375,7 @@ export default function ScanDetailPage() {
         {progress?.phases && progress.phases.length > 0 && (
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2 text-xs font-mono">
-              <span className="text-text-secondary">扫描进度</span>
+              <span className="text-text-secondary">{t('p16.scanProgress')}</span>
               <span className="text-cyan">{progress.progress_percent}%</span>
             </div>
 
@@ -394,7 +400,7 @@ export default function ScanDetailPage() {
                       {isCompleted && <Check className="h-3 w-3 inline mr-1" />}
                       {isRunning && <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />}
                       {!isCompleted && !isRunning && <Clock className="h-3 w-3 inline mr-1" />}
-                      {getShortPhaseName(phase.name)}
+                      {getShortPhaseName(phase.name, t)}
                       {hasDuration && (
                         <span className="text-text-tertiary">({formatPhaseDuration(phase.duration_seconds)})</span>
                       )}
@@ -431,9 +437,9 @@ export default function ScanDetailPage() {
         <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t border-border">
           {/* Scan Target */}
           <div className="col-span-4">
-            <div className="text-xs text-text-secondary font-mono mb-1">扫描对象</div>
+            <div className="text-xs text-text-secondary font-mono mb-1">{t('p16.scanTarget')}</div>
             <span className="text-text-primary font-mono text-sm">
-              {(scan.config as any)?.original_filename
+              {(scan.config as ScanConfigDetail)?.original_filename
                 || (() => {
                     if (!scan.source_path) return '--';
                     const name = scan.source_path.split('/').filter(Boolean).pop() || scan.source_path;
@@ -444,13 +450,13 @@ export default function ScanDetailPage() {
 
           {/* Task Name */}
           <div>
-            <div className="text-xs text-text-secondary font-mono mb-1">任务名</div>
+            <div className="text-xs text-text-secondary font-mono mb-1">{t('p16.taskName')}</div>
             <span className="text-text-primary font-mono text-sm">{scan.name}</span>
           </div>
 
           {/* Engines */}
           <div className="col-span-2">
-            <div className="text-xs text-text-secondary font-mono mb-1">引擎</div>
+            <div className="text-xs text-text-secondary font-mono mb-1">{t('p16.engines')}</div>
             <div className="flex flex-wrap gap-1">
               {(scan.config?.engines && scan.config.engines.length > 0)
                 ? scan.config.engines.map((engine: string) => (
@@ -464,7 +470,7 @@ export default function ScanDetailPage() {
 
           {/* Agent Model */}
           <div className="col-span-2">
-            <div className="text-xs text-text-secondary font-mono mb-1">Agent 模型</div>
+            <div className="text-xs text-text-secondary font-mono mb-1">{t('p16.agentModel')}</div>
             <span className="text-cyan font-mono text-sm">
               {llmConfigs.agent_scan?.model || '--'}
             </span>
@@ -472,7 +478,7 @@ export default function ScanDetailPage() {
 
           {/* Adversarial Model */}
           <div className="col-span-2">
-            <div className="text-xs text-text-secondary font-mono mb-1">辩论模型</div>
+            <div className="text-xs text-text-secondary font-mono mb-1">{t('p16.debateModel')}</div>
             <span className="text-warning font-mono text-sm">
               {llmConfigs.verification?.model || '--'}
             </span>
@@ -503,12 +509,12 @@ export default function ScanDetailPage() {
           <div className="grid grid-cols-3 gap-4 mb-4">
             <Statistic
               title={t('scanDetail.agentScanTokens')}
-              value={(scan.token_usage as any)?.agent_scan_tokens || 0}
+              value={(scan.token_usage as TokenUsageDetail)?.agent_scan_tokens || 0}
               valueClassName="text-cyan"
             />
             <Statistic
               title={t('scanDetail.adversarialTokens')}
-              value={(scan.token_usage as any)?.adversarial_tokens || 0}
+              value={(scan.token_usage as TokenUsageDetail)?.adversarial_tokens || 0}
               valueClassName="text-purple-400"
             />
             <Statistic
@@ -554,7 +560,7 @@ export default function ScanDetailPage() {
             <h3 className="text-cyan font-mono font-bold">{t('scanDetail.vulnDistribution')}</h3>
             {(scan.findings_count ?? 0) > 0 && (
               <Badge variant="critical" className="font-mono text-xs">
-                {scan.findings_count} 个漏洞
+                {scan.findings_count} {t('p16.vulnCount').replace('{count}', String(scan.findings_count))}
               </Badge>
             )}
           </div>

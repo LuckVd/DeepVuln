@@ -1,9 +1,32 @@
 import { useState } from 'react';
 import { Card, Button, CustomSelect, Input, Alert } from '@/components/ui';
-import { Download, FileText, Loader2, CheckCircle } from 'lucide-react';
+import { Download, FileText, Loader2, CheckCircle, Trash2, RotateCw } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { reportsApi } from '@/api/reports';
 import { useScans } from '@/hooks/useApi';
+
+interface ReportRecord {
+  id: string;
+  scanId: number;
+  scanName: string;
+  format: 'json' | 'csv' | 'html';
+  createdAt: string;
+}
+
+const STORAGE_KEY = 'deepvuln-recent-reports';
+
+function loadReports(): ReportRecord[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReports(reports: ReportRecord[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(reports.slice(0, 20)));
+}
 
 /**
  * Reports page with export functionality
@@ -14,6 +37,7 @@ export default function ReportsPage() {
   const [exportType, setExportType] = useState<'json' | 'csv' | 'html'>('json');
   const [isExporting, setIsExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+  const [recentReports, setRecentReports] = useState<ReportRecord[]>(loadReports);
 
   // Get scans for selection
   const { data: scansData, isLoading: scansLoading } = useScans({
@@ -26,6 +50,48 @@ export default function ReportsPage() {
     value: String(scan.id),
     label: `#${String(scan.id).padStart(4, '0')} - ${scan.name}`,
   })) || [];
+
+  const getScanName = (scanId: number) =>
+    scansData?.items.find((s) => s.id === scanId)?.name || `Scan #${scanId}`;
+
+  const addReportToHistory = (scanId: number, format: 'json' | 'csv' | 'html') => {
+    const record: ReportRecord = {
+      id: `${scanId}-${format}-${Date.now()}`,
+      scanId,
+      scanName: getScanName(scanId),
+      format,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [record, ...recentReports].slice(0, 20);
+    setRecentReports(updated);
+    saveReports(updated);
+  };
+
+  const removeReport = (id: string) => {
+    const updated = recentReports.filter((r) => r.id !== id);
+    setRecentReports(updated);
+    saveReports(updated);
+  };
+
+  const handleReExport = async (record: ReportRecord) => {
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const filename = `deepvuln-scan-${record.scanId}-${timestamp}`;
+    switch (record.format) {
+      case 'json':
+        const jsonData = await reportsApi.exportJson(record.scanId);
+        const jsonBlob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/json' });
+        reportsApi.downloadBlob(jsonBlob, `${filename}.json`);
+        break;
+      case 'csv':
+        const csvData = await reportsApi.exportCsv(record.scanId);
+        reportsApi.downloadBlob(csvData, `${filename}.csv`);
+        break;
+      case 'html':
+        const htmlBlob = await reportsApi.exportHtml(record.scanId);
+        reportsApi.downloadBlob(htmlBlob, `${filename}.html`);
+        break;
+    }
+  };
 
   const handleExport = async () => {
     if (!selectedScanId) return;
@@ -50,12 +116,13 @@ export default function ReportsPage() {
           break;
 
         case 'html':
-          const htmlData = await reportsApi.exportPdf(selectedScanId);
-          reportsApi.downloadBlob(htmlData, `${filename}.html`);
+          const htmlBlob = await reportsApi.exportHtml(selectedScanId);
+          reportsApi.downloadBlob(htmlBlob, `${filename}.html`);
           break;
       }
 
       setExportSuccess(true);
+      addReportToHistory(selectedScanId, exportType);
       setTimeout(() => setExportSuccess(false), 3000);
     } catch (error) {
       console.error('Export failed:', error);
@@ -87,13 +154,13 @@ export default function ReportsPage() {
           {/* Scan Selection */}
           <div>
             <label className="text-sm font-medium text-text-secondary mb-2 block">
-              选择扫描
+              {t('p16.selectScan')}
             </label>
             <CustomSelect
               value={selectedScanId ? String(selectedScanId) : ''}
               onChange={(val) => setSelectedScanId(val ? parseInt(val) : null)}
               options={[
-                { value: '', label: '请选择已完成的扫描...' },
+                { value: '', label: t('p16.selectCompletedScan') },
                 ...scanOptions,
               ]}
               disabled={scansLoading}
@@ -104,7 +171,7 @@ export default function ReportsPage() {
           {/* Export Type */}
           <div>
             <label className="text-sm font-medium text-text-secondary mb-2 block">
-              导出格式
+              {t('p16.exportFormat')}
             </label>
             <CustomSelect
               value={exportType}
@@ -129,12 +196,12 @@ export default function ReportsPage() {
             {isExporting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                导出中...
+                {t('p16.exporting')}
               </>
             ) : exportSuccess ? (
               <>
                 <CheckCircle className="mr-2 h-4 w-4" />
-                完成
+                {t('p16.exportDone')}
               </>
             ) : (
               <>
@@ -145,7 +212,7 @@ export default function ReportsPage() {
           </Button>
 
           {exportSuccess && (
-            <span className="text-success text-sm font-mono">报告已生成</span>
+            <span className="text-success text-sm font-mono">{t('p16.reportGenerated')}</span>
           )}
         </div>
       </Card>
@@ -163,7 +230,7 @@ export default function ReportsPage() {
             <h3 className="text-success font-mono font-bold mb-2">{t('reports.json')}</h3>
             <p className="text-text-secondary text-sm mb-4">{t('reports.jsonDesc')}</p>
             <div className="text-xs text-text-tertiary font-mono">
-              适合数据分析和机器处理
+              {t('p16.suitableForData')}
             </div>
           </div>
         </Card>
@@ -179,7 +246,7 @@ export default function ReportsPage() {
             <h3 className="text-warning font-mono font-bold mb-2">{t('reports.csv')}</h3>
             <p className="text-text-secondary text-sm mb-4">{t('reports.csvDesc')}</p>
             <div className="text-xs text-text-tertiary font-mono">
-              适合 Excel 和电子表格
+              {t('p16.suitableForExcel')}
             </div>
           </div>
         </Card>
@@ -195,7 +262,7 @@ export default function ReportsPage() {
             <h3 className="text-cyan font-mono font-bold mb-2">{t('reports.html')}</h3>
             <p className="text-text-secondary text-sm mb-4">{t('reports.htmlDesc')}</p>
             <div className="text-xs text-text-tertiary font-mono">
-              浏览器可打印为 PDF
+              {t('p16.printableToPdf')}
             </div>
           </div>
         </Card>
@@ -204,10 +271,55 @@ export default function ReportsPage() {
       {/* Recent Reports */}
       <Card className="glass-panel">
         <h3 className="text-cyan font-mono font-bold mb-4">{t('reports.recent')}</h3>
-        <div className="text-center py-12 text-text-tertiary font-mono">
-          <p>{t('reports.noReports')}</p>
-          <p className="text-xs mt-2">生成报告后将在此显示历史记录</p>
-        </div>
+        {recentReports.length === 0 ? (
+          <div className="text-center py-12 text-text-tertiary font-mono">
+            <p>{t('reports.noReports')}</p>
+            <p className="text-xs mt-2">{t('p16.reportHistory')}</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {recentReports.map((report) => (
+              <div
+                key={report.id}
+                className="flex items-center justify-between py-3 px-4 rounded-lg bg-dark-800/50 border border-dark-700 hover:border-cyan/30 transition-colors"
+              >
+                <div className="flex items-center gap-4">
+                  <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded uppercase ${
+                    report.format === 'json' ? 'bg-success/20 text-success' :
+                    report.format === 'csv' ? 'bg-warning/20 text-warning' :
+                    'bg-cyan/20 text-cyan'
+                  }`}>
+                    {report.format}
+                  </span>
+                  <div>
+                    <p className="text-sm text-text-primary font-mono">
+                      #{String(report.scanId).padStart(4, '0')} - {report.scanName}
+                    </p>
+                    <p className="text-xs text-text-tertiary">
+                      {new Date(report.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleReExport(report)}
+                    className="p-1.5 text-text-tertiary hover:text-cyan transition-colors"
+                    title={t('p16.redownload')}
+                  >
+                    <RotateCw className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => removeReport(report.id)}
+                    className="p-1.5 text-text-tertiary hover:text-red-400 transition-colors"
+                    title={t('p16.deleteRecord')}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );

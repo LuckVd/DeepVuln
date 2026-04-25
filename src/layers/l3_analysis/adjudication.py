@@ -572,7 +572,31 @@ async def adjudicate_findings(
         summary.evidence_strength = strength_counts
         logger.info(f"Evidence strength calculated: {strength_counts}")
     else:
-        logger.debug("Skipping evidence strength calculation: source_path not provided")
+        # Calculate evidence strength without source_path using available metadata
+        from src.layers.l3_analysis.models import EvidenceStrength
+        strength_counts: dict[str, int] = {
+            "strong": 0,
+            "medium": 0,
+            "weak": 0,
+            "speculative": 0,
+        }
+        for finding in findings:
+            related_engines = getattr(finding, "related_engines", []) or []
+            duplicate_count = getattr(finding, "duplicate_count", 0) or 0
+            if len(related_engines) >= 2 or duplicate_count >= 2:
+                finding.evidence_strength = EvidenceStrength.STRONG
+                strength_counts["strong"] += 1
+            elif finding.confidence >= 0.8 or duplicate_count >= 1:
+                finding.evidence_strength = EvidenceStrength.MEDIUM
+                strength_counts["medium"] += 1
+            elif finding.confidence >= 0.5:
+                finding.evidence_strength = EvidenceStrength.WEAK
+                strength_counts["weak"] += 1
+            else:
+                finding.evidence_strength = EvidenceStrength.SPECULATIVE
+                strength_counts["speculative"] += 1
+        summary.evidence_strength = strength_counts
+        logger.info(f"Evidence strength calculated (no source_path): {strength_counts}")
 
     # P4-03: Global Adjudication Consistency Check
     # This is the FINAL consistency check before output.

@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react'
-import { authApi, LoginResponse, UserInfo } from '@/api/auth'
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { authApi, type LoginResponse, type UserInfo } from '@/api/auth'
+import { AUTH_EXPIRED_EVENT } from '@/api/client'
 
 interface AuthState {
   token: string | null
@@ -21,6 +23,8 @@ const TOKEN_KEY = 'deepvuln_token'
 const USER_KEY = 'deepvuln_user'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const navigate = useNavigate()
+
   const [state, setState] = useState<AuthState>({
     token: localStorage.getItem(TOKEN_KEY),
     user: JSON.parse(localStorage.getItem(USER_KEY) || 'null'),
@@ -28,6 +32,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: !!localStorage.getItem(TOKEN_KEY),
     isLoading: true,
   })
+
+  // Listen for 401 expiry events dispatched by the API client so that
+  // navigation happens through React Router instead of a full page reload.
+  useEffect(() => {
+    const handleExpired = () => {
+      localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(USER_KEY)
+      setState({ token: null, user: null, mustChangePassword: false, isAuthenticated: false, isLoading: false })
+      navigate('/login', { replace: true })
+    }
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired)
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired)
+  }, [navigate])
 
   // Verify token on mount
   useEffect(() => {
@@ -60,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res: LoginResponse = await authApi.login(username, password)
     localStorage.setItem(TOKEN_KEY, res.access_token)
     const user: UserInfo = {
-      id: 0,
+      id: res.user_id,
       username: res.username,
       must_change_password: res.must_change_password,
       is_active: true,

@@ -625,8 +625,10 @@ class ContextBuilder:
         """
         Find all functions that call the target function.
 
-        Returns list of {name, file, line} dicts.
+        Returns list of {name, file, line, call_expression} dicts.
         """
+        import re
+
         callers = []
 
         # Skip if target_function is None
@@ -648,6 +650,11 @@ class ContextBuilder:
                     for i, line in enumerate(lines):
                         # Simple pattern: function_name(
                         if target_function + '(' in line:
+                            # Skip function/method definitions
+                            stripped = line.strip()
+                            if re.match(r'^(async\s+)?def\s', stripped):
+                                continue
+
                             # Get the function containing this call
                             caller_func = self._get_containing_function(lines, i)
                             if caller_func:
@@ -656,6 +663,7 @@ class ContextBuilder:
                                     "name": caller_func,
                                     "file": rel_path,
                                     "line": str(i + 1),
+                                    "call_expression": stripped,
                                 })
                                 break  # One caller per file is enough
 
@@ -959,8 +967,23 @@ class ContextBuilder:
             if call_chain.callers:
                 lines.append("")
                 lines.append("Called by:")
-                for caller in call_chain.callers[:3]:
+                all_hardcoded = True
+                for caller in call_chain.callers[:5]:
+                    expr = caller.get("call_expression", "")
                     lines.append(f"  - {caller['name']} in {caller['file']}:{caller['line']}")
+                    if expr:
+                        lines.append(f"    Code: {expr}")
+                        if _is_likely_dynamic_arg(expr, call_chain.function_name):
+                            lines.append("    Arg source: potentially dynamic")
+                            all_hardcoded = False
+                        else:
+                            lines.append("    Arg source: hardcoded literal")
+                if all_hardcoded and call_chain.callers:
+                    lines.append("")
+                    lines.append(
+                        "NOTE: All callers pass hardcoded literals. "
+                        "user_controlled should be FALSE for parameters from this function."
+                    )
             else:
                 lines.append("")
                 lines.append("No external callers found - may be dead code or very internal")
@@ -1014,3 +1037,97 @@ class ContextBuilder:
         lines.append("# Severity hint: If no [USER CONTROLLED] markers, consider lowering severity.")
 
         return "\n".join(lines)
+
+
+def _is_likely_dynamic_arg(call_expr: str, func_name: str) -> bool:
+    """Check if the arguments to func_name in call_expr are likely dynamic.
+
+    Returns True if arguments appear to be variables/function calls (potentially
+    user-controlled). Returns False if all arguments are string/numeric literals.
+
+    Examples:
+        'get_media_dir("api")'       -> False (hardcoded string literal)
+        'get_media_dir(channel)'     -> True  (variable)
+        'get_media_dir()'            -> False (no arguments)
+        'get_media_dir(f"dir/{x}")'  -> True  (f-string)
+    """
+    import re
+
+    # Extract the argument portion from func_name(...)
+    pattern = re.escape(func_name) + r'\((.*)\)'
+    match = re.search(pattern, call_expr)
+    if not match:
+        # Can't parse, assume dynamic to be safe
+        return True
+
+    args_str = match.group(1).strip()
+
+    # No arguments -> not dynamic
+    if not args_str:
+        return False
+
+    # Split by comma, check each argument
+    args = _split_args(args_str)
+    for arg in args:
+        arg = arg.strip()
+        if not arg:
+            continue
+
+        # String literal: "..." or '...' or """..."""
+        if re.match(r'^(""".*"""|\'\'\'.*\'\'\'|".*"|\'.*\')$', arg, re.DOTALL):
+            continue
+
+        # Numeric literal: 42, 3.14, 0x1F
+        if re.match(r'^-?\d+(\.\d+)?$', arg):
+            continue
+
+        # Boolean/None literal
+        if arg in ('True', 'False', 'None', 'true', 'false', 'null'):
+            continue
+
+        # Keyword argument with literal value: name="value" or name=42
+        kw_match = re.match(r'^\w+=(""|\'\'|".*"|\'.*\'|-?\d+|True|False|None)$', arg)
+        if kw_match:
+            continue
+
+        # Anything else is likely dynamic (variable, f-string, function call, etc.)
+        return True
+
+    return False
+
+
+def _split_args(args_str: str) -> list[str]:
+    """Split function arguments respecting nested parentheses and strings."""
+    args = []
+    depth = 0
+    current = []
+    in_string = None
+
+    for char in args_str:
+        if in_string:
+            current.append(char)
+            if char == in_string:
+                in_string = None
+            continue
+
+        if char in ('"', "'"):
+            current.append(char)
+            in_string = char
+            continue
+
+        if char == '(':
+            depth += 1
+            current.append(char)
+        elif char == ')':
+            depth -= 1
+            current.append(char)
+        elif char == ',' and depth == 0:
+            args.append(''.join(current))
+            current = []
+        else:
+            current.append(char)
+
+    if current:
+        args.append(''.join(current))
+
+    return args

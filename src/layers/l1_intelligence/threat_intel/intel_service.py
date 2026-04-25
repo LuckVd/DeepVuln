@@ -1,5 +1,6 @@
 """Unified threat intelligence service - main entry point."""
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +23,164 @@ from src.layers.l1_intelligence.threat_intel.sources.pocs.github_search import (
 from src.layers.l1_intelligence.threat_intel.storage.database import ThreatIntelDatabase
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Version-range matching helpers
+# ---------------------------------------------------------------------------
+
+# Try to import packaging.version for robust version comparison.
+# Fall back to a lightweight tuple-based comparison when packaging is absent.
+try:
+    from packaging.version import InvalidVersion, Version as _PkgVersion
+
+    def _parse_version(v: str) -> tuple:
+        """Parse version string using packaging library."""
+        try:
+            return tuple(_PkgVersion(v).release)
+        except InvalidVersion:
+            return _version_tuple_fallback(v)
+
+except ImportError:
+
+    def _parse_version(v: str) -> tuple:
+        """Parse version string into comparable tuple (fallback)."""
+        return _version_tuple_fallback(v)
+
+
+def _version_tuple_fallback(v: str) -> tuple:
+    """Convert a version string like '1.2.3' into a comparable tuple of ints."""
+    cleaned = re.sub(r"[^0-9.]", "", v)
+    if not cleaned:
+        return (0,)
+    parts: list[int] = []
+    for part in cleaned.split("."):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+def _compare_versions(v1: tuple, v2: tuple) -> int:
+    """Compare two version tuples. Returns -1, 0, or 1."""
+    max_len = max(len(v1), len(v2))
+    # Pad shorter tuple with zeros for proper comparison (1.0 == 1.0.0)
+    v1_padded = v1 + (0,) * (max_len - len(v1))
+    v2_padded = v2 + (0,) * (max_len - len(v2))
+    if v1_padded < v2_padded:
+        return -1
+    if v1_padded > v2_padded:
+        return 1
+    return 0
+
+
+def _parse_single_constraint(spec: str) -> tuple[str, tuple] | None:
+    """Parse a single version constraint like '>=1.0', '<2.0.1', '<=3'.
+
+    Returns:
+        (operator, version_tuple) or None if unparseable.
+    """
+    spec = spec.strip()
+    if not spec:
+        return None
+
+    match = re.match(r"^(>=|<=|>|<|=)\s*(.+)$", spec)
+    if match:
+        op, ver_str = match.group(1), match.group(2)
+        return (op, _parse_version(ver_str))
+
+    # No operator prefix means exact version or bare version
+    return ("=", _parse_version(spec))
+
+
+def _satisfies_constraint(
+    version_tuple: tuple, op: str, constraint_tuple: tuple
+) -> bool:
+    """Check if *version_tuple* satisfies the single constraint (op, constraint_tuple)."""
+    cmp = _compare_versions(version_tuple, constraint_tuple)
+    if op == ">=":
+        return cmp >= 0
+    if op == "<=":
+        return cmp <= 0
+    if op == ">":
+        return cmp > 0
+    if op == "<":
+        return cmp < 0
+    if op == "=":
+        return cmp == 0
+    return False
+
+
+def _version_in_range(version_str: str, range_spec: str) -> bool:
+    """Check whether *version_str* falls inside the version range *range_spec*.
+
+    Supported range_spec formats:
+      - ">=1.0,<2.0"       comma-separated constraints (all must match)
+      - "1.0-2.0"          hyphen-separated inclusive range
+      - "<1.5.3"           single constraint
+      - ">=2.0"            single constraint
+      - "<=3.0"            single constraint
+    """
+    range_spec = range_spec.strip()
+    if not range_spec:
+        return True
+
+    version_tuple = _parse_version(version_str)
+
+    # Hyphen-separated range: "1.0-2.0" means >=1.0,<=2.0
+    if "," not in range_spec and "-" in range_spec:
+        # Be careful: version strings can contain hyphens in pre-release
+        # identifiers like "1.0-beta". Only treat as range when both sides
+        # look like plain version numbers.
+        parts = range_spec.split("-", 1)
+        left = parts[0].strip()
+        right = parts[1].strip()
+        # Only treat as range if the right side starts with a digit (a version)
+        if right and right[0].isdigit():
+            return _satisfies_constraint(version_tuple, ">=", _parse_version(left)) and \
+                _satisfies_constraint(version_tuple, "<=", _parse_version(right))
+        # Otherwise fall through — the whole string is just a version (with prerelease)
+
+    # Comma-separated constraints (AND semantics)
+    if "," in range_spec:
+        parts = range_spec.split(",")
+        return all(_version_in_range(version_str, part) for part in parts)
+
+    # Single constraint
+    parsed = _parse_single_constraint(range_spec)
+    if parsed is None:
+        return True  # unparseable -> include conservatively
+
+    op, constraint_tuple = parsed
+    return _satisfies_constraint(version_tuple, op, constraint_tuple)
+
+
+def _is_version_affected(version_str: str, affected_versions: list[str]) -> bool:
+    """Determine whether *version_str* is covered by the *affected_versions* entries.
+
+    The ``affected_versions`` list may contain:
+      - Individual constraints (e.g. ``[">=1.0", "<2.0"]``) which must **all** be
+        satisfied -- they typically originate from paired OSV events (introduced + fixed).
+      - Compound range strings (e.g. ``[">=1.0,<2.0"]``) which are handled internally
+        by ``_version_in_range``.
+
+    Conservative: if the CVE has no affected version information at all, the version
+    is considered potentially affected (True).
+    """
+    if not affected_versions:
+        return True  # no range data -> include to avoid false negatives
+
+    # If every entry is a single constraint (no commas, no hyphens), they are
+    # paired constraints from OSV-style events that must ALL match (AND).
+    # Otherwise each entry is an independent compound range and ANY matching is
+    # sufficient (OR).
+    all_single = all("," not in spec and "-" not in spec for spec in affected_versions)
+
+    if all_single:
+        return all(_version_in_range(version_str, spec) for spec in affected_versions)
+
+    # Compound entries: at least one range must match
+    return any(_version_in_range(version_str, spec) for spec in affected_versions)
 
 
 class IntelService:
@@ -213,8 +372,11 @@ class IntelService:
 
         # Step 3: Filter by version if specified
         if version:
-            # TODO: Add version range matching logic
-            pass
+            results_with_confidence = [
+                (cve, confidence)
+                for cve, confidence in results_with_confidence
+                if _is_version_affected(version, cve.affected_versions)
+            ]
 
         return results_with_confidence[:limit]
 

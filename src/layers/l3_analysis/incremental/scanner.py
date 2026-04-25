@@ -221,10 +221,80 @@ class IncrementalScanner:
         logger.info("Incremental scanner initialized")
 
     def _compute_project_hash(self) -> str:
-        """Compute a hash to identify this project."""
+        """Compute a content-based SHA256 hash to identify this project.
+
+        Hashes the content of key project manifest files and a sample of the
+        directory structure so that meaningful changes produce a different hash
+        while remaining fast to compute.
+        """
         import hashlib
-        content = f"{self.project_path.name}:{self.project_path.stat().st_size}"
-        return hashlib.md5(content.encode()).hexdigest()[:8]
+
+        hasher = hashlib.sha256()
+
+        # --- Phase 1: Hash key project manifest files ---
+        manifest_files = [
+            "go.mod",
+            "go.sum",
+            "package.json",
+            "package-lock.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            "requirements.txt",
+            "Pipfile.lock",
+            "pyproject.toml",
+            "setup.py",
+            "setup.cfg",
+            "poetry.lock",
+            "pom.xml",
+            "build.gradle",
+            "build.gradle.kts",
+            "Cargo.toml",
+            "Cargo.lock",
+            "Gemfile",
+            "Gemfile.lock",
+            "composer.json",
+            "composer.lock",
+            "mix.exs",
+            "pubspec.yaml",
+            "pubspec.lock",
+            "project.clj",
+            "deps.edn",
+            "build.sbt",
+            "Makefile",
+            "CMakeLists.txt",
+            "meson.build",
+            "bazel",
+        ]
+
+        for manifest in manifest_files:
+            manifest_path = self.project_path / manifest
+            try:
+                if manifest_path.is_file():
+                    hasher.update(manifest.encode())
+                    hasher.update(manifest_path.read_bytes())
+            except OSError:
+                # File may not be readable; skip gracefully
+                continue
+
+        # --- Phase 2: Hash directory structure (first 100 files) ---
+        try:
+            count = 0
+            for entry in sorted(self.project_path.rglob("*")):
+                if not entry.is_file():
+                    continue
+                # Skip hidden and dependency directories
+                parts = entry.relative_to(self.project_path).parts
+                if any(p.startswith(".") or p in ("node_modules", "vendor", "__pycache__", ".venv", "venv") for p in parts):
+                    continue
+                hasher.update(str(entry.relative_to(self.project_path)).encode())
+                count += 1
+                if count >= 100:
+                    break
+        except OSError:
+            # Directory traversal may fail; best-effort
+            pass
+
+        return hasher.hexdigest()
 
     async def scan(self) -> IncrementalScanResult:
         """
@@ -426,18 +496,109 @@ class IncrementalScanner:
         """
         Scan a single file for vulnerabilities.
 
-        This is a placeholder that would be replaced with actual
-        scanner integration in production.
+        Attempts, in order:
+        1. SemgrepEngine -- fast pattern-based scan on the single file.
+        2. OpenCodeAgent  -- LLM-based deep analysis as a fallback.
 
         Args:
-            file_path: Path to the file to scan.
+            file_path: Relative or absolute path to the file to scan.
 
         Returns:
-            List of findings for this file.
+            List of finding dicts for this file.
         """
-        # Placeholder: In production, this would call Semgrep/CodeQL/Agent
-        await asyncio.sleep(0.1)  # Simulate scan time
+        full_path = self.project_path / file_path if not Path(file_path).is_absolute() else Path(file_path)
+
+        if not full_path.exists():
+            logger.debug(f"_scan_single_file: file does not exist: {full_path}")
+            return []
+
+        # ------------------------------------------------------------------
+        # Strategy 1: SemgrepEngine
+        # ------------------------------------------------------------------
+        try:
+            from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
+
+            engine = SemgrepEngine()
+            if engine.is_available():
+                result = await engine.scan(
+                    source_path=full_path,
+                    use_auto_config=True,
+                    use_rule_gating=False,
+                    use_finding_budget=False,
+                    use_file_filtering=False,
+                    use_ast_validation=False,
+                )
+                findings = [
+                    self._finding_to_dict(f, file_path)
+                    for f in result.findings
+                ]
+                if findings:
+                    logger.debug(
+                        f"Semgrep found {len(findings)} issues in {file_path}"
+                    )
+                    return findings
+        except Exception as exc:
+            logger.debug(f"Semgrep single-file scan failed for {file_path}: {exc}")
+
+        # ------------------------------------------------------------------
+        # Strategy 2: OpenCodeAgent (LLM-based fallback)
+        # ------------------------------------------------------------------
+        try:
+            from src.layers.l3_analysis.engines.opencode_agent import OpenCodeAgent
+
+            agent = OpenCodeAgent()
+            if agent.is_available():
+                result = await agent.scan(
+                    source_path=full_path,
+                    files=[str(full_path)],
+                )
+                findings = [
+                    self._finding_to_dict(f, file_path)
+                    for f in result.findings
+                ]
+                if findings:
+                    logger.debug(
+                        f"Agent found {len(findings)} issues in {file_path}"
+                    )
+                return findings
+        except Exception as exc:
+            logger.debug(f"Agent single-file scan failed for {file_path}: {exc}")
+
+        # No engine could analyse the file
         return []
+
+    @staticmethod
+    def _finding_to_dict(finding: Any, file_path: str) -> dict[str, Any]:
+        """Convert a Finding model instance to a plain dict for storage."""
+        result: dict[str, Any] = {
+            "file_path": file_path,
+            "title": getattr(finding, "title", ""),
+            "description": getattr(finding, "description", ""),
+            "severity": str(getattr(finding, "severity", "info")),
+            "confidence": getattr(finding, "confidence", 0.0),
+            "type": str(getattr(finding, "type", "info")),
+        }
+
+        rule_id = getattr(finding, "rule_id", None)
+        if rule_id:
+            result["rule_id"] = rule_id
+
+        fix = getattr(finding, "fix_suggestion", None)
+        if fix:
+            result["fix_suggestion"] = fix
+
+        location = getattr(finding, "location", None)
+        if location:
+            result["line_start"] = getattr(location, "line", None)
+            result["line_end"] = getattr(location, "end_line", None)
+            result["snippet"] = getattr(location, "snippet", None)
+            result["function"] = getattr(location, "function", None)
+
+        metadata = getattr(finding, "metadata", None)
+        if metadata:
+            result["metadata"] = metadata
+
+        return result
 
     async def full_scan(self) -> IncrementalScanResult:
         """

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { Card } from '@/components/ui'
 import { Monitor } from 'lucide-react'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -11,8 +11,9 @@ type ConnectionStatus = 'idle' | 'checking' | 'connected' | 'failed'
 
 export default function SettingsPage() {
   const { t } = useLanguage()
-  const [uptime, setUptime] = useState('00:00:00')
-  const startTime = useRef(Date.now())
+  const [uptime] = useState('N/A')
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'failed'>('checking')
+  const [wsStatus, setWsStatus] = useState<'checking' | 'active' | 'inactive'>('checking')
 
   // LLM Config state
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigListItem[]>([])
@@ -31,18 +32,20 @@ export default function SettingsPage() {
   })
   const [savingSettings, setSavingSettings] = useState(false)
 
-  // Update uptime every second (time since page load)
+  // Health check for backend and WebSocket status
   useEffect(() => {
-    const updateUptime = () => {
-      const elapsed = Math.floor((Date.now() - startTime.current) / 1000)
-      const hours = String(Math.floor(elapsed / 3600)).padStart(2, '0')
-      const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0')
-      const seconds = String(elapsed % 60).padStart(2, '0')
-      setUptime(`${hours}:${minutes}:${seconds}`)
+    const checkHealth = async () => {
+      try {
+        await systemApi.get()
+        setBackendStatus('connected')
+        // If REST API is reachable, assume WS is available too
+        setWsStatus('active')
+      } catch {
+        setBackendStatus('failed')
+        setWsStatus('inactive')
+      }
     }
-    updateUptime()
-    const interval = setInterval(updateUptime, 1000)
-    return () => clearInterval(interval)
+    checkHealth()
   }, [])
 
   // Load LLM configs
@@ -123,7 +126,7 @@ export default function SettingsPage() {
         newResults[config.id] = result.value.result
       } else {
         newStatuses[config.id] = 'failed'
-        newResults[config.id] = { success: false, message: '检测失败' }
+        newResults[config.id] = { success: false, message: t('p16.checkFailed') }
       }
     })
 
@@ -190,12 +193,12 @@ export default function SettingsPage() {
         <Card className="glass-panel col-span-2">
           <div className="flex items-center gap-3 mb-6">
             <span className="text-2xl">🤖</span>
-            <h3 className="text-cyan font-mono font-bold text-lg">LLM 配置</h3>
+            <h3 className="text-cyan font-mono font-bold text-lg">{t('p16.llmConfig')}</h3>
           </div>
 
           {loadingConfigs ? (
             <div className="text-center py-8 text-text-secondary font-mono">
-              加载中...
+              {t('p16.loading')}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-6">
@@ -213,8 +216,8 @@ export default function SettingsPage() {
                 ) : (
                   <Card className="glass-panel py-12 text-center text-text-tertiary font-mono">
                     <div className="text-3xl mb-2">🔵</div>
-                    <div className="font-bold mb-1">Agent 扫描配置</div>
-                    <div className="text-sm">未配置</div>
+                    <div className="font-bold mb-1">{t('p16.agentScanConfig')}</div>
+                    <div className="text-sm">{t('p16.notConfigured')}</div>
                   </Card>
                 )
               })()}
@@ -233,8 +236,8 @@ export default function SettingsPage() {
                 ) : (
                   <Card className="glass-panel py-12 text-center text-text-tertiary font-mono">
                     <div className="text-3xl mb-2">🟠</div>
-                    <div className="font-bold mb-1">对抗性验证配置</div>
-                    <div className="text-sm">未配置</div>
+                    <div className="font-bold mb-1">{t('p16.adversarialConfig')}</div>
+                    <div className="text-sm">{t('p16.notConfigured')}</div>
                   </Card>
                 )
               })()}
@@ -273,15 +276,19 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2">
               <div className="text-text-secondary">{t('settings.backend')}</div>
-              <div className="text-success">{t('settings.connected')}</div>
+              <div className={backendStatus === 'connected' ? 'text-success' : backendStatus === 'failed' ? 'text-critical' : 'text-text-tertiary'}>
+                {backendStatus === 'connected' ? t('settings.connected') : backendStatus === 'failed' ? t('p16.disconnected') : t('p16.loading')}
+              </div>
             </div>
             <div className="space-y-2">
               <div className="text-text-secondary">{t('settings.websocket')}</div>
-              <div className="text-success">{t('settings.active')}</div>
+              <div className={wsStatus === 'active' ? 'text-success' : wsStatus === 'inactive' ? 'text-critical' : 'text-text-tertiary'}>
+                {wsStatus === 'active' ? t('settings.active') : wsStatus === 'inactive' ? t('p16.inactive') : t('p16.loading')}
+              </div>
             </div>
             <div className="space-y-2">
               <div className="text-text-secondary">{t('settings.uptime')}</div>
-              <div className="text-cyan">{uptime}</div>
+              <div className="text-cyan">{t('p16.notAvailable')}</div>
             </div>
           </div>
         </Card>

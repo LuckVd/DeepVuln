@@ -256,5 +256,8 @@ class EngineRegistry:
         return list(self._engines.keys())
 
 
-# Global registry instance
+# Global registry instance.
+# NOTE: Currently unused in the main scan flow (SmartScanner/ScanOrchestrator
+# instantiate engines directly). Retained for potential future use as a
+# service-locator or plugin-discovery mechanism.
 engine_registry = EngineRegistry()

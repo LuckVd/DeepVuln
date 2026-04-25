@@ -511,6 +511,20 @@ class SmartScanner:
                     )
             return None
 
+        elif engine_name == "ast_engine":
+            # AST engine - tree-sitter based structural analysis
+            ast_engine = None
+            if self.engine_registry:
+                ast_engine = self.engine_registry.get("ast_engine")
+            if ast_engine is None:
+                from src.layers.l3_analysis.engines.ast_engine.ast_engine import (
+                    ASTEngine,
+                )
+                ast_engine = ASTEngine()
+            if ast_engine and ast_engine.is_available():
+                return await ast_engine.scan(source_path=source_path)
+            return None
+
         return None
 
 

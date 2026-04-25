@@ -9,10 +9,12 @@ the base three-role debate system with:
 - Rule extraction from successful verifications
 """
 
+import json
 import logging
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from ..llm.client import LLMClient
@@ -37,6 +39,8 @@ from .strategy_library import (
 )
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_RULES_CACHE_DIR = Path.home() / ".cache" / "deepvuln" / "rules"
 
 
 class EnhancedVerificationConfig:
@@ -168,8 +172,10 @@ class EnhancedAdversarialVerification:
         )
         self.convergence_checker = ConvergenceChecker(config=convergence_config)
 
-        # Track extracted rules
-        self.extracted_rules: list[dict[str, Any]] = []
+        # Track extracted rules (persisted to disk)
+        self._rules_cache_dir = _DEFAULT_RULES_CACHE_DIR
+        self._rules_cache_file = self._rules_cache_dir / "adversarial_extracted_rules.json"
+        self.extracted_rules: list[dict[str, Any]] = self._load_rules()
 
         # Statistics
         self._stats = {
@@ -610,40 +616,81 @@ class EnhancedAdversarialVerification:
         findings: list[Finding | dict[str, Any]],
         source_path: str,
         code_fetcher: Callable | None = None,
+        max_concurrent: int = 3,
     ) -> VerificationSession:
         """
-        Verify multiple vulnerability findings.
+        Verify multiple vulnerability findings with controlled parallelism.
 
         Args:
             findings: List of findings to verify.
             source_path: Path to the source code.
             code_fetcher: Optional function to fetch code for each finding.
+            max_concurrent: Maximum concurrent verifications.
 
         Returns:
             VerificationSession with all results.
         """
+        import asyncio
+
         session = VerificationSession(
             session_id=str(uuid.uuid4())[:12],
             source_path=source_path,
         )
 
-        for finding in findings:
-            # Get code context
-            if code_fetcher:
-                code_context, related_code = await code_fetcher(finding)
-            else:
-                code_context = self.base_verifier._get_default_code_context(finding)
-                related_code = None
+        semaphore = asyncio.Semaphore(max_concurrent)
 
-            result = await self.verify_finding(
-                finding=finding,
-                code_context=code_context,
-                related_code=related_code,
-            )
-            session.add_result(result)
+        async def _verify_one(finding: Finding | dict[str, Any]) -> None:
+            async with semaphore:
+                # Get code context
+                if code_fetcher:
+                    code_context, related_code = await code_fetcher(finding)
+                else:
+                    code_context = self.base_verifier._get_default_code_context(finding)
+                    related_code = None
+
+                result = await self.verify_finding(
+                    finding=finding,
+                    code_context=code_context,
+                    related_code=related_code,
+                )
+                session.add_result(result)
+
+        await asyncio.gather(*[_verify_one(f) for f in findings])
 
         session.completed_at = datetime.now(UTC)
+
+        # Persist extracted rules after batch
+        if self.extracted_rules:
+            self._save_rules()
+
         return session
+
+    def _load_rules(self) -> list[dict[str, Any]]:
+        """Load previously extracted rules from disk cache.
+
+        Returns:
+            List of rule dicts, or empty list on failure.
+        """
+        try:
+            if self._rules_cache_file.exists():
+                with open(self._rules_cache_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    logger.info(f"Loaded {len(data)} cached adversarial rules from {self._rules_cache_file}")
+                    return data
+        except Exception as e:
+            logger.warning(f"Failed to load cached rules: {e}")
+        return []
+
+    def _save_rules(self) -> None:
+        """Persist extracted rules to disk cache."""
+        try:
+            self._rules_cache_dir.mkdir(parents=True, exist_ok=True)
+            with open(self._rules_cache_file, "w", encoding="utf-8") as f:
+                json.dump(self.extracted_rules, f, ensure_ascii=False, indent=2)
+            logger.info(f"Saved {len(self.extracted_rules)} adversarial rules to {self._rules_cache_file}")
+        except Exception as e:
+            logger.warning(f"Failed to save extracted rules: {e}")
 
     def get_statistics(self) -> dict[str, Any]:
         """Get verification statistics."""

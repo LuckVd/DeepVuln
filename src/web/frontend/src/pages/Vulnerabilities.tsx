@@ -15,6 +15,14 @@ import { useGlobalVulns, useGlobalVulnsSummary, useUpdateFindingStatus } from '@
 import type { Finding, FindingStatus, SeverityLevel } from '@/types/models';
 import { getVulnTypeName } from '@/utils/ruleTranslations';
 
+// Badge variant types used in the table
+type BadgeVariant = 'critical' | 'high' | 'medium' | 'low' | 'info' | 'pending' | 'completed' | 'failed';
+
+// Finding from global vulns endpoint includes scan_name
+interface GlobalFinding extends Finding {
+  scan_name?: string;
+}
+
 /**
  * Global vulnerabilities page with cyberpunk theme
  */
@@ -64,7 +72,7 @@ export default function VulnerabilitiesPage() {
   };
 
   const handleViewDetail = (finding: Finding) => {
-    navigate(`/scans/${finding.scan_id}/findings`);
+    navigate(`/scans/${finding.scan_id}/findings?highlight=${finding.id}`);
   };
 
   const handleStatusChange = (finding: Finding & { scan_name: string }, newStatus: FindingStatus) => {
@@ -174,7 +182,7 @@ export default function VulnerabilitiesPage() {
       </Card>
 
       {/* Vulnerabilities Table */}
-      <Card className="glass-panel overflow-hidden">
+      <Card className="glass-panel">
         {isLoading ? (
           <div className="text-center text-text-secondary font-mono py-16">
             <span className="inline-flex items-center gap-2">
@@ -227,12 +235,12 @@ export default function VulnerabilitiesPage() {
                       <td className="p-4 font-mono text-cyan">#{String(finding.id).padStart(4, '0')}</td>
                       <td className="p-4 text-text-primary">{getVulnTypeName(finding.vuln_type)}</td>
                       <td className="p-4">
-                        <Badge variant={finding.severity as any} className="min-w-[90px] justify-center">
+                        <Badge variant={finding.severity as BadgeVariant} className="min-w-[90px] justify-center">
                           {t(`severity.${finding.severity}`)}
                         </Badge>
                       </td>
                       <td className="p-4">
-                        <Badge variant={statusVariant as any} className="min-w-[90px] justify-center">
+                        <Badge variant={statusVariant as BadgeVariant} className="min-w-[90px] justify-center">
                           {t(`status.${finding.status === 'false_positive' ? 'failed' : finding.status}`)}
                         </Badge>
                       </td>
@@ -240,7 +248,7 @@ export default function VulnerabilitiesPage() {
                         {finding.file_path.split('/').slice(-2).join('/')}:{finding.line_start}
                       </td>
                       <td className="p-4 text-text-dim font-mono text-xs">
-                        {(finding as any).scan_name || `#${finding.scan_id}`}
+                        {(finding as GlobalFinding).scan_name || `#${finding.scan_id}`}
                       </td>
                       <td className="p-4 text-text-tertiary font-mono text-xs">
                         {finding.engine}

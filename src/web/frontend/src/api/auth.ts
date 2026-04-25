@@ -5,6 +5,7 @@ export interface LoginResponse {
   token_type: string
   must_change_password: boolean
   username: string
+  user_id: number
 }
 
 export interface UserInfo {

@@ -10,10 +10,14 @@ from src.layers.l3_analysis.engines.ast_engine.detectors.crypto_detector import 
 from src.layers.l3_analysis.engines.ast_engine.detectors.deserialization_detector import (
     DeserializationDetector,
 )
+from src.layers.l3_analysis.engines.ast_engine.detectors.framework_detector import (
+    FrameworkDetector,
+)
 
 __all__ = [
     "BaseDetector",
     "DangerousAPIDetector",
     "CryptoMisuseDetector",
     "DeserializationDetector",
+    "FrameworkDetector",
 ]

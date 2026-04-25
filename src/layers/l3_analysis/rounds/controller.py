@@ -269,9 +269,6 @@ class RoundController:
 
         # Check for critical findings
         if self.stop_on_critical:
-            critical_candidates = current_round.get_candidates_by_severity(
-                [type('SeverityLevel', (), {'value': 'critical'})]
-            )
             for candidate in current_round.candidates:
                 if (
                     candidate.finding.severity.value == "critical"

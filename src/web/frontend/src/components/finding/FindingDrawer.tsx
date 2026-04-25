@@ -21,8 +21,8 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { translateDescription, translateRemediation, getVulnTypeName } from '@/utils/ruleTranslations';
-import { formatDateTime, setTimezone } from '@/utils/format';
-import { systemSettingsApi } from '@/api/system';
+import { formatDateTime } from '@/utils/format';
+import { useSystemSettings } from '@/hooks/useSystemSettings';
 import { scansApi } from '@/api/scans';
 import type {
   Finding,
@@ -77,25 +77,12 @@ export default function FindingDrawer({
 }: FindingDrawerProps) {
   const { t } = useLanguage();
   const [debateData, setDebateData] = useState<AdversarialDebate | null>(null);
+
+  // 加载系统时区设置 (cached via React Query with 5-min staleTime)
+  useSystemSettings();
   const [debateLoading, setDebateLoading] = useState(false);
   const [debateError, setDebateError] = useState(false);
   const [expandedRounds, setExpandedRounds] = useState<Record<number, boolean>>({ 1: true });
-
-  // 加载系统时区设置
-  useEffect(() => {
-    const loadTimezone = async () => {
-      try {
-        const response = await systemSettingsApi.get();
-        const tz = response.categories?.general?.['general.timezone'];
-        if (tz && typeof tz === 'string') {
-          setTimezone(tz);
-        }
-      } catch (error) {
-        console.error('Failed to load timezone setting:', error);
-      }
-    };
-    loadTimezone();
-  }, []);
 
   // Load adversarial debate data when finding changes
   useEffect(() => {
@@ -821,13 +808,30 @@ function DebateRoundCard({
   );
 }
 
+// Combined argument data type covering both attacker and defender fields
+interface ArgumentData {
+  claim?: string;
+  evidence?: string[];
+  reasoning?: string;
+  strength?: string;
+  confidence?: number;
+  // Attacker-specific fields
+  poc_code?: string;
+  poc_type?: string;
+  exploitation_steps?: string[];
+  // Defender-specific fields
+  sanitizers_found?: string[];
+  validation_checks?: string[];
+  false_positive_reasons?: string[];
+}
+
 function ArgumentCard({
   role,
   data,
   t,
 }: {
   role: 'attacker' | 'defender';
-  data: NonNullable<AdversarialRound['attacker_argument']>;
+  data: ArgumentData;
   t: (key: string) => string;
 }) {
   const isAttacker = role === 'attacker';
@@ -873,39 +877,39 @@ function ArgumentCard({
       )}
 
       {/* Attacker-specific: PoC and exploitation steps */}
-      {isAttacker && (data as any).poc_code && (
+      {isAttacker && data.poc_code && (
         <div>
           <div className="text-text-tertiary font-mono text-xs mb-1">{t('findings.pocCode')}:</div>
           <pre className="text-xs font-mono bg-background-tertiary p-2 rounded overflow-x-auto border border-border">
-            {(data as any).poc_code}
+            {data.poc_code}
           </pre>
         </div>
       )}
-      {isAttacker && (data as any).exploitation_steps && (data as any).exploitation_steps.length > 0 && (
+      {isAttacker && data.exploitation_steps && data.exploitation_steps.length > 0 && (
         <div>
           <div className="text-text-tertiary font-mono text-xs mb-1">{t('findings.exploitationSteps')}:</div>
           <ol className="text-text-secondary text-sm list-decimal list-inside space-y-0.5">
-            {(data as any).exploitation_steps.map((s: string, i: number) => <li key={i}>{s}</li>)}
+            {data.exploitation_steps.map((s, i) => <li key={i}>{s}</li>)}
           </ol>
         </div>
       )}
 
       {/* Defender-specific: sanitizers and false positive reasons */}
-      {!isAttacker && (data as any).sanitizers_found && (data as any).sanitizers_found.length > 0 && (
+      {!isAttacker && data.sanitizers_found && data.sanitizers_found.length > 0 && (
         <div>
           <div className="text-text-tertiary font-mono text-xs mb-1">{t('findings.sanitizersFound')}:</div>
           <div className="flex flex-wrap gap-1">
-            {(data as any).sanitizers_found.map((s: string, i: number) => (
+            {data.sanitizers_found.map((s, i) => (
               <span key={i} className="text-xs px-2 py-0.5 rounded bg-success/10 text-success">{s}</span>
             ))}
           </div>
         </div>
       )}
-      {!isAttacker && (data as any).false_positive_reasons && (data as any).false_positive_reasons.length > 0 && (
+      {!isAttacker && data.false_positive_reasons && data.false_positive_reasons.length > 0 && (
         <div>
           <div className="text-text-tertiary font-mono text-xs mb-1">{t('findings.fpReasons')}:</div>
           <ul className="text-text-secondary text-sm list-disc list-inside">
-            {(data as any).false_positive_reasons.map((r: string, i: number) => <li key={i}>{r}</li>)}
+            {data.false_positive_reasons.map((r, i) => <li key={i}>{r}</li>)}
           </ul>
         </div>
       )}

@@ -7,6 +7,7 @@ from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.ast_engine.detectors import (
     DeserializationDetector,
     DangerousAPIDetector,
+    FrameworkDetector,
 )
 from src.layers.l3_analysis.engines.ast_engine.detectors.crypto_detector import (
     CryptoMisuseDetector,
@@ -64,14 +65,11 @@ class ASTEngine(BaseEngine):
         self._tree_sitter_manager = TreeSitterManager()
 
         # Initialize detectors (P8-03)
-        from src.layers.l3_analysis.engines.ast_engine.detectors.deserialization_detector import (
-            DeserializationDetector,
-        )
-
         self._detectors = [
             DangerousAPIDetector(),
             CryptoMisuseDetector(),
             DeserializationDetector(),
+            FrameworkDetector(),
         ]
 
         # Collect rule IDs from all detectors

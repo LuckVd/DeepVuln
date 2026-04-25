@@ -514,7 +514,8 @@ class SecurityAuditPrompt:
 6. 始终仅使用有效的 JSON 响应 - 不要包含额外文本
 7. **关键**: 像攻击者一样思考 - 什么可能出错？
 8. **关键**: 有疑问时，添加到 suspicious_code 而不是跳过
-9. **关键**: title、description 和 recommendation 必须使用中文"""  # noqa: E501
+9. **关键**: title、description 和 recommendation 必须使用中文
+10. **关键**: 在评估 user_controlled 时，必须参考 CALL CHAIN ANALYSIS 部分。如果所有调用者传入的都是硬编码字面量（如字符串 "api"、数字 42），则 user_controlled 必须为 false，severity 不应高于 info/low。不要假设参数可能被外部控制——依据实际调用证据判断。"""  # noqa: E501
 
     def get_user_prompt_for_file(
         self,

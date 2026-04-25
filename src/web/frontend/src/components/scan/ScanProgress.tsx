@@ -1,3 +1,8 @@
+/**
+ * @deprecated ScanProgress component is not currently used in any page.
+ * ScanDetail.tsx renders progress inline instead. This component is kept
+ * for potential reuse if a dedicated progress view is needed later.
+ */
 import React, { useMemo, useState } from 'react';
 import { Card, Badge, Progress, Statistic, Timeline, Collapsible, CollapsibleTrigger, CollapsibleContent, Button } from '@/components/ui';
 import { Check, Loader2, Clock, X, Pause, ChevronDown, ChevronRight } from 'lucide-react';

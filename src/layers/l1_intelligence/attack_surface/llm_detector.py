@@ -516,7 +516,6 @@ class LLMFullDetector:
         self.max_files_to_analyze = max_files_to_analyze
         self.logger = get_logger(__name__)
         self._tree_generator = ProjectTreeGenerator()
-        self._cache: dict[str, Any] = {}
 
     async def detect_full(
         self,
@@ -1325,10 +1324,6 @@ Language: {language}
             ".thrift": "Thrift",
         }
         return extension_to_lang.get(file_path.suffix.lower(), "Unknown")
-
-    def clear_cache(self) -> None:
-        """Clear the detection cache."""
-        self._cache.clear()
 
 
 # =============================================================================

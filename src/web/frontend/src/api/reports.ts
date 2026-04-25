@@ -33,6 +33,16 @@ export const reportsApi = {
   },
 
   /**
+   * 导出 HTML 格式报告
+   */
+  async exportHtml(scanId: number): Promise<Blob> {
+    const response = await client.get(`/scans/${scanId}/report/pdf`, {
+      responseType: 'blob',
+    })
+    return response.data
+  },
+
+  /**
    * 下载文件
    */
   downloadBlob(blob: Blob, filename: string) {

@@ -117,6 +117,7 @@ async def _execute_scan_async(
             progress_callback=progress_broadcaster,
             db_session_factory=async_session_maker,
             llm_client=llm_client,
+            source_type=scan.source_type,
         )
 
         # Execute scan

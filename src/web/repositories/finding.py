@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from sqlalchemy import select, and_, case
+from sqlalchemy import select, and_, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.web.models.finding import Finding
@@ -39,6 +39,7 @@ class FindingRepository(
         severity: Optional[str] = None,
         status: Optional[str] = None,
         engine: Optional[str] = None,
+        search: Optional[str] = None,
         sort_field: Optional[str] = None,
         sort_dir: Optional[str] = None,
     ) -> list[Finding]:
@@ -53,6 +54,7 @@ class FindingRepository(
             severity: Optional severity filter
             status: Optional status filter
             engine: Optional engine filter
+            search: Optional keyword search (matches vuln_type, file_path, title, description)
             sort_field: Sort field (severity, confidence, engine)
             sort_dir: Sort direction (asc, desc)
 
@@ -67,6 +69,16 @@ class FindingRepository(
             query = query.where(Finding.status == status)
         if engine:
             query = query.where(Finding.engine == engine)
+        if search:
+            pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    Finding.vuln_type.ilike(pattern),
+                    Finding.file_path.ilike(pattern),
+                    Finding.title.ilike(pattern),
+                    Finding.description.ilike(pattern),
+                )
+            )
 
         # Build ORDER BY clauses
         order_clauses = []

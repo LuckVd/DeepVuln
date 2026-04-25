@@ -338,26 +338,38 @@ def get_source_registry() -> SourceRegistry:
 
 def _load_default_sinks() -> None:
     """Load default sink libraries."""
-    from src.layers.l3_analysis.sinks_sources import java, python, go, php, javascript
-
-    if _sink_registry:
-        _sink_registry.register(java.get_sink_library())
-        _sink_registry.register(python.get_sink_library())
-        _sink_registry.register(go.get_sink_library())
-        _sink_registry.register(php.get_sink_library())
-        _sink_registry.register(javascript.get_sink_library())
+    if not _sink_registry:
+        return
+    _language_modules = ["java", "python", "go", "php", "javascript"]
+    for lang in _language_modules:
+        try:
+            mod = __import__(
+                f"src.layers.l3_analysis.sinks_sources.{lang}",
+                fromlist=["get_sink_library"],
+            )
+            _sink_registry.register(mod.get_sink_library())
+        except ImportError:
+            _sink_registry.logger.warning(f"Sink module not found for language: {lang}")
+        except Exception as e:
+            _sink_registry.logger.warning(f"Failed to load sinks for {lang}: {e}")
 
 
 def _load_default_sources() -> None:
     """Load default source libraries."""
-    from src.layers.l3_analysis.sinks_sources import java, python, go, php, javascript
-
-    if _source_registry:
-        _source_registry.register(java.get_source_library())
-        _source_registry.register(python.get_source_library())
-        _source_registry.register(go.get_source_library())
-        _source_registry.register(php.get_source_library())
-        _source_registry.register(javascript.get_source_library())
+    if not _source_registry:
+        return
+    _language_modules = ["java", "python", "go", "php", "javascript"]
+    for lang in _language_modules:
+        try:
+            mod = __import__(
+                f"src.layers.l3_analysis.sinks_sources.{lang}",
+                fromlist=["get_source_library"],
+            )
+            _source_registry.register(mod.get_source_library())
+        except ImportError:
+            _source_registry.logger.warning(f"Source module not found for language: {lang}")
+        except Exception as e:
+            _source_registry.logger.warning(f"Failed to load sources for {lang}: {e}")
 
 
 __all__ = [

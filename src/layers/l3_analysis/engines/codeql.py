@@ -621,8 +621,8 @@ class CodeQLEngine(BaseEngine):
         """
         Compute a hash of the source code for cache key.
 
-        Uses file paths and modification times for quick hashing.
-        For large projects, samples a subset of files for performance.
+        Uses file content hashes (sampled for large files) instead of mtime
+        so that the cache key is stable across touch/rebuild operations.
 
         Args:
             source_path: Path to the source code.
@@ -662,8 +662,8 @@ class CodeQLEngine(BaseEngine):
             hasher.update(str(source_path.absolute()).encode())
             return hasher.hexdigest()[:16]
 
-        # Collect files with their mtimes
-        files_info = []
+        # Collect files with their relative paths for deterministic ordering
+        file_paths: list[Path] = []
         for ext in target_extensions:
             for file_path in source_path.rglob(f"*{ext}"):
                 # Skip common non-source directories
@@ -672,25 +672,35 @@ class CodeQLEngine(BaseEngine):
                     "dist", "build", "target", ".gradle", ".idea", ".vscode",
                 ]):
                     continue
-                try:
-                    stat = file_path.stat()
-                    # Use relative path and mtime for quick hash
-                    rel_path = file_path.relative_to(source_path)
-                    files_info.append((str(rel_path), stat.st_mtime, stat.st_size))
-                except OSError:
-                    continue
+                file_paths.append(file_path)
 
-        # Sort for deterministic ordering
-        files_info.sort()
+        # Sort by relative path for deterministic ordering
+        try:
+            file_paths.sort(key=lambda p: str(p.relative_to(source_path)))
+        except ValueError:
+            file_paths.sort(key=str)
 
         # Limit to first 1000 files for performance
-        for rel_path, mtime, size in files_info[:1000]:
-            hasher.update(rel_path.encode())
-            hasher.update(str(mtime).encode())
-            hasher.update(str(size).encode())
+        SAMPLE_SIZE = 4096  # Read first 4KB of each file
+        for file_path in file_paths[:1000]:
+            try:
+                rel_path = str(file_path.relative_to(source_path))
+                hasher.update(rel_path.encode())
+                # Hash file content instead of mtime
+                with open(file_path, "rb") as f:
+                    content_sample = f.read(SAMPLE_SIZE)
+                hasher.update(hashlib.sha256(content_sample).hexdigest().encode())
+            except OSError:
+                # If file cannot be read, still include the path for uniqueness
+                try:
+                    rel_path = str(file_path.relative_to(source_path))
+                except ValueError:
+                    rel_path = str(file_path)
+                hasher.update(rel_path.encode())
+                hasher.update(b"<unreadable>")
 
         # Add total file count for uniqueness
-        hasher.update(str(len(files_info)).encode())
+        hasher.update(str(len(file_paths)).encode())
 
         # Add source path for additional uniqueness
         hasher.update(str(source_path.absolute()).encode())
@@ -1192,7 +1202,13 @@ class CodeQLEngine(BaseEngine):
                 )
 
             # Parse and merge findings from all successful suites
-            sarif_output = successful_suites[0][1]  # Keep first for raw_output
+            # Merge all suite SARIFs into a combined raw_output
+            sarif_output = successful_suites[0][1]
+            if len(successful_suites) > 1:
+                combined_runs = list(sarif_output.get("runs", []))
+                for _, extra_sarif in successful_suites[1:]:
+                    combined_runs.extend(extra_sarif.get("runs", []))
+                sarif_output = {**sarif_output, "runs": combined_runs}
             for suite_name, suite_sarif in successful_suites:
                 try:
                     suite_findings = self._parse_sarif(

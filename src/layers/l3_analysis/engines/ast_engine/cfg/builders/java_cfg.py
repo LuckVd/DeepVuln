@@ -1,8 +1,19 @@
 """
 Java CFG Builder - Control Flow Graph builder for Java.
 
-Implements CFG construction for Java code.
+Implements CFG construction for Java code, supporting:
+- if/else statements
+- for loops (classic and enhanced)
+- while loops
+- do-while loops
+- switch/case/default statements
+- try/catch/finally statements
+- synchronized blocks
+- assert statements
+- break/continue/return/throw
 """
+
+from typing import Any
 
 from src.layers.l3_analysis.engines.ast_engine.cfg.base import LanguageCFGBuilder
 from src.layers.l3_analysis.engines.ast_engine.cfg.models import (
@@ -13,37 +24,56 @@ from src.layers.l3_analysis.engines.ast_engine.cfg.models import (
 
 
 class JavaCFGBuilder(LanguageCFGBuilder):
-    """Control Flow Graph builder for Java."""
+    """
+    Control Flow Graph builder for Java.
+
+    Supports all Java control flow structures including do-while loops,
+    switch expressions/statements, try-with-resources, synchronized blocks,
+    and assert statements.
+    """
 
     def get_language(self) -> str:
+        """Return 'java'."""
         return "java"
 
     def get_control_flow_types(self) -> set[str]:
+        """Return Java control flow node types."""
         return {
             "if_statement",
             "while_statement",
             "for_statement",
             "do_statement",
             "try_statement",
+            "try_with_resources_statement",
             "switch_expression",
             "switch_statement",
+            "synchronized_statement",
+            "assert_statement",
             "return_statement",
             "break_statement",
             "continue_statement",
             "throw_statement",
+            "labeled_statement",
         }
 
     def get_edge_type_for_statement(self, stmt_type: str) -> CFGEdgeType | None:
+        """Get CFG edge type for a Java statement type."""
         edge_mapping = {
             "if_statement": CFGEdgeType.CONDITIONAL_TRUE,
+            "else_clause": CFGEdgeType.CONDITIONAL_FALSE,
             "while_statement": CFGEdgeType.LOOP_ENTER,
             "for_statement": CFGEdgeType.LOOP_ENTER,
             "do_statement": CFGEdgeType.LOOP_ENTER,
             "try_statement": CFGEdgeType.UNCONDITIONAL,
+            "try_with_resources_statement": CFGEdgeType.UNCONDITIONAL,
             "catch_clause": CFGEdgeType.EXCEPTION,
             "finally_clause": CFGEdgeType.UNCONDITIONAL,
             "switch_expression": CFGEdgeType.CONDITIONAL_TRUE,
             "switch_statement": CFGEdgeType.CONDITIONAL_TRUE,
+            "case_clause": CFGEdgeType.CONDITIONAL_TRUE,
+            "default_clause": CFGEdgeType.CONDITIONAL_FALSE,
+            "synchronized_statement": CFGEdgeType.UNCONDITIONAL,
+            "assert_statement": CFGEdgeType.CONDITIONAL_TRUE,
             "return_statement": CFGEdgeType.UNCONDITIONAL,
             "break_statement": CFGEdgeType.LOOP_EXIT,
             "continue_statement": CFGEdgeType.LOOP_BACK,
@@ -51,23 +81,98 @@ class JavaCFGBuilder(LanguageCFGBuilder):
         }
         return edge_mapping.get(stmt_type)
 
+    # ------------------------------------------------------------------
+    # Basic block identification
+    # ------------------------------------------------------------------
+
     def identify_basic_blocks(
         self,
-        function_body: list,
+        function_body: list[Any],
         file_path: str,
     ) -> list[BasicBlock]:
-        """Identify basic blocks in Java function body."""
-        blocks = []
-        for stmt in function_body:
-            blocks.append(
-                BasicBlock(
-                    start_line=getattr(stmt, "line", 0),
-                    end_line=getattr(stmt, "line", 0),
-                    statements=[stmt],
-                    leader_type=getattr(stmt, "type", None),
+        """
+        Identify basic blocks in a Java function body.
+
+        A basic block starts at:
+        - Function entry
+        - After a conditional branch point
+        - After a loop back edge target
+        - Exception handler entry
+
+        A basic block ends at:
+        - Before a conditional branch
+        - Before a loop
+        - At return/break/continue/throw
+        """
+        if not function_body:
+            return []
+
+        blocks: list[BasicBlock] = []
+        current_block = BasicBlock(
+            start_line=function_body[0].line if function_body else 0,
+            end_line=0,
+        )
+        current_block.is_entry = True
+
+        for i, stmt in enumerate(function_body):
+            stmt_type = getattr(stmt, "type", "")
+
+            if self._is_block_terminator(stmt_type):
+                current_block.end_line = stmt.line
+                current_block.statements.append(stmt)
+                current_block.is_exit = stmt_type in (
+                    "return_statement",
+                    "throw_statement",
                 )
-            )
+                current_block.leader_type = stmt_type
+                blocks.append(current_block)
+
+                if i < len(function_body) - 1:
+                    current_block = BasicBlock(
+                        start_line=function_body[i + 1].line,
+                        end_line=0,
+                    )
+            else:
+                if not current_block.statements:
+                    current_block.start_line = stmt.line
+                current_block.statements.append(stmt)
+                current_block.end_line = stmt.line
+
+        if current_block.statements and current_block not in blocks:
+            if not current_block.is_exit:
+                blocks.append(current_block)
+
         return blocks
+
+    def _is_block_terminator(self, stmt_type: str) -> bool:
+        """Check if a statement type terminates a basic block in Java."""
+        terminators = {
+            "if_statement",
+            "else_clause",
+            "while_statement",
+            "for_statement",
+            "do_statement",
+            "try_statement",
+            "try_with_resources_statement",
+            "catch_clause",
+            "finally_clause",
+            "switch_expression",
+            "switch_statement",
+            "case_clause",
+            "default_clause",
+            "synchronized_statement",
+            "assert_statement",
+            "return_statement",
+            "break_statement",
+            "continue_statement",
+            "throw_statement",
+            "labeled_statement",
+        }
+        return stmt_type in terminators
+
+    # ------------------------------------------------------------------
+    # Edge construction
+    # ------------------------------------------------------------------
 
     def build_cfg_edges(
         self,
@@ -75,14 +180,403 @@ class JavaCFGBuilder(LanguageCFGBuilder):
         function_id: str,
         file_path: str,
     ) -> list[CFGEdge]:
-        """Build CFG edges for Java basic blocks."""
-        edges = []
-        for i in range(len(blocks) - 1):
+        """
+        Build CFG edges between Java basic blocks.
+
+        Handles:
+        - Sequential flow (fall-through)
+        - Conditional branches (if/else)
+        - Loops (for, while, do-while, enhanced for)
+        - Exception handling (try/catch/finally)
+        - Switch/case/default
+        - Synchronized blocks
+        - Assert statements
+        - Control transfers (break/continue/return/throw)
+        """
+        edges: list[CFGEdge] = []
+
+        for i, block in enumerate(blocks):
+            leader_type = block.leader_type
+
+            if leader_type == "if_statement":
+                edges.extend(self._build_if_edges(block, blocks, i))
+            elif leader_type == "while_statement":
+                edges.extend(self._build_while_edges(block, blocks, i))
+            elif leader_type == "for_statement":
+                edges.extend(self._build_for_edges(block, blocks, i))
+            elif leader_type == "do_statement":
+                edges.extend(self._build_do_while_edges(block, blocks, i))
+            elif leader_type in ("try_statement", "try_with_resources_statement"):
+                edges.extend(self._build_try_edges(block, blocks, i))
+            elif leader_type in ("switch_statement", "switch_expression"):
+                edges.extend(self._build_switch_edges(block, blocks, i))
+            elif leader_type == "synchronized_statement":
+                edges.extend(self._build_synchronized_edges(block, blocks, i))
+            elif leader_type == "assert_statement":
+                edges.extend(self._build_assert_edges(block, blocks, i))
+            elif leader_type == "throw_statement":
+                # Exception edges handled by try builder
+                pass
+            elif leader_type == "return_statement":
+                # No outgoing edges from return
+                pass
+            elif leader_type in ("break_statement", "continue_statement"):
+                # Handled by loop edge builders
+                pass
+            else:
+                # Sequential fall-through to next block
+                if i + 1 < len(blocks):
+                    edges.append(
+                        CFGEdge(
+                            edge_type=CFGEdgeType.UNCONDITIONAL,
+                            source=id(block),
+                            target=id(blocks[i + 1]),
+                        )
+                    )
+
+        return edges
+
+    # -- if / else -------------------------------------------------------
+
+    def _build_if_edges(
+        self, if_block: BasicBlock, blocks: list[BasicBlock], index: int
+    ) -> list[CFGEdge]:
+        """Build edges for if/else statements."""
+        edges: list[CFGEdge] = []
+
+        # True branch (if body)
+        if index + 1 < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.CONDITIONAL_TRUE,
+                    source=id(if_block),
+                    target=id(blocks[index + 1]),
+                    condition="if_condition",
+                )
+            )
+
+        # False branch (else)
+        else_index = self._find_else_block(blocks, index)
+        if else_index is not None and else_index < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.CONDITIONAL_FALSE,
+                    source=id(if_block),
+                    target=id(blocks[else_index]),
+                    condition="else_branch",
+                )
+            )
+
+        return edges
+
+    def _find_else_block(
+        self, blocks: list[BasicBlock], if_index: int
+    ) -> int | None:
+        """Find the else block index after an if statement."""
+        for i in range(if_index + 1, len(blocks)):
+            if blocks[i].leader_type == "else_clause":
+                return i
+            if blocks[i].leader_type not in (
+                "if_statement",
+            ):
+                break
+        return None
+
+    # -- while loop ------------------------------------------------------
+
+    def _build_while_edges(
+        self, while_block: BasicBlock, blocks: list[BasicBlock], index: int
+    ) -> list[CFGEdge]:
+        """Build edges for while loops."""
+        edges: list[CFGEdge] = []
+
+        # Entry to loop body
+        if index + 1 < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.LOOP_ENTER,
+                    source=id(while_block),
+                    target=id(blocks[index + 1]),
+                )
+            )
+
+        # Back edge from end of loop body to while condition
+        loop_exit_index = self._find_loop_exit(blocks, index)
+        if loop_exit_index is not None:
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.LOOP_BACK,
+                    source=id(blocks[loop_exit_index]),
+                    target=id(while_block),
+                )
+            )
+
+        # Exit edge from while condition to block after loop
+        if loop_exit_index is not None and loop_exit_index + 1 < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.LOOP_EXIT,
+                    source=id(while_block),
+                    target=id(blocks[loop_exit_index + 1]),
+                    condition="loop_condition_false",
+                )
+            )
+
+        return edges
+
+    # -- for loop --------------------------------------------------------
+
+    def _build_for_edges(
+        self, for_block: BasicBlock, blocks: list[BasicBlock], index: int
+    ) -> list[CFGEdge]:
+        """Build edges for for loops (classic and enhanced for-each)."""
+        edges: list[CFGEdge] = []
+
+        # Entry to loop body
+        if index + 1 < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.LOOP_ENTER,
+                    source=id(for_block),
+                    target=id(blocks[index + 1]),
+                )
+            )
+
+        # Back edge
+        loop_exit_index = self._find_loop_exit(blocks, index)
+        if loop_exit_index is not None:
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.LOOP_BACK,
+                    source=id(blocks[loop_exit_index]),
+                    target=id(for_block),
+                )
+            )
+
+        # Exit edge
+        if loop_exit_index is not None and loop_exit_index + 1 < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.LOOP_EXIT,
+                    source=id(for_block),
+                    target=id(blocks[loop_exit_index + 1]),
+                    condition="loop_condition_false",
+                )
+            )
+
+        return edges
+
+    # -- do-while loop ---------------------------------------------------
+
+    def _build_do_while_edges(
+        self, do_block: BasicBlock, blocks: list[BasicBlock], index: int
+    ) -> list[CFGEdge]:
+        """Build edges for do-while loops."""
+        edges: list[CFGEdge] = []
+
+        # Entry to loop body (always enters at least once)
+        if index + 1 < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.LOOP_ENTER,
+                    source=id(do_block),
+                    target=id(blocks[index + 1]),
+                )
+            )
+
+        # Back edge from end of loop body to do condition
+        loop_exit_index = self._find_loop_exit(blocks, index)
+        if loop_exit_index is not None:
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.LOOP_BACK,
+                    source=id(blocks[loop_exit_index]),
+                    target=id(do_block),
+                    condition="do_while_condition_true",
+                )
+            )
+
+            # Exit when condition is false
+            if loop_exit_index + 1 < len(blocks):
+                edges.append(
+                    CFGEdge(
+                        edge_type=CFGEdgeType.LOOP_EXIT,
+                        source=id(blocks[loop_exit_index]),
+                        target=id(blocks[loop_exit_index + 1]),
+                        condition="do_while_condition_false",
+                    )
+                )
+
+        return edges
+
+    # -- try / catch / finally -------------------------------------------
+
+    def _build_try_edges(
+        self, try_block: BasicBlock, blocks: list[BasicBlock], index: int
+    ) -> list[CFGEdge]:
+        """Build edges for try/catch/finally statements."""
+        edges: list[CFGEdge] = []
+
+        # Normal flow through try body
+        if index + 1 < len(blocks):
             edges.append(
                 CFGEdge(
                     edge_type=CFGEdgeType.UNCONDITIONAL,
-                    source=id(blocks[i]),
-                    target=id(blocks[i + 1]),
+                    source=id(try_block),
+                    target=id(blocks[index + 1]),
                 )
             )
+
+        # Exception edges to catch clauses
+        catch_index = index + 1
+        while catch_index < len(blocks) and blocks[catch_index].leader_type == "catch_clause":
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.EXCEPTION,
+                    source=id(try_block),
+                    target=id(blocks[catch_index]),
+                )
+            )
+            catch_index += 1
+
+        # Finally clause always executes
+        if catch_index < len(blocks) and blocks[catch_index].leader_type == "finally_clause":
+            for j in range(index, catch_index):
+                edges.append(
+                    CFGEdge(
+                        edge_type=CFGEdgeType.UNCONDITIONAL,
+                        source=id(blocks[j]),
+                        target=id(blocks[catch_index]),
+                    )
+                )
+
         return edges
+
+    # -- switch / case ---------------------------------------------------
+
+    def _build_switch_edges(
+        self, switch_block: BasicBlock, blocks: list[BasicBlock], index: int
+    ) -> list[CFGEdge]:
+        """Build edges for switch statements and expressions."""
+        edges: list[CFGEdge] = []
+
+        # Edge to each case/default clause
+        case_index = index + 1
+        while case_index < len(blocks) and blocks[case_index].leader_type in (
+            "case_clause",
+            "default_clause",
+        ):
+            edge_type = (
+                CFGEdgeType.CONDITIONAL_TRUE
+                if blocks[case_index].leader_type == "case_clause"
+                else CFGEdgeType.CONDITIONAL_FALSE
+            )
+            edges.append(
+                CFGEdge(
+                    edge_type=edge_type,
+                    source=id(switch_block),
+                    target=id(blocks[case_index]),
+                )
+            )
+            case_index += 1
+
+        # All cases merge to the block after switch (break exits)
+        if case_index < len(blocks):
+            for j in range(index + 1, case_index):
+                edges.append(
+                    CFGEdge(
+                        edge_type=CFGEdgeType.UNCONDITIONAL,
+                        source=id(blocks[j]),
+                        target=id(blocks[case_index]),
+                    )
+                )
+
+        return edges
+
+    # -- synchronized ----------------------------------------------------
+
+    def _build_synchronized_edges(
+        self, sync_block: BasicBlock, blocks: list[BasicBlock], index: int
+    ) -> list[CFGEdge]:
+        """Build edges for synchronized blocks."""
+        edges: list[CFGEdge] = []
+
+        # Entry to synchronized body
+        if index + 1 < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.UNCONDITIONAL,
+                    source=id(sync_block),
+                    target=id(blocks[index + 1]),
+                )
+            )
+
+        # Fall through from body to next block
+        if index + 2 < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.UNCONDITIONAL,
+                    source=id(blocks[index + 1]),
+                    target=id(blocks[index + 2]),
+                )
+            )
+
+        return edges
+
+    # -- assert ----------------------------------------------------------
+
+    def _build_assert_edges(
+        self, assert_block: BasicBlock, blocks: list[BasicBlock], index: int
+    ) -> list[CFGEdge]:
+        """Build edges for assert statements."""
+        edges: list[CFGEdge] = []
+
+        # True branch: continue to next block
+        if index + 1 < len(blocks):
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.CONDITIONAL_TRUE,
+                    source=id(assert_block),
+                    target=id(blocks[index + 1]),
+                    condition="assert_condition_true",
+                )
+            )
+
+            # False branch: throws AssertionError
+            edges.append(
+                CFGEdge(
+                    edge_type=CFGEdgeType.EXCEPTION,
+                    source=id(assert_block),
+                    target=id(blocks[index + 1]),
+                    condition="assert_condition_false",
+                )
+            )
+
+        return edges
+
+    # -- helpers ---------------------------------------------------------
+
+    def _find_loop_exit(
+        self, blocks: list[BasicBlock], loop_index: int
+    ) -> int | None:
+        """Find the block where a loop exits (break or end of loop body)."""
+        depth = 0
+        for i in range(loop_index + 1, len(blocks)):
+            leader_type = blocks[i].leader_type
+            if leader_type in ("for_statement", "while_statement", "do_statement"):
+                depth += 1
+            elif leader_type == "break_statement" and depth == 0:
+                return i
+            elif depth == 0 and leader_type not in (
+                "break_statement",
+                "continue_statement",
+            ):
+                # First non-loop-body block after the loop
+                return i - 1
+            elif leader_type in ("for_statement", "while_statement", "do_statement") and depth > 0:
+                depth -= 1
+                if depth == 0:
+                    return i - 1
+        if loop_index + 1 < len(blocks):
+            return loop_index + 1
+        return None

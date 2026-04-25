@@ -803,6 +803,66 @@ async def get_current_file(
     )
 
 
+@router.get("/scans/{scan_id}/findings/{finding_id}")
+async def get_scan_finding(
+    scan_id: int,
+    finding_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(optional_api_key)] = None,
+) -> dict:
+    """
+    Get a single finding by ID within a scan.
+
+    Args:
+        scan_id: Scan ID
+        finding_id: Finding ID
+        db: Database session
+
+    Returns:
+        Finding details
+
+    Raises:
+        HTTPException 404: If scan or finding not found
+    """
+    scan_repo = ScanRepository()
+    finding_repo = FindingRepository()
+
+    # Verify scan exists
+    scan = await scan_repo.get(db, id=scan_id)
+    if scan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan {scan_id} not found"
+        )
+
+    finding = await finding_repo.get(db, id=finding_id)
+    if finding is None or finding.scan_id != scan_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Finding {finding_id} not found in scan {scan_id}"
+        )
+
+    return {
+        "id": finding.id,
+        "vuln_type": finding.vuln_type,
+        "severity": finding.severity,
+        "confidence": finding.confidence,
+        "file_path": finding.file_path,
+        "line_start": finding.line_start,
+        "line_end": finding.line_end,
+        "function_name": finding.function_name,
+        "title": finding.title,
+        "description": finding.description,
+        "evidence": finding.evidence,
+        "remediation": finding.remediation,
+        "engine": finding.engine,
+        "status": finding.status,
+        "cpg_path": finding.cpg_path,
+        "extra_metadata": finding.extra_metadata,
+        "created_at": _iso(finding.created_at),
+    }
+
+
 @router.get("/scans/{scan_id}/findings")
 async def get_scan_findings(
     scan_id: int,
@@ -813,6 +873,7 @@ async def get_scan_findings(
     severity: str | None = Query(None, description="Filter by severity"),
     status: str | None = Query(None, description="Filter by status"),
     engine: str | None = Query(None, description="Filter by engine"),
+    search: str | None = Query(None, description="Keyword search across vuln_type, file_path, title, description"),
     sort_field: str | None = Query(None, description="Sort by field (severity, confidence, engine)"),
     sort_dir: str | None = Query(None, description="Sort direction (asc, desc)"),
 ) -> dict:
@@ -849,6 +910,7 @@ async def get_scan_findings(
     findings = await finding_repo.get_by_scan(
         db, scan_id=scan_id, skip=skip, limit=page_size,
         severity=severity, status=status, engine=engine,
+        search=search,
         sort_field=sort_field, sort_dir=sort_dir,
     )
 

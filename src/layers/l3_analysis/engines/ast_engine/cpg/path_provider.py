@@ -13,6 +13,9 @@ from src.layers.l3_analysis.engines.ast_engine.cpg.base import LanguageCPGProvid
 from src.layers.l3_analysis.engines.ast_engine.cpg.providers.js_provider import (
     JSCPGProvider,
 )
+from src.layers.l3_analysis.engines.ast_engine.cpg.providers.java_provider import (
+    JavaCPGProvider,
+)
 from src.layers.l3_analysis.engines.ast_engine.cpg.providers.python_provider import (
     PythonCPGProvider,
 )
@@ -43,9 +46,8 @@ class CPGPathProvider:
             "python": PythonCPGProvider(),
             "javascript": JSCPGProvider(),
             "typescript": JSCPGProvider(),  # JSCPGProvider handles both
-            # Additional providers will be registered as they are implemented
-            # "java": JavaCPGProvider(),
-            # "go": GoCPGProvider(),
+            "java": JavaCPGProvider(),
+            # "go": GoCPGProvider(),  # TODO: implement when Go call graph builder is ready
         }
 
     def get_attack_paths(

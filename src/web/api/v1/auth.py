@@ -33,6 +33,7 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     must_change_password: bool
     username: str
+    user_id: int
 
 
 class ChangePasswordRequest(BaseModel):
@@ -81,6 +82,7 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
         access_token=token,
         must_change_password=user.must_change_password,
         username=user.username,
+        user_id=user.id,
     )
 
 

@@ -87,6 +87,7 @@ export const scansApi = {
     severity?: string
     status?: string
     engine?: string
+    search?: string
     sort_field?: string
     sort_dir?: string
   }): Promise<{
@@ -98,6 +99,14 @@ export const scansApi = {
     findings: Finding[]
   }> {
     const response = await client.get(`/scans/${id}/findings`, { params })
+    return response.data
+  },
+
+  /**
+   * 获取单个漏洞
+   */
+  async getFinding(scanId: number, findingId: number): Promise<Finding> {
+    const response = await client.get(`/scans/${scanId}/findings/${findingId}`)
     return response.data
   },
 

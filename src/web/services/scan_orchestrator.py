@@ -81,6 +81,7 @@ class ScanOrchestrator:
         progress_callback: Optional[ProgressCallback] = None,
         db_session_factory: Optional[Callable[[], AsyncSession]] = None,
         llm_client: Optional[LLMClient] = None,
+        source_type: Optional[str] = None,
     ):
         """Initialize the scan orchestrator.
 
@@ -91,9 +92,11 @@ class ScanOrchestrator:
             progress_callback: Optional progress callback for events
             db_session_factory: Factory function for creating DB sessions
             llm_client: Optional LLM client for LLM-based features
+            source_type: Type of source ("local", "git", "zip")
         """
         self.scan_id = scan_id
         self.source_path = source_path
+        self.source_type = source_type or "local"
         self.config = scan_config
         self.progress_callback = progress_callback or ProgressBroadcaster(
             scan_id, db_session_factory
@@ -723,7 +726,19 @@ class ScanOrchestrator:
         if "agent" in requested:
             # 只有在配置了 LLM 客户端时才启用 agent
             if self.llm_client and self.llm_client.is_available:
-                engine = OpenCodeAgent(llm_client=self.llm_client)
+                # P3-05: Create CPGPathProvider for attack path analysis
+                cpg_path_provider = None
+                try:
+                    from src.layers.l3_analysis.engines.ast_engine.cpg.path_provider import CPGPathProvider
+                    cpg_path_provider = CPGPathProvider()
+                    logger.info(f"Scan {self.scan_id}: CPGPathProvider created for agent engine")
+                except Exception as e:
+                    logger.warning(f"Scan {self.scan_id}: CPGPathProvider unavailable: {e}")
+
+                engine = OpenCodeAgent(
+                    llm_client=self.llm_client,
+                    cpg_path_provider=cpg_path_provider,
+                )
                 selected_engines["agent"] = engine
                 logger.info(f"Scan {self.scan_id}: Agent engine selected")
             else:
@@ -1178,7 +1193,7 @@ class ScanOrchestrator:
         # Get adversarial configuration
         adversarial_config = self.config.get("adversarial", False)
         max_rounds = self.config.get("adversarial_max_rounds", 5)
-        round_timeout = self.config.get("adversarial_round_timeout", 180)
+        round_timeout = self.config.get("adversarial_round_timeout", 600)
 
         if not adversarial_config:
             logger.info("Adversarial verification disabled by config")
@@ -1549,8 +1564,62 @@ class ScanOrchestrator:
         """
         source_path = Path(self.source_path)
 
+        # Handle Git URL — clone repository first
+        if self.source_type == "git" or (
+            isinstance(self.source_path, str)
+            and self.source_path.startswith(("http://", "https://", "git@", "ssh://"))
+        ):
+            self.temp_dir = Path(
+                tempfile.mkdtemp(prefix=f"deepvuln_git_{self.scan_id}_")
+            )
+            try:
+                import subprocess
+
+                git_url = str(self.source_path)
+                # Auto-expand owner/repo short format to full GitHub URL
+                if not git_url.startswith(("http://", "https://", "git@", "ssh://")):
+                    import re
+                    if re.match(r"^[a-zA-Z0-9_.\-]+/[a-zA-Z0-9_.\-]+$", git_url):
+                        git_url = f"https://github.com/{git_url}.git"
+                        logger.info(f"Phase 0: Expanded short repo to {git_url}")
+                # Support branch option
+                branch = self.config.get("branch")
+                clone_cmd = ["git", "clone", "--depth", "1"]
+                if branch:
+                    clone_cmd.extend(["--branch", branch])
+                clone_cmd.extend([git_url, str(self.temp_dir)])
+
+                logger.info(f"Phase 0: Cloning Git repo: {git_url} -> {self.temp_dir}")
+                result = subprocess.run(
+                    clone_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                if result.returncode != 0:
+                    raise ValueError(
+                        f"git clone failed (exit {result.returncode}): {result.stderr.strip()}"
+                    )
+                self.source_path = self.temp_dir
+                logger.info(f"Phase 0: Git clone complete: {self.source_path}")
+            except subprocess.TimeoutExpired:
+                if self.temp_dir and self.temp_dir.exists():
+                    shutil.rmtree(self.temp_dir, ignore_errors=True)
+                    self.temp_dir = None
+                raise ValueError(f"git clone timed out after 300s for {self.source_path}")
+            except ValueError:
+                if self.temp_dir and self.temp_dir.exists():
+                    shutil.rmtree(self.temp_dir, ignore_errors=True)
+                    self.temp_dir = None
+                raise
+            except Exception as e:
+                if self.temp_dir and self.temp_dir.exists():
+                    shutil.rmtree(self.temp_dir, ignore_errors=True)
+                    self.temp_dir = None
+                raise ValueError(f"Failed to clone Git repository: {e}")
+
         # Handle ZIP files for path resolution
-        if source_path.suffix == ".zip":
+        elif source_path.suffix == ".zip":
             # Extract ZIP for Phase 0 analysis (tech stack + attack surface)
             # The extracted directory will be reused in Phase 1 to avoid double extraction
             self.temp_dir = Path(
@@ -1773,6 +1842,7 @@ def create_scan_orchestrator(
     scan_config: Dict[str, Any],
     progress_callback: Optional[ProgressCallback] = None,
     llm_client: Optional[LLMClient] = None,
+    source_type: Optional[str] = None,
 ) -> ScanOrchestrator:
     """
     Factory function to create a ScanOrchestrator instance.
@@ -1782,6 +1852,7 @@ def create_scan_orchestrator(
         scan_config: Scan configuration
         progress_callback: Optional progress callback
         llm_client: Optional LLM client for LLM-based features
+        source_type: Type of source ("local", "git", "zip")
 
     Returns:
         Configured ScanOrchestrator instance
@@ -1791,4 +1862,5 @@ def create_scan_orchestrator(
         scan_config=scan_config,
         progress_callback=progress_callback,
         llm_client=llm_client,
+        source_type=source_type,
     )

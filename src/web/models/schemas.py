@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import Optional, Any, Annotated
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from pydantic.functional_serializers import PlainSerializer
 
 
@@ -111,10 +111,10 @@ class ScanConfig(BaseModel):
         description="Maximum rounds for adversarial verification"
     )
     adversarial_round_timeout: int = Field(
-        default=180,
+        default=600,
         ge=30,
         le=600,
-        description="Timeout per round in seconds (default: 3 minutes)"
+        description="Timeout per round in seconds (default: 10 minutes)"
     )
 
     # 增量扫描 (P14-06)
@@ -270,6 +270,23 @@ class ScanBase(BaseModel):
         default_factory=ScanConfig,
         description="Scan configuration parameters"
     )
+
+    @model_validator(mode="after")
+    def validate_git_source_path(self) -> "ScanBase":
+        """当 source_type=git 时，校验 source_path 必须是有效格式。"""
+        if self.source_type == "git":
+            sp = self.source_path.strip()
+            if sp.startswith(("http://", "https://", "git@", "ssh://")):
+                return self
+            # 允许 owner/repo 短格式（如 bytedance/deer-flow）
+            import re
+            if re.match(r"^[a-zA-Z0-9_.\-]+/[a-zA-Z0-9_.\-]+$", sp):
+                return self
+            raise ValueError(
+                f"git source_path 必须是完整 URL（https://github.com/owner/repo）"
+                f"或 owner/repo 短格式，收到: '{sp}'"
+            )
+        return self
 
 
 class ScanCreate(ScanBase):

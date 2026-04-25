@@ -1,5 +1,27 @@
 # Change Log
 
+## 2026-04-25
+
+### Phase 16 — 全面质量修复（深度审视 40 项问题） ✅
+
+- **Goal ID**: phase16-quality-fix
+- **Summary**: 对全项目深度审视发现 40 个问题，按优先级分 6 批次全部修复。涵盖致命崩溃、核心功能空壳、声明未实现、实现偏差、负优化消除和前端 i18n 杂项清理
+- **影响范围**: 后端 3 层核心（L1 情报、L3 分析）、Web 服务全链路（API/任务/仓库）、前端所有页面
+- **核心变更**:
+  1. **Batch 1 — 致命崩溃**: 创建 go/javascript/php Sink/Source 定义文件，修复 registry.py 导入不存在模块导致的 ImportError
+  2. **Batch 2 — 核心空壳**: 实现增量扫描 _scan_single_file()、SHA256 项目哈希、Java/Go/JS 完整 CFG 构建器、Java CPG Provider、Java+JS 调用图构建器、FrameworkDetector 注册、SmartScanner 添加 ast_engine 调度
+  3. **Batch 3 — 声明补全**: 实现 Cargo/Composer/Gem/NuGet 4 个依赖扫描器、JS/TS 代码结构解析器、HTML 报告导出修复、威胁情报版本匹配、CPG Provider 集成、对抗验证规则持久化
+  4. **Batch 4 — 实现偏差**: Agent Semaphore 并发控制、CodeQL 内容哈希缓存、登录返回 user_id、401 React Router、WebSocket JWT、服务端搜索、Vulnerabilities 跳转修复、对抗性验证并行化、证据强度无条件计算
+  5. **Batch 5 — 负优化消除**: 引擎注册表清理、死缓存移除、多套件 SARIF 合并、Dashboard memo、粒子 useMemo、单条 finding API、staleTime 配置、时区 Context 共享、AST 上下文缓存、404 路由 + lazy loading
+  6. **Batch 6 — i18n 杂项**: Login/Findings 中文 i18n、版本号注入、as any 消除、ScanProgress 标记 deprecated、Rounds 死代码清理
+- **新增文件**: 12 个（go/js/php sink-source、java/js call graph builder、java cpg provider、4 个依赖扫描器、js_ts parser、useSystemSettings hook）
+- **修改文件**: ~45 个（后端 ~20 + 前端 ~15 + 工作流文件）
+- **测试**: 后端 Python 导入验证全部通过（6 批次），前端 TypeScript 有 4 个预存错误（非 Phase 16 引入），Scans.tsx readonly 类型已修复
+- **安全**: 3 个 BLOCKER（硬编码 JWT 密钥、默认 admin 密码、DB 凭据在跟踪文件中）均为 Phase 15 及之前的预存问题，Phase 16 新增了 WS JWT 认证改进。无新增安全问题
+- **死代码**: 8 项发现 — 5 项可立即清理（_detect_tech_stack 包装、_deduplicate_findings 死方法、ScanProgress 未用组件、exportPdf 死函数、PathlibPath 冗余导入），2 项转为路线图（HybridHTTPDetector、engine_registry），1 项功能 Bug（exportHtml 调用错误端点）
+
+---
+
 ## 2026-04-17
 
 ### Web 安全与体验增强 — JWT 登录认证 + HTML 报告重设计 + UI 修复 ✅

@@ -3,6 +3,9 @@ import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'ax
 // API 基础路径
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
+// Custom event dispatched on 401 so AuthContext can navigate via React Router
+export const AUTH_EXPIRED_EVENT = 'deepvuln:auth-expired'
+
 // 创建 axios 实例
 const client: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -40,12 +43,11 @@ client.interceptors.response.use(
 
       switch (status) {
         case 401:
-          // 未授权 - 清除 token
+          // 未授权 - 清除 token and dispatch custom event for React Router navigation
           localStorage.removeItem(TOKEN_KEY)
           localStorage.removeItem('deepvuln_user')
-          // 如果不在登录页，跳转
           if (window.location.pathname !== '/login') {
-            window.location.href = '/login'
+            window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
           }
           break
         case 403:

@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Input } from '@/components/ui'
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/contexts/LanguageContext'
 import { ShieldAlert, Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const { t } = useLanguage()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -25,7 +27,7 @@ export default function LoginPage() {
       if (detail) {
         setError(detail)
       } else {
-        setError('登录失败，请检查网络连接')
+        setError(t('p16.loginFailed'))
       }
     } finally {
       setLoading(false)
@@ -51,12 +53,12 @@ export default function LoginPage() {
         {/* Login Card */}
         <div className="glass-panel rounded-lg p-8 corner-brackets">
           <h2 className="text-cyan font-mono font-bold text-sm tracking-widest mb-6">
-            SYSTEM LOGIN
+            {t('p16.systemLogin')}
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <Input
-              label="用户名"
+              label={t('p16.username')}
               type="text"
               placeholder="admin"
               value={username}
@@ -66,7 +68,7 @@ export default function LoginPage() {
             />
 
             <Input
-              label="密码"
+              label={t('p16.password')}
               type="password"
               placeholder="••••••••"
               value={password}
@@ -83,7 +85,7 @@ export default function LoginPage() {
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  认证中...
+                  {t('p16.authenticating')}
                 </>
               ) : (
                 'LOGIN'
@@ -94,7 +96,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-text-tertiary text-xs font-mono mt-6 tracking-wider">
-          DeepVuln v0.9.0
+          DeepVuln {typeof __APP_VERSION__ !== 'undefined' ? `v${__APP_VERSION__}` : t('p16.versionFallback')}
         </p>
       </div>
     </div>

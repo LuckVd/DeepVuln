@@ -9,6 +9,7 @@ interface UseFindingsParams {
   severity?: SeverityLevel
   status?: FindingStatus
   engine?: string
+  search?: string
   sort_field?: string
   sort_dir?: string
   enabled?: boolean
@@ -38,6 +39,7 @@ export function useFindings({
   severity,
   status,
   engine,
+  search,
   sort_field,
   sort_dir,
   enabled = true,
@@ -46,7 +48,7 @@ export function useFindings({
 
   // 获取漏洞列表
   const findingsQuery = useQuery({
-    queryKey: ['findings', scanId, page, page_size, severity, status, engine, sort_field, sort_dir],
+    queryKey: ['findings', scanId, page, page_size, severity, status, engine, search, sort_field, sort_dir],
     queryFn: () =>
       scansApi.getFindings(scanId, {
         page,
@@ -54,6 +56,7 @@ export function useFindings({
         severity,
         status,
         engine,
+        search,
         sort_field,
         sort_dir,
       }),
@@ -96,10 +99,7 @@ export function useFindings({
 export function useFinding(scanId: number, findingId: number) {
   return useQuery({
     queryKey: ['finding', scanId, findingId],
-    queryFn: async () => {
-      const data = await scansApi.getFindings(scanId, { page: 1, page_size: 1000 })
-      return data.findings.find((f) => f.id === findingId)
-    },
+    queryFn: () => scansApi.getFinding(scanId, findingId),
     enabled: !!scanId && !!findingId,
   })
 }

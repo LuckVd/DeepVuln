@@ -6,6 +6,8 @@ complementing pattern-based tools like Semgrep and CodeQL with semantic understa
 """
 
 import asyncio
+import functools
+import hashlib
 import logging
 import os
 import uuid
@@ -70,6 +72,46 @@ SKIP_DIRECTORIES = {
     ".tox", ".pytest_cache", ".mypy_cache",
     "migrations", "docs", "tests", "test", "spec",
 }
+
+
+# Module-level LRU cache for AST context extraction, keyed by file path + content hash.
+_ast_cache_logger = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=256)
+def _extract_ast_context_cached(file_path_str: str, content_hash: str) -> str | None:
+    """Extract AST context for a file, cached by path and content hash.
+
+    Returns the AST prompt section string, or None if extraction fails.
+    """
+    try:
+        from src.layers.l3_analysis.engines.ast_engine.context import (
+            ASTContextExtractor,
+        )
+        from src.layers.l3_analysis.engines.ast_engine.graph import (
+            ASTGraphBuilder,
+        )
+
+        file_path = Path(file_path_str)
+        ast_builder = ASTGraphBuilder()
+        ast_graph = ast_builder.build_from_file(file_path)
+        ast_extractor = ASTContextExtractor(ast_graph=ast_graph)
+
+        code = file_path.read_text(encoding="utf-8", errors="replace")
+        lines = code.split("\n")[:10]
+        for line_num, line in enumerate(lines, 1):
+            if line.strip():
+                ast_ctx = ast_extractor.extract_for_location(
+                    file_path=file_path_str,
+                    line=line_num,
+                    code_snippet=line.strip()[:100],
+                )
+                if ast_ctx.ast_structure.get("type") != "unknown":
+                    return ast_ctx.to_prompt_section()
+        return None
+    except Exception as e:
+        _ast_cache_logger.warning(f"AST context extraction failed for {file_path_str}: {e}")
+        return None
 
 
 class OpenCodeAgent(BaseEngine):
@@ -441,20 +483,22 @@ class OpenCodeAgent(BaseEngine):
         vulnerability_focus: list[str] | None,
         context: dict[str, Any],
     ) -> list[Finding]:
-        """Analyze multiple files concurrently."""
-        tasks = []
+        """Analyze multiple files concurrently with bounded parallelism."""
+        semaphore = asyncio.Semaphore(self.max_concurrent)
 
-        for file_path in files:
-            task = self._analyze_single_file(
-                file_path=file_path,
-                source_path=source_path,
-                language=language,
-                vulnerability_focus=vulnerability_focus,
-                context=context,
-            )
-            tasks.append(task)
+        async def _bounded_analyze(file_path: Path) -> list[Finding]:
+            async with semaphore:
+                return await self._analyze_single_file(
+                    file_path=file_path,
+                    source_path=source_path,
+                    language=language,
+                    vulnerability_focus=vulnerability_focus,
+                    context=context,
+                )
 
-        # Execute with concurrency limit
+        tasks = [_bounded_analyze(fp) for fp in files]
+
+        # Execute with concurrency limit via semaphore
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Collect all findings
@@ -492,46 +536,41 @@ class OpenCodeAgent(BaseEngine):
                 # Build enhanced context using ContextBuilder
                 from src.layers.l3_analysis.task.context_builder import ContextBuilder
                 context_builder = ContextBuilder()
+
+                # Extract function names from file for per-function call chain analysis
+                func_names = self._extract_function_names(code)
+
+                # Build base enhanced context (file-level, no function filter)
                 enhanced_code = context_builder.build_enhanced_context(
                     source_path=source_path,
                     file_path=relative_path,
-                    include_call_chain=True,
+                    function_name=None,  # File-level analysis
+                    include_call_chain=False,  # We handle this per-function below
                     include_dependencies=True,
-                    include_data_flow=True,
+                    include_data_flow=False,  # Also requires function_name
                 )
 
-                # P8-06: Extract AST context for enhanced AI understanding
+                # Append per-function call chain analysis
+                for fname in func_names:
+                    chain = context_builder.analyze_call_chain(
+                        source_path=source_path,
+                        file_path=relative_path,
+                        function_name=fname,
+                    )
+                    if chain and chain.callers:
+                        enhanced_code += "\n\n" + context_builder._format_call_chain(chain)
+
+                # P8-06: Extract AST context for enhanced AI understanding (LRU cached)
                 ast_context_str = None
                 try:
-                    from src.layers.l3_analysis.engines.ast_engine.context import (
-                        ASTContextExtractor,
+                    content_hash = hashlib.sha256(
+                        file_path.read_bytes()
+                    ).hexdigest()[:16]
+                    ast_context_str = _extract_ast_context_cached(
+                        str(file_path), content_hash
                     )
-                    from src.layers.l3_analysis.engines.ast_engine.graph import (
-                        ASTGraphBuilder,
-                    )
-
-                    # Build AST graph for the file
-                    ast_builder = ASTGraphBuilder()
-                    ast_graph = ast_builder.build_from_file(file_path)
-
-                    # Extract AST context
-                    ast_extractor = ASTContextExtractor(ast_graph=ast_graph)
-
-                    # Get first few lines for context extraction
-                    lines = code.split("\n")[:10]
-                    for line_num, line in enumerate(lines, 1):
-                        if line.strip():
-                            ast_ctx = ast_extractor.extract_for_location(
-                                file_path=relative_path,
-                                line=line_num,
-                                code_snippet=line.strip()[:100],
-                            )
-                            if ast_ctx.ast_structure.get("type") != "unknown":
-                                ast_context_str = ast_ctx.to_prompt_section()
-                                break
                 except Exception as e:
-                    # AST context is optional - log and continue
-                    self.logger.debug(f"AST context extraction failed: {e}")
+                    self.logger.debug(f"AST context cache lookup failed: {e}")
 
                 # P9-01: Extract CPG attack paths (optional enhancement)
                 cpg_paths = None
@@ -593,6 +632,11 @@ class OpenCodeAgent(BaseEngine):
                                 "reaches_sink": matched_path.reaches_sink,
                             }
 
+                # Calibrate severity based on call chain analysis
+                findings = self._calibrate_severity(
+                    findings, source_path, relative_path
+                )
+
                 return findings
 
             except LLMTruncatedResponseError as e:
@@ -633,6 +677,124 @@ class OpenCodeAgent(BaseEngine):
                     f"Unexpected error analyzing {file_path}: {type(e).__name__}: {e}"
                 )
                 return []
+
+    @staticmethod
+    def _extract_function_names(code: str) -> list[str]:
+        """Extract top-level and class method function names from source code."""
+        import re
+
+        names = []
+        for match in re.finditer(
+            r'(?:^|\n)[ \t]*(?:async\s+)?def\s+(\w+)\s*\(',
+            code,
+        ):
+            name = match.group(1)
+            # Skip dunder methods and test helpers
+            if not name.startswith('__'):
+                names.append(name)
+
+        # Also match JS/TS function declarations and arrow functions
+        for match in re.finditer(
+            r'(?:^|\n)[ \t]*(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(',
+            code,
+        ):
+            names.append(match.group(1))
+
+        return names
+
+    def _calibrate_severity(
+        self,
+        findings: list[Finding],
+        source_path: Path,
+        file_path: str,
+    ) -> list[Finding]:
+        """Calibrate severity based on call chain reachability analysis.
+
+        If a finding claims user_controlled but all callers pass hardcoded
+        literals, downgrade severity to LOW and correct the metadata.
+        """
+        if not findings:
+            return findings
+
+        from src.layers.l3_analysis.task.context_builder import (
+            ContextBuilder,
+            _is_likely_dynamic_arg,
+        )
+
+        cb = ContextBuilder()
+
+        # Build a map: func_name -> all_callers_hardcoded
+        # by analyzing each function in the file
+        hardcoded_funcs: set[str] = set()
+        func_names = self._extract_function_names(
+            (source_path / file_path).read_text(encoding="utf-8", errors="replace")
+        )
+        for fname in func_names:
+            try:
+                chain = cb.analyze_call_chain(
+                    source_path=source_path,
+                    file_path=file_path,
+                    function_name=fname,
+                )
+            except Exception:
+                continue
+            if not chain or chain.is_entry_point or not chain.callers:
+                continue
+            callers_with_expr = [
+                c for c in chain.callers if c.get("call_expression")
+            ]
+            if not callers_with_expr:
+                continue
+            if all(
+                not _is_likely_dynamic_arg(c["call_expression"], fname)
+                for c in callers_with_expr
+            ):
+                hardcoded_funcs.add(fname)
+
+        # If no functions have all-hardcoded callers, nothing to calibrate
+        if not hardcoded_funcs:
+            return findings
+
+        # Calibrate findings that mention hardcoded-only functions
+        for finding in findings:
+            if finding.severity not in (
+                SeverityLevel.CRITICAL,
+                SeverityLevel.HIGH,
+                SeverityLevel.MEDIUM,
+            ):
+                continue
+            if not finding.metadata.get("user_controlled"):
+                continue
+
+            # Check if finding's title or description mentions a hardcoded func
+            finding_text = f"{finding.title} {finding.description}"
+            matched_func = None
+            for fname in hardcoded_funcs:
+                if fname in finding_text:
+                    matched_func = fname
+                    break
+            if not matched_func:
+                continue
+
+            original_severity = finding.severity.value
+            finding.severity = SeverityLevel.LOW
+            finding.metadata["severity_adjustment"] = {
+                "original": original_severity,
+                "adjusted": "low",
+                "reason": (
+                    f"All callers of {matched_func}() pass hardcoded literals — "
+                    "parameter not user-controlled"
+                ),
+                "factor": "call_chain_verification",
+            }
+            finding.metadata["user_controlled"] = False
+            finding.confidence = min(finding.confidence, 0.4)
+            self.logger.info(
+                f"Severity calibrated: {finding.title} "
+                f"{original_severity} -> low (all callers hardcoded)"
+            )
+
+        return findings
 
     def _parse_llm_response(
         self,

@@ -1,5 +1,5 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card,
   Button,
@@ -23,6 +23,7 @@ import FindingDrawer from '@/components/finding/FindingDrawer';
 export default function FindingsPage() {
   const { id: scanId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useLanguage();
   const id = parseInt(scanId || '0');
 
@@ -66,6 +67,7 @@ export default function FindingsPage() {
     status: statusFilter,
     severity: severityFilter,
     engine: engineFilter,
+    search: searchText || undefined,
     sort_field: sortField || undefined,
     sort_dir: sortField ? sortDir : undefined,
     enabled: !isNaN(id),
@@ -80,20 +82,8 @@ export default function FindingsPage() {
     return Array.from(engines).sort();
   }, [data?.findings]);
 
-  // Filter results (client-side search)
-  const filteredFindings = data?.findings.filter((finding) => {
-    if (!searchText) return true;
-    const searchLower = searchText.toLowerCase();
-    return (
-      finding.vuln_type.toLowerCase().includes(searchLower) ||
-      finding.file_path.toLowerCase().includes(searchLower) ||
-      finding.title?.toLowerCase().includes(searchLower) ||
-      finding.description?.toLowerCase().includes(searchLower)
-    );
-  }) || [];
-
-  // Sorting is now handled by the backend — no client-side re-sort needed
-  const sortedFindings = filteredFindings;
+  // Search is now handled server-side — no client-side filter needed
+  const sortedFindings = data?.findings || [];
 
   const toggleSort = (field: 'severity' | 'confidence' | 'engine') => {
     if (sortField === field) {
@@ -121,6 +111,20 @@ export default function FindingsPage() {
     updateStatus(findingId, newStatus);
     // Brief success feedback could be added here
   };
+
+  // Auto-open drawer when navigating from Vulnerabilities page with ?highlight=<id>
+  useEffect(() => {
+    const highlightId = searchParams.get('highlight');
+    if (highlightId && data?.findings) {
+      const target = data.findings.find(f => String(f.id) === highlightId);
+      if (target) {
+        setSelectedFinding(target);
+        setDrawerOpen(true);
+        // Clear the highlight param so it doesn't re-trigger
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [searchParams, data?.findings, setSearchParams]);
 
   if (isNaN(id)) {
     navigate('/scans');
@@ -188,11 +192,11 @@ export default function FindingsPage() {
             className="w-40"
           />
           <CustomSelect
-            label="引擎"
+            label={t('p16.engine')}
             value={engineFilter || ''}
             onChange={(val) => setEngineFilter(val || undefined)}
             options={[
-              { value: '', label: '全部引擎' },
+              { value: '', label: t('p16.allEngines') },
               ...engineOptions.map((e) => ({ value: e, label: e.toUpperCase() })),
             ]}
             className="w-36"
@@ -217,7 +221,7 @@ export default function FindingsPage() {
         <FindingList
           findings={sortedFindings}
           loading={isLoading}
-          total={searchText ? sortedFindings.length : data?.total || 0}
+          total={data?.total || 0}
           page={page}
           pageSize={pageSize}
           onPageChange={handlePageChange}
