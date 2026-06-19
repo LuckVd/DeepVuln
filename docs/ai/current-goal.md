@@ -4,6 +4,8 @@
 > **目标**: Phase 17 — AI 与静态最优结合的深化（剩余架构/能力项）
 > **Goal ID**: phase17-ai-static-deepening
 > **创建日期**: 2026-06-19
+>
+> **🧭 冷启动 TL;DR（2026-06-19 第二轮收尾）**：Phase 17 已完成 **D4 / Web-semgrep(0→10) / D1(ScanPipeline) / D5(打分统一) / D4 遗留(agent 种子) / CLI 移除(web-only)**，全部 ✅ 并 **push 到 origin**。**待办 3 项**：E5（AI 补漏逻辑漏洞，新能力）/ D3（断点续扫，需 Celery，用户已授权可装）/ D6（CPG CFG 可达性，低优先大工程）。**环境**：web-only；`export OPENAI_API_KEY="$ANTHROPIC_AUTH_TOKEN"; export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"`；glm-4.5-air；本机 1.9GB（**无 CodeQL**）；测试用 sqlite。分支 `feat/static-evidence-grounding` 与 origin 同步。
 
 ---
 
@@ -183,21 +185,21 @@ def cat_file():
 ## 新 agent 接力指南（冷启动必读）
 
 ### 1. 先读这些建立上下文（按顺序）
-1. **本文件**（current-goal.md）—— 当前 goal + 6 项拆解 + 本指南。
-2. `/root/.claude/projects/-opt-pro/memory/deepvuln-refactor-progress.md` —— 跨会话记忆（愿景 + 已完成阶段 + 环境）。
-3. `git log --oneline -6` + 各 commit diff —— 本次改了什么。
-4. `git branch --show-current` → 应是 `feat/static-evidence-grounding`（未 push）。
+1. **本文件顶部 TL;DR + 各节状态** —— 当前 goal 全景（已完成 ✅ / 待办 3 项）。
+2. 跨会话记忆：`/root/.claude/projects/-opt-pro-deepvuln/memory/`（本项目；含 `deepvuln-web-only-no-cli.md` 等决策）。
+3. `git log --oneline -8` + 各 commit diff —— 本会话改了什么（4 笔：b372071/0787683/2f7624a/1ff6fa0）。
+4. `git branch --show-current` → 应是 `feat/static-evidence-grounding`（**已 push origin**，与远端同步）。
 
 ### 2. 环境与已踩的坑（避免重复踩）
 - **LLM**：`export OPENAI_API_KEY="$ANTHROPIC_AUTH_TOKEN"; export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"`；**用 glm-4.5-air（快）**；glm-4.6/4.5 是 reasoning 模型，慢且 max_tokens 要给够、易超时。
 - **内存**：本机 1.9GB，**CodeQL 跑不了**（Java OOM）；用 sqlite（`sqlite+aiosqlite:///:memory:`）替代 postgres 测试。已装 semgrep/web 依赖/tree-sitter-javascript。
-- **enable_full_rounds（D4 关键坑）**：CLI 和 scan_tasks **都不传它**（已 grep 确认），**只能**构造 `ScanOrchestrator(scan_config={"enable_full_rounds": True, ...})` 传入。**不能用 CLI 测 D4**。
+- **enable_full_rounds（四轮开关）**：`scan_tasks` 默认不传它，需构造 `ScanOrchestrator(scan_config={"enable_full_rounds": True, ...})` 传入（CLI 已移除，web-only）。
 - **构造 ScanOrchestrator 测试的坑**：
   - `progress_callback` 必须用 `__getattr__` 兜底（接口方法多：on_phase_start/complete/progress/on_engine_*/on_scan_*/broadcast_event/set_scan_config/on_phase_skipped 等），否则缺方法报错。
   - 建表：`async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)`。
   - concurrency 从 sqlite 读 llm_config 表会失败（warning）→ 自动 fallback default，**可忽略**。
 
-### 3. D4 调试脚本（可直接复跑，定位 0 candidates）
+### 3. 四轮审计验证探针（D4 已修复 ✅，此为复用回归工具）
 保存为 `/tmp/d4_debug.py`，`python3 /tmp/d4_debug.py`（先 export OPENAI_* 两个变量）：
 ```python
 import asyncio, os, traceback
@@ -238,15 +240,16 @@ async def main():
 
 asyncio.run(main())
 ```
-**当前症状**：`Audit session completed: 0 candidates`（RoundController 流程通，但 Round1-3 产出空）。
-**下一步排查**：① `_run_full_rounds_audit` 里 `strategy.total_targets` 是否 0（→ 查 `strategy/engine.py:211 _convert_entry_points` 是否把 entry_points 转成 targets）；② 若 targets>0，在 `round_one.py:84 execute` 内打印 candidate 构造点，看为什么没产出 VulnerabilityCandidate。
+**状态**：D4 已修复（`termination.py` 首轮必跑护栏 + Round1 agent 种子注入）。此脚本现作四轮回归探针——期望 `RESULT(verified) > 0`（Round1 产 semgrep 候选 + 注入的 agent 种子候选）。若回退到 0，先查 `termination.py` 的 `rounds_completed==0` 护栏是否被改掉。
 
 ### 4. 关键文件:行号锚点
-| 项 | 文件:行 | 说明 |
-|---|---|---|
-| D4 | `scan_orchestrator.py:1048` `_run_exploitability_verification`、`:1071` enable_full_rounds 检查、`:1155` `_run_full_rounds_audit` | 四轮接通点 |
-| D4 | `round_one.py:84` `execute`（round_two/three 同结构） | Round1-3 候选产出（0 candidates 源头） |
-| D4 | `strategy/engine.py:125` `create_strategy`、`:211` `_convert_entry_points` | targets 生成 |
-| D1 | `scan_orchestrator.py:140` `execute_scan`、`cli/main.py:739` `run_full_security_scan` | pipeline 待接入的两处编排（均未 import ScanPipeline） |
-| D5 | `round_four.py:~909` `_calculate_confidence_score` + `scoring/multi_dim_scorer.py` + `core/final_score.py` | 三套打分 |
+| 项 | 文件:锚点 | 说明 | 状态 |
+|---|---|---|---|
+| D4 | `termination.py` 首轮必跑护栏；`round_one.py` `_add_seeded_candidates` | 四轮候选产出 + agent 种子注入 | ✅ |
+| Web semgrep | `core/rule_gating.py` `_extract_tech_stack_info`(dict 兼容)；`scan_orchestrator.py` `_build_engine_options`(`use_auto_config`) | 0→10 findings 修复 | ✅ |
+| D1 | `scan_orchestrator.py` `execute_scan`/`_build_scan_phases`；`web/services/scan_pipeline_adapters.py` | ScanPipeline 编排（Web-only） | ✅ |
+| D5 | `round_four.py` `_apply_verification_result`(`confidence_score=round(confidence*100)`) | 打分统一到 multi_dim | ✅ |
+| **E5** | （待建）`prompts/logic_vuln.py` + `LogicVulnDetector`（复用 `_llm_assisted_assessment`） | AI 补漏逻辑漏洞 | ⏳ |
+| **D3** | `scan_orchestrator.py` `_save_checkpoint_phase`/`_clean_checkpoint`；`checkpoint_service.py`；pipeline `CheckpointSink` | 断点续扫（findings 持久化恢复待续；需 Celery） | ⏳ |
+| **D6** | `path_finder/finder.py` reaches_sink（固定 True）；`cpg/path_provider.py` GoCPGProvider | CFG 可达性（大工程低优先） | ⏳ |
 | D3 | `scan_orchestrator.py` `_save_checkpoint_phase`/`_clean_checkpoint` + `checkpoint_service.py` | 断点续扫（机制通，缺 findings 持久化） |
