@@ -5,9 +5,7 @@ status: "in_progress"
 design_confirmed: true
 blocked_by: []
 open_questions:
-  - "D1: 重写 CLI/Web 主路径需测试环境验证回归"
-  - "D3: 完整 skip 需 Celery 中断→resume 场景验证"
-  - "D4 遗留(已闭合): Round1 agent findings 已用种子注入接通(scan_results[agent]→seed_findings，不重跑 agent)；Round2 深度审仍 skip(低价值，Round4 覆盖)"
+  - "D3: 完整 skip 需 Celery 中断→resume 场景验证（用户已授权可自装 Celery）"
 resolved_questions:
   - "D4: 根因是 TerminationDecider 零数据早停(net_benefit=0-ε<0)，非 Round1 semgrep；已加首轮必跑护栏修复，0→10 candidates"
   - "Web 主路径 semgrep 0 findings: 两层根因(rule_gating 不认 dict + orchestrator 无 --config)，均已修;基线恢复 10 findings。CLI 已弃用(web-only)"
@@ -24,7 +22,7 @@ test_scope:
   - "pipeline 单测 6/6 ✅"
   - "3 个 Python 漏洞函数内数据流 reachable ✅"
   - "D4 四轮 RoundController 流程跑通(不 fallback) ✅"
-test_result: "核心链路验证通过;D4 候选产出/D1 回归/D3 中断恢复待后续会话"
+test_result: "D4(0→10候选)/Web semgrep(0→10)/D1(pipeline)/D4遗留(agent种子)/D5(打分统一) 均已完成验证;待办 E5/D3/D6"
 new_files:
   - "src/layers/pipeline/ (6 文件: scan_pipeline/context/phases/progress/checkpoint/__init__)"
   - "src/web/core/limiter.py"
@@ -35,8 +33,8 @@ modified_files:
   - "核心: taint_tracker.py / round_four.py / multi_dim_scorer.py / reachability_scorer.py / prompts(exploitability,adversarial) / verification(adversarial,gatekeeper) / security.py / config.py / main.py / scan_orchestrator.py / concurrency.py / executor.py / openai_client.py / in_memory_deduplicator.py / python_builder.py / strategy/engine.py"
 security_blockers: []
 dead_code_actions:
-  - "Round1-3 不再是死代码(D4 接通+开关),但产出 0 candidates 待修"
-  - "ScanPipeline 模块建好待接入(D1)"
+  - "Round1-3 已接通且产出候选(D4 0→10; Round1 agent findings 种子注入);Round2 深度审仍 skip(低价值)"
+  - "ScanPipeline 已接入 Web execute_scan(D1);CLI 已移除(web-only)"
 sync_status: "synced"
 last_check_at: "2026-06-19"
 previous_goal:

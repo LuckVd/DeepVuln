@@ -15,7 +15,10 @@
 
 ---
 
-## 本次会话已完成（4 commit，分支 `feat/static-evidence-grounding`，未 push）
+## 已完成基线（上一轮 4 commit + 本轮 3 commit，分支 `feat/static-evidence-grounding`，已 push 到 origin）
+
+> 上一轮：安全+P0bug / 证据引擎+数据流+AI grounding / taint 修复 / 四轮 SKIP 崩溃修复。
+> **本轮（2026-06-19 第二轮，3 commit `b372071`/`0787683`/`2f7624a`）**：D4 终止护栏 · Web semgrep 0→10 · D1 ScanPipeline · CLI 移除(web-only) · D4 遗留 agent 种子注入 · D5 打分统一。详见下方各节。
 
 | commit | 内容 |
 |---|---|
@@ -34,7 +37,7 @@
 
 ---
 
-## 剩余目标（6 项，按优先级，分会话推进）
+## 剩余目标（3 项待办：E5 / D3 / D6；D4 / D5 / D1 + Web semgrep 修复 已完成 ✅）
 
 ### D4 — 四轮 Round1-3 候选产出（P0，最兑现宣传）✅ 已修复（本会话）
 
