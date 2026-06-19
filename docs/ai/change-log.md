@@ -42,6 +42,22 @@
 - **Security**: 无
 - **Commit**: 8cb6277
 
+### Phase 17 — D6 CPG CFG 可达性接地 + P9-01/Go bug 修复 ✅
+
+- **Goal ID**: phase17-ai-static-deepening（D6；含 P9-01 连接、Go 裂块修复）
+- **Summary**: 把已实现却从未接入的 CFG 子系统（~2000 行死代码）接通，`reaches_sink`/`condition_paths` 从硬编码变为真实值；接通过程暴露并修复 5 个既有 bug，其中 P9-01 使整个 CPG 攻击路径特性首次端到端可用。四语言（py/js/java/go）均裂块 + 死代码检测
+- **Impact**:
+  - `cpg/models.py`：`function_cfgs` 字段 + `merge_cfg()`（建 `cfg_block` 节点+`cfg` 边）+ `get_successors(edge_types=)` + `get_cfgs_for_file()`
+  - `cpg/builder.py`：`FUNCTION_TYPES` 常量；`_fuse_graphs(language=)`；`_build_and_merge_cfgs()`；`_link_call_to_definition()`+`_files_match()`（P9-01）
+  - `path_finder/finder.py`：`_verify_cfg_reachability`/`_locate_block`/`_extract_condition_paths`/`_find_cfg_edge`；`_find_sinks` 回落 `ast_node.name`（bug 3）；`_build_attack_path` 接真实值
+  - `cfg/base.py`：通用化 `_extract_function_body`（下钻 `block`/`statement_block`）——**根因 bug，修前全语言 0 块**
+  - `cfg/builders/go_cfg.py`：`_extract_function_body` 解包 `statement_list`（Go 单块 bug）
+- **Bug 修复（5，全是死代码接通才暴露）**：①CFG 体提取返回空（根因）②P9-01 入口/体节点未连通（`get_paths` 恒 `[]`）③sink 读未设置的 `ast_name` ④`method_declaration` 缺失（Java）⑤Go `statement_list` 未解包
+- **Tests**: `test_path_finder`+`test_cpg`+`test_cfg` = 109 passed；四语言参数化裂块 + provider e2e（可达→`True`/死代码→`False`）；全 `test_l3` 2177 passed / 24 既有失败（零回归，+10 通过）
+- **Dead Code**: `get_cfgs_for_file` 初为未用 → 已接入 `_locate_block`；`get_successors(edge_types)` 为预留 API（按设计 BFS 不消费 cfg 边，CFG 作独立校验），已单测覆盖
+- **Security**: 无硬编码密钥（扫描通过）；无新增对外接口/鉴权变更
+- **Commit**: 待提交（pending）
+
 ## 2026-04-25
 
 ### Phase 16 — 全面质量修复（深度审视 40 项问题） ✅

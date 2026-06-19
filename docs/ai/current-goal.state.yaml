@@ -1,7 +1,7 @@
 goal_id: "phase17-ai-static-deepening"
 title: "Phase 17 — AI 与静态最优结合的深化（剩余架构/能力项）"
-stage: "in_progress"
-status: "in_progress"
+stage: "done"
+status: "completed"
 design_confirmed: true
 blocked_by: []
 open_questions: []
@@ -9,6 +9,8 @@ resolved_questions:
   - "D3: 完整 skip 已用真实 Celery(redis broker via docker)+sqlite 验证 save→resume 跨任务恢复(hash 验证+字段保真);并修 checkpoint_service 两个阻塞 bug"
   - "D4: 根因是 TerminationDecider 零数据早停(net_benefit=0-ε<0)，非 Round1 semgrep；已加首轮必跑护栏修复，0→10 candidates"
   - "Web 主路径 semgrep 0 findings: 两层根因(rule_gating 不认 dict + orchestrator 无 --config)，均已修;基线恢复 10 findings。CLI 已弃用(web-only)"
+  - "D6: CFG 子系统(~2000行)此前是死代码从未接入;接通后 reaches_sink/condition_paths 变真实值,四语言裂块;暴露并修 5 既有 bug(体提取返回空=根因 / P9-01 入口-体节点未连通致 get_paths 恒[] / sink 读未设 ast_name / method_declaration 缺失 / Go statement_list 未解包)"
+  - "P9-01: 同一函数在 CPG 是两个未连通节点(call_function 入口 vs function_definition 体);_link_call_to_definition 加 defines 边(file后缀匹配+line)修复,CPG 攻击路径特性首次端到端可用"
 implementation_steps:
   - "本会话已完成并 commit(4 个): 安全+P0bug(ec15c12) / 证据引擎+函数内数据流+AI grounding(95178ae) / taint误报修复+多语言框架+性能(4700adf) / 四轮SKIP崩溃修复(87c7083) ✅"
   - "D4 四轮候选产出: ✅ 已修——根因 TerminationDecider 零数据早停(termination.py 加首轮必跑护栏);audit probe 0→10 candidates;TDD 22 测试绿"
@@ -16,13 +18,13 @@ implementation_steps:
   - "D1 pipeline 接入(仅 Web): ✅ execute_scan 改用 ScanPipeline+_build_scan_phases+WebProgressSink/WebCheckpointSink;基线改前/改后 phase 事件+findings 逐字段一致;CLI 弃用不接入"
   - "E5 AI 补漏逻辑漏洞: ✅ 已建——prompts/logic_vuln.py + LogicVulnerabilityDetector(入口可达 limited-scope + 三要素硬证据 + 置信度封顶0.6 + SPECULATIVE) + ScanPhase.LOGIC_VULN_DISCOVERY(EXPLOIT 后/ADJUDICATION 前) + config flag logic_vuln(默认关);27 单测绿 + GLM 端到端检出 IDOR 不误报"
   - "D3 断点续扫 findings 持久化: ✅ 已建——_serialize/_restore_scan_results + WebCheckpointSink.save 注入 resume_data + execute_scan resume 恢复;修 checkpoint_service 两个既有 bug(session context manager `()()` + datetime `mode=\"json\"`,此前 checkpoint 根本没存进 DB);10 单测 + 真实 sqlite DB 往返(hash 验证) + 真实 Celery(redis broker) 跨任务 save→resume 全 PASS"
-  - "D6 CPG CFG 可达性: 大工程,path_finder reaches_sink 固定 True 待实现 ⏳ todo"
+  - "D6 CPG CFG 可达性接地: ✅ 已建——cpg/models.py(function_cfgs+merge_cfg+get_successors edge_types+get_cfgs_for_file) + cpg/builder.py(_build_and_merge_cfgs+_link_call_to_definition+FUNCTION_TYPES) + path_finder/finder.py(_verify_cfg_reachability+_locate_block+_extract_condition_paths+_find_sinks 回落 ast_node.name) + cfg/base.py(_extract_function_body 通用化下钻 block/statement_block) + go_cfg.py(解包 statement_list);四语言(py/js/java/go)裂块+死代码检测;修 5 既有 bug;109 passed(provider e2e 可达/死代码 + 四语言参数化);全 test_l3 2177 passed/24 既有失败(零回归)"
 test_scope:
   - "多引擎端到端(semgrep+agent+GLM) ✅"
   - "pipeline 单测 6/6 ✅"
   - "3 个 Python 漏洞函数内数据流 reachable ✅"
   - "D4 四轮 RoundController 流程跑通(不 fallback) ✅"
-test_result: "D4(0→10候选)/Web semgrep(0→10)/D1(pipeline)/D4遗留(agent种子)/D5(打分统一)/E5(logic_vuln 27单测+GLM端到端)/D3(续扫 10单测+真实DB往返+真实Celery跨进程) 均已完成验证;待办 D6"
+test_result: "D4(0→10候选)/Web semgrep(0→10)/D1(pipeline)/D4遗留(agent种子)/D5(打分统一)/E5(logic_vuln 27单测+GLM端到端)/D3(续扫 10单测+真实DB往返+真实Celery跨进程)/D6(CFG可达性 109 passed+provider e2e+四语言裂块) 全部完成验证;Phase 17 全部项 done;全 test_l3 2177 passed/24 既有失败(零回归)"
 new_files:
   - "src/layers/pipeline/ (6 文件: scan_pipeline/context/phases/progress/checkpoint/__init__)"
   - "src/web/core/limiter.py"
@@ -34,10 +36,12 @@ new_files:
 modified_files:
   - "见 4 个 commit 的 git diff: ec15c12 / 95178ae / 4700adf / 87c7083"
   - "核心: taint_tracker.py / round_four.py / multi_dim_scorer.py / reachability_scorer.py / prompts(exploitability,adversarial) / verification(adversarial,gatekeeper) / security.py / config.py / main.py / scan_orchestrator.py / concurrency.py / executor.py / openai_client.py / in_memory_deduplicator.py / python_builder.py / strategy/engine.py"
+  - "D6(未提交): cpg/models.py / cpg/builder.py / path_finder/finder.py / cfg/base.py / cfg/builders/go_cfg.py + tests(test_cpg/test_models.py + test_path_finder/test_finder.py)"
 security_blockers: []
 dead_code_actions:
   - "Round1-3 已接通且产出候选(D4 0→10; Round1 agent findings 种子注入);Round2 深度审仍 skip(低价值)"
   - "ScanPipeline 已接入 Web execute_scan(D1);CLI 已移除(web-only)"
+  - "D6: get_cfgs_for_file 初为未用→已接入 _locate_block;get_successors(edge_types) 为预留 API(BFS 按设计不消费 cfg 边,CFG 作独立校验),已单测覆盖;CFG 子系统(~2000行)从死代码→全部接通"
 sync_status: "synced"
 last_check_at: "2026-06-19"
 previous_goal:

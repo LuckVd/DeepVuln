@@ -1,11 +1,11 @@
 # Current Goal
 
-> **状态**: 进行中 🔧（创建于 2026-06-19）
+> **状态**: 已完成 ✅（创建于 2026-06-19；D6 收尾 2026-06-19）
 > **目标**: Phase 17 — AI 与静态最优结合的深化（剩余架构/能力项）
 > **Goal ID**: phase17-ai-static-deepening
 > **创建日期**: 2026-06-19
 >
-> **🧭 冷启动 TL;DR（2026-06-19 第三轮收尾）**：Phase 17 已完成 **D4 / Web-semgrep(0→10) / D1(ScanPipeline) / D5(打分统一) / D4 遗留(agent 种子) / CLI 移除(web-only) / E5(AI 补漏逻辑漏洞) / D3(断点续扫 findings 持久化)**，全部 ✅ 并 **push 到 origin**（HEAD `8cb6277`）。**待办 1 项**：D6（CPG CFG 可达性，低优先大工程）。D3 顺带修了 `checkpoint_service`/`phase_manager` 两个阻塞 session bug（此前 checkpoint 根本没存进 DB）。**环境**：web-only；`export OPENAI_API_KEY="$ANTHROPIC_AUTH_TOKEN"; export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"`；glm-4.5-air；本机 1.9GB（**无 CodeQL**）；测试用 sqlite。分支 `feat/static-evidence-grounding` 与 origin 同步。
+> **🧭 冷启动 TL;DR（2026-06-19 全部完成）**：Phase 17 **全部项已完成** — D4 / Web-semgrep(0→10) / D1(ScanPipeline) / D5(打分统一) / D4 遗留(agent 种子) / CLI 移除(web-only) / E5(AI 补漏逻辑漏洞) / D3(断点续扫 findings 持久化) / **D6(CPG CFG 可达性接地)**。D6 接通了 ~2000 行死代码 CFG 子系统，`reaches_sink`/`condition_paths` 变真实值，四语言(py/js/java/go)裂块；暴露并修 **5 个既有 bug**，其中 **P9-01**（入口/体节点未连通）使**整个 CPG 攻击路径特性首次端到端可用**（此前 `get_paths` 恒返回 `[]`）。D3 顺带修了 `checkpoint_service`/`phase_manager` session bug。**待提交**（HEAD 仍 `098cb4d`，本次改动未 commit）。**环境**：web-only；`export OPENAI_API_KEY="$ANTHROPIC_AUTH_TOKEN"; export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"`；glm-4.5-air；本机 1.9GB（**无 CodeQL**）；测试用 sqlite。分支 `feat/static-evidence-grounding`。
 
 ---
 
@@ -251,7 +251,7 @@ asyncio.run(main())
 | D5 | `round_four.py` `_apply_verification_result`(`confidence_score=round(confidence*100)`) | 打分统一到 multi_dim | ✅ |
 | **E5** | `prompts/logic_vuln.py` + `engines/logic_vuln_detector.py`（入口可达 limited-scope + 三要素硬证据 + 置信度封顶0.6）+ `ScanPhase.LOGIC_VULN_DISCOVERY` + flag `logic_vuln`（默认关） | AI 补漏逻辑漏洞 | ✅ `cb348cb` |
 | **D3** | `scan_orchestrator._serialize/_restore_scan_results` + `WebCheckpointSink.save` 注入 `resume_data` + execute_scan resume 恢复；修 `checkpoint_service` session/datetime 两 bug | 断点续扫 findings 持久化与恢复 | ✅ `2a0e568` |
-| **D6** | `path_finder/finder.py` reaches_sink（固定 True）；`cpg/path_provider.py` GoCPGProvider | CFG 可达性（大工程低优先） | ⏳ |
+| **D6** | `cpg/models.py`(function_cfgs/merge_cfg) + `cpg/builder.py`(_build_and_merge_cfgs/_link_call_to_definition) + `path_finder/finder.py`(_verify_cfg_reachability/_extract_condition_paths) + `cfg/base.py`(_extract_function_body 通用化) + `go_cfg.py`(解包 statement_list) | CPG CFG 可达性接地（reaches_sink/condition_paths 真实值）+ 修 5 既有 bug（P9-01/体提取/sink/Java/Go） | ✅ 待提交 |
 
 ---
 
@@ -309,5 +309,68 @@ D3 核心改动：
 - 静态：改动文件 `ast.parse` OK；`checkpoint_service.py` ruff F 全清；orchestrator 的 2 个 F 警告为既有（非本次）。
 - 回归：`test_pause_resume.py`/`test_checkpoint_service.py` 既有 errors 不变（同源 fixture/环境问题，与本次无关）；E5 的 27 测试仍绿。
 - 临时脚本/docker redis 验证后已清理。
+
+---
+
+## Feat Record: 2026-06-19 D6 CPG CFG 可达性接地（完整版）
+
+### 需求描述
+用户原描述：`/ai-feat D6`。范围经确认选「完整 D6（原描述）」：把已实现却从未接入的 CFG 子系统接通，让 `AttackPath.reaches_sink` 与 `condition_paths` 从硬编码变为真实值，并跨 python/js/java/go 验证。
+
+### 实现方案
+CFG 作为**独立的可达性后置校验**，不并入 BFS 路径搜索（保持现有路径语义/测试不破）。分 5 阶段 TDD：
+1. **CPG 模型**：`CodePropertyGraph` 携带 `function_cfgs`，`merge_cfg()` 建 `cfg_block` 节点+`cfg` 边并登记 CFG，`get_successors(edge_types=)` 可选过滤，`get_cfgs_for_file()`。
+2. **可达性**：`_verify_cfg_reachability` 按行号把路径节点映射到 CFG 基本块（`_locate_block`），要求每个块从其函数入口可达；死块（如 `return` 后）→ `reaches_sink=False`；无 CFG 回落 `True`（零回归）。
+3. **条件**：`_extract_condition_paths` 沿路径块查 `CFGEdge.condition`+edge_type，记 `{cond: True/False}`（仅 conditional 边）。
+4. **builder 接通**：`_fuse_graphs` 末尾 `_build_and_merge_cfgs`（按扩展名定语言→`CFGBuilderFactory`→遍历函数节点→`build_cfg`→`merge_cfg`，每函数 try/except 容错）；`build_from_code` 传显式 language。
+5. **多语言**：通用化 base `_extract_function_body` 处理 `block`/`statement_block` 体包装；加 `method_declaration`(Java)。
+
+### 暴露并修复的既有 bug（CFG 子系统从未被调用，全是死代码）
+- **Bug 1（根因，致全语言 CFG 空）**：`cfg/base.py _extract_function_body` 只找函数的直接 `*_statement` 子节点，但 tree-sitter 里函数体包在 `block`/`statement_block` 下 → 返回空 → 0 基本块。通用化为下钻 `block`/`statement_block`。
+- **Bug 2**：`cpg/builder.py` `function_types` 缺 `method_declaration`（Java 方法不被识别）。收敛为 `FUNCTION_TYPES` 类常量并补齐。
+- **Bug 3**：`path_finder/finder.py _find_sinks` 读 `metadata["ast_name"]`（从未被 `merge_ast_graph` 设置）→ sink 永远找不到。回落到 `metadata["ast_node"].name`。
+
+### 修改文件
+- `src/layers/l3_analysis/engines/ast_engine/cpg/models.py`：+`function_cfgs` 字段、`merge_cfg()`、`get_successors(edge_types=)`、`get_cfgs_for_file()`；导入 `ControlFlowGraph`。
+- `src/layers/l3_analysis/engines/ast_engine/cpg/builder.py`：+`FUNCTION_TYPES` 常量；`_fuse_graphs(language=)`；`_build_and_merge_cfgs()`；`_create_function_body_edges`/`_build_and_merge_cfgs` 改用常量；`build_from_code` 传 language。
+- `src/layers/l3_analysis/engines/ast_engine/path_finder/finder.py`：`_build_attack_path` 调真实 `_verify_cfg_reachability`/`_extract_condition_paths`；实现 `_verify_cfg_reachability`/`_locate_block`/`_extract_condition_paths`/`_find_cfg_edge`；`_find_sinks` 回落 `ast_node.name`。
+- `src/layers/l3_analysis/engines/ast_engine/cfg/base.py`：通用化 `_extract_function_body`（下钻 block/statement_block）。
+- `tests/unit/test_l3/test_cpg/test_models.py`：+`TestCFGFusion`（7 测试：function_cfgs/merge_cfg 节点边/get_successors 过滤/get_cfgs_for_file）。
+- `tests/unit/test_l3/test_path_finder/test_finder.py`：+`TestCFGReachability`（3）、`TestConditionPaths`（3）、`TestPythonEndToEnd`（3，含 1 xfail 记录 P9-01）、`TestMultiLanguageCFGBuild`（5，含 4 语言参数化）。
+
+### 验证结果
+- **D6 全绿**：`test_path_finder` + `test_cpg/test_models` + `test_cfg` = **68 passed, 1 xfailed**（xfailed 是有意记录的 P9-01 provider 缺口）。
+- **集成层实证（真源码）**：python `eval` 可达 → `_verify_cfg_reachability=True`；`return` 后死 `eval` → `False`（真 CFG，非桩）。多语言 function_cfgs 均产出：python/js 在 `if` 处正确裂块（≥2 block、≥1 边）；java/go 产出 CFG 但裂块粗（见下）。
+- **回归**：`test_cpg` 全目录 58 passed（仅 1 既有 `test_supports_language` 失败，与本次无关）；改 `cfg/base.py` 后 `test_cfg` 18 全绿。
+- **既有失败（24，全在 test_l3，均与 D6 无关，非本次回归）**：`max_concurrent` 默认值、dedup/gatekeeper/semgrep/detector/adjudication 等模块。
+
+### ⚠️ 已知边界（诚实披露，非静默）
+> 下方 #1/#2 已在追加记录（P9-01 + Go 裂块修复）中**修复**；保留原文以记录发现过程。
+1. ~~**P9-01 连接 bug（阻 provider 级 e2e，超出 D6 范围）**~~：入口 `call_function` CPG 节点与函数体 `function_definition` CPG 节点是两个未连通的节点 → BFS 无法 entry→sink → `PythonCPGProvider.get_paths` 对真源码返回 `[]`。**✅ 已修**（见追加记录：`_link_call_to_definition` 加 `defines` 边；provider e2e 全绿）。
+2. ~~**Java/Go CFG 裂块粗**~~：Java 实测本就正确裂块（初判为误诊）；Go 因 `block→statement_list` 包装未解包致单块。**✅ Go 已修**（`go_cfg._extract_function_body` 解包 `statement_list`）。四语言现均裂块。
+3. D6 状态行/TL;DR 未同步更新（按 `/ai-feat` 仅追加；建议 `/ai-sync` 更新 D6 为 done）。
+
+---
+
+## Feat Record (追加): 2026-06-19 P9-01 连接 + Go 裂块修复
+
+### 需求描述
+用户：「先继续修复 bug」。修上条 D6 记录披露的两个边界 bug，使 CPG 攻击路径特性真正端到端可用 + 多语言精度对齐。
+
+### 实现方案
+- **P9-01（连接）**：`CPGBuilder._link_call_to_definition` —— 同一函数在 CPG 里是两个未连通节点（`call_function` 入口 vs `function_definition` 体节点，`contains` 边挂在后者）。按 `file`(后缀匹配，容忍相对/绝对路径不一致) + `line` 匹配两者，加 `defines` 边 `call_function→function_definition`，BFS 得以 entry→体→sink。
+- **Go 裂块**：`go_cfg._extract_function_body` 解包 `block→statement_list→statements`（base 止于 `block` 返回 `[statement_list]` 单节点致整函数 1 块）。
+- **Java**：复测确认本就正确裂块（`if`+`return` → 2 块 1 边；`return` 后死代码 → 孤儿块），无需改。
+
+### 修改文件
+- `src/layers/l3_analysis/engines/ast_engine/cpg/builder.py`：+`_link_call_to_definition()` + `_files_match()`；`_fuse_graphs` 末尾调用。
+- `src/layers/l3_analysis/engines/ast_engine/cfg/builders/go_cfg.py`：+`_extract_function_body` 解包 `statement_list`。
+- `tests/unit/test_l3/test_path_finder/test_finder.py`：原 P9-01 xfail → 2 个真实 provider e2e 测试（可达/死代码 reaches_sink）；`TestMultiLanguageCFGBuild` 升级为四语言参数化裂块断言。
+
+### 验证结果
+- `test_path_finder` + `test_cpg` + `test_cfg` = **109 passed**（含四语言裂块 + provider e2e 可达/死代码）。
+- `test_cpg_agent`(集成) + `test_opencode_agent` = 42 passed（仅既有 `max_concurrent` 默认值失败，与本次无关）。
+- provider e2e 实证：`PythonCPGProvider().get_paths(真 .py)` 现返回非空路径；可达 `eval`→`reaches_sink=True`，`return` 后死 `eval`→`False`。
+- **CPG 攻击路径特性此前从未端到端工作过**（P9-01 致 `get_paths` 恒返回 `[]`）；现修复。
 
 

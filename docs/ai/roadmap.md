@@ -31,7 +31,7 @@
 |Phase 14|Web 完整能力迁移|攻击面检测 + 可利用性验证 + 去重仲裁 + 对抗性验证 + Token 统计 + 增量扫描增强|done|2026-04-09|
 |Phase 15|Web 安全与体验增强|JWT 登录认证 + HTML 报告赛博风重设计 + UI 修复|done|2026-04-17|
 |Phase 16|全面质量修复|深度审视40项问题：致命崩溃+核心空壳+语言补全+偏差修复+负优化+i18n|done|2026-04-25|
-|Phase 17|AI+静态最优结合深化|安全加固+证据引擎+函数内数据流+AI grounding+四轮候选+打分统一+pipeline接入+断点续扫findings持久化+AI补漏逻辑漏洞(✅;D3顺带修checkpoint_service/phase_manager session bug);剩余:CPG CFG 可达性(D6)|in_progress|2026-06-19|
+|Phase 17|AI+静态最优结合深化|安全加固+证据引擎+函数内数据流+AI grounding+四轮候选+打分统一+pipeline接入+断点续扫findings持久化+AI补漏逻辑漏洞+CPG CFG可达性接地(D6✅;接通~2000行死代码CFG子系统,暴露并修5个既有bug,含P9-01使CPG攻击路径特性首次端到端可用;四语言裂块);D3顺带修checkpoint_service/phase_manager session bug|done|2026-06-19|
 
 ---
 
