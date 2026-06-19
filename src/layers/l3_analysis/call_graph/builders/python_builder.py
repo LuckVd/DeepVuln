@@ -80,7 +80,10 @@ class PythonCallGraphBuilder(CallGraphBuilder):
                     func_name = self._get_text(child, content)
                     break
 
-            if func_name:
+            if func_name and func_name.isidentifier():
+                # Guard against _get_text occasionally returning garbage
+                # (e.g. "():\n    " from a mis-extracted byte range), which
+                # produced phantom call-graph nodes.
                 line = self._get_line_number(node)
                 node_id = self._create_node_id(file_path, func_name, class_name)
 

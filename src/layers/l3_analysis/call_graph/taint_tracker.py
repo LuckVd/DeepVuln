@@ -195,6 +195,74 @@ class TaintTracker:
         "sql": "sqli", "sql_injection": "sqli",
         "path": "path_traversal", "lfi": "path_traversal", "rfi": "path_traversal",
     }
+    # JavaScript taint sources/sinks (intra-procedural). Extend per language
+    # by adding a _<LANG>_SOURCE_PATTERNS / _<LANG>_SINK_PATTERNS and wiring it
+    # into _source_patterns() / _sink_patterns() below.
+    _JS_SOURCE_PATTERNS = [
+        r"req\.query", r"req\.body", r"req\.params", r"req\.cookies",
+        r"request\.body", r"request\.query", r"request\.params",
+        r"process\.env", r"require\(.readline",
+    ]
+    _JS_SINK_PATTERNS: dict[str, list[str]] = {
+        "cmdi": [r"\beval\(", r"child_process\.(exec|execSync|spawn)\(", r"new\s+Function\("],
+        "sqli": [r"\.query\(", r"\.execute\("],
+        "path_traversal": [r"fs\.(readFile|writeFile|readFileSync|writeFileSync|createReadStream|readdir)\("],
+        "xss": [],
+    }
+
+    def _source_patterns(self) -> list[str]:
+        return {
+            "python": self._PY_SOURCE_PATTERNS,
+            "javascript": self._JS_SOURCE_PATTERNS,
+        }.get(self.language, [])
+
+    def _sink_patterns(self, vuln_type: str) -> list[str]:
+        per_lang = {
+            "python": self._PY_SINK_PATTERNS,
+            "javascript": self._JS_SINK_PATTERNS,
+        }.get(self.language, {})
+        return per_lang.get(vuln_type, [])
+
+    def _extract_function(self, file_source: str, func_name: str) -> str | None:
+        """Extract a function body by name, dispatching by language."""
+        if self.language == "python":
+            return self._extract_python_function(file_source, func_name)
+        if self.language == "javascript":
+            return self._extract_js_function(file_source, func_name)
+        return None
+
+    def _extract_js_function(self, file_source: str, func_name: str) -> str | None:
+        """Heuristic JS function extraction via brace matching.
+
+        Less precise than the Python indent-based extractor (string/regex
+        braces can confuse it); accurate extraction needs tree-sitter-javascript,
+        which is not currently installed.
+        """
+        import re
+
+        lines = file_source.splitlines()
+        pat = re.compile(
+            rf"(function\s+{re.escape(func_name)}\s*\(|"
+            rf"{re.escape(func_name)}\s*[:=]\s*(async\s+)?(\([^)]*\)\s*=>|function)|"
+            rf"\b{re.escape(func_name)}\s*\([^)]*\)\s*\{{)"
+        )
+        start = None
+        for i, line in enumerate(lines):
+            if pat.search(line):
+                start = i
+                break
+        if start is None:
+            return None
+        body = [lines[start]]
+        depth = lines[start].count("{") - lines[start].count("}")
+        for line in lines[start + 1:]:
+            if pat.search(line):
+                break  # next function definition
+            body.append(line)
+            depth += line.count("{") - line.count("}")
+            if depth <= 0 and "{" in "".join(body):
+                break
+        return "\n".join(body)
 
     def _trace_intra_function(self, sink_node, source_code_map, vuln_type, source_path=None):
         """Detect source→sink dataflow WITHIN the sink function.
@@ -205,7 +273,7 @@ class TaintTracker:
         source = self._get_node_source(sink_node, source_code_map, source_path)
         if not source:
             return None
-        func_body = self._extract_python_function(source, sink_node.name)
+        func_body = self._extract_function(source, sink_node.name)
         if not func_body:
             return None
         reachable, evidence = self._find_intra_taint(func_body, vuln_type)
@@ -245,7 +313,7 @@ class TaintTracker:
                     continue
         if not source:
             return None
-        func_body = self._extract_python_function(source, sink_function)
+        func_body = self._extract_function(source, sink_function)
         if not func_body:
             return None
         reachable, evidence = self._find_intra_taint(func_body, vuln_type)
@@ -299,8 +367,13 @@ class TaintTracker:
             if line.strip() == "":
                 body.append(line)
                 continue
-            # Stop at the next top-level def / class / decorator
-            if re.match(r"\S", line) and re.match(r"(def |class |@|async def )", line):
+            stripped = line.lstrip()
+            # Stop at ANY nested def (any indent) so an inner function's body
+            # is NOT merged into this scope (would cause scope-confusion false
+            # positives). Also stop at a top-level class / decorator.
+            if re.match(r"(def |async def )", stripped):
+                break
+            if re.match(r"\S", line) and re.match(r"(class |@)", line):
                 break
             body.append(line)
         return "\n".join(body)
@@ -314,16 +387,25 @@ class TaintTracker:
         """
         import re
 
-        vuln_type = self._VULN_TYPE_ALIASES.get(vuln_type, vuln_type)
-        sink_pats = self._PY_SINK_PATTERNS.get(vuln_type, [])
-        if not sink_pats:
+        # Intra-procedural taint is Python-only: the source/sink patterns below
+        # are Python syntax. Running them on JS/Java/Go would false-positive on
+        # coincidental matches (e.g. `.execute(` exists in many languages).
+        # Intra-procedural taint runs per-language patterns. Unsupported
+        # languages/vuln_types get empty patterns → safe no-op (no false positive).
+        if len(func_body.splitlines()) > 500:
             return False, {}
-        src_re = [re.compile(p) for p in self._PY_SOURCE_PATTERNS]
+        vuln_type = self._VULN_TYPE_ALIASES.get(vuln_type, vuln_type)
+        src_pats = self._source_patterns()
+        sink_pats = self._sink_patterns(vuln_type)
+        if not src_pats or not sink_pats:
+            return False, {}
+        src_re = [re.compile(p) for p in src_pats]
         sink_re = [re.compile(p) for p in sink_pats]
 
         # 1. Collect variables assigned from a source call
         tainted_vars: dict[str, str] = {}
-        assign_re = re.compile(r"^\s*(\w+)\s*=\s*(.+)$")
+        # Match ``var = <source>`` (Python) and ``var|let|const x = <source>`` (JS)
+        assign_re = re.compile(r"^\s*(?:(?:var|let|const)\s+)?(\w+)\s*=\s*(.+)$")
         for line in func_body.splitlines():
             for r in src_re:
                 if r.search(line):
