@@ -75,7 +75,13 @@ class WebCheckpointSink:
         return list(getattr(self._orch, "_completed_phases", set()))
 
     async def save(self, phase: str, data: dict[str, Any] | None = None) -> None:
-        await self._orch._save_checkpoint_phase(phase, data)
+        # D3: snapshot the current findings into resume_data so a resumed scan
+        # can skip completed phases without losing their output. This lives
+        # under resume_data (not the progress summary) so findings never leak
+        # into the frontend progress event built from ``data``.
+        payload = dict(data or {})
+        payload["resume_data"] = {"scan_results": self._orch._serialize_scan_results()}
+        await self._orch._save_checkpoint_phase(phase, payload)
 
     async def clean(self) -> None:
         await self._orch._clean_checkpoint()

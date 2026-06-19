@@ -281,3 +281,34 @@ E5（Phase 17 待办）：补静态引擎（semgrep/AST/taint）和现有 agent 
 - **端到端（本机 sqlite 无需，直连 GLM glm-4.5-air）**：构造 IDOR 入口 `get_user` + 受保护入口 `get_profile`（有 ownership check）。实测检出 1 条 `[high] IDOR in user lookup`（CWE-639, conf=0.6），三要素证据完整（attack_path 具体到「认证用户改 /api/users/2 取回他人记录」）；**未误报**受保护的 `get_profile`。RESULT: **PASS ✅**。
 - 临时 e2e 脚本（/tmp）验证后已删除；2 个单测文件为契约测试，保留。
 
+---
+
+## Feat Record: 2026-06-19 D3 — 断点续扫 findings 持久化与恢复
+
+### 需求描述
+D3（Phase 17 待办）：续扫时已完成 phase（`engine_execution`）被 skip，但其产出的 findings 没持久化/恢复 → 后续 exploitability/adjudication 无数据。原状态「save/clean/resume_from 机制已通，findings 持久化恢复待续」。验证要求：真实 Celery 中断→resume 场景（用户授权 docker 装 redis）。
+
+### 实现方案 + 暴露的既有 bug
+实现 findings 序列化→checkpoint `resume_data`→恢复链路。**摸排中暴露 checkpoint DB 持久化根本没工作过**（两个既有 bug，D3 的真前置）：
+- **Bug 1（阻塞）**：`checkpoint_service.py` 用 `async with get_session_local() as db:`——`get_session_local()` 返回的是 `async_sessionmaker`（不支持 async context manager），必须 `get_session_local()() `。修 3 处。（代码库不一致：orchestrator/adversarial/concurrency 用 `factory()` 带括号=对；checkpoint_service/phase_manager 缺括号=错，本次只修 checkpoint_service。）
+- **Bug 2（阻塞）**：`checkpoint.model_dump()` 保留 datetime 对象 → 存 DB JSON 列 `TypeError: datetime not JSON serializable`。改 `model_dump(mode="json")`（与 `get_hash()` 的 `model_dump_json` 一致）。
+
+D3 核心改动：
+- `scan_orchestrator.py`：`_serialize_scan_results()`（`ScanResult.model_dump(mode="json")` 逐引擎，容错）+ `_restore_scan_results()`（`model_validate` 逐引擎，容错）+ `_restore_state_from_checkpoint(ckpt)`；`execute_scan` resume 块加载 checkpoint 后调恢复。
+- `scan_pipeline_adapters.py`：`WebCheckpointSink.save` 注入 `resume_data={"scan_results": ...}`——**不**污染 progress summary（summary 仍只进前端），findings 只进 checkpoint。
+
+### 修改文件
+- `src/web/services/checkpoint_service.py`：修 session context manager（3 处 `()()`) + datetime 序列化（`mode="json"`) + 清未用导入（json/Scan/ScanPhase/ScanStatus）。
+- `src/web/services/scan_orchestrator.py`：+`_serialize_scan_results`/`_restore_scan_results`/`_restore_state_from_checkpoint`；execute_scan resume 调恢复 + 日志恢复 findings 数。
+- `src/web/services/scan_pipeline_adapters.py`：`WebCheckpointSink.save` 注入 resume_data。
+- `tests/unit/test_web/test_scan_resume_findings.py`（新增，10 测试）：往返保真（severity/source/location/cwe/evidence_strength/metadata/logic_vuln 源）、JSON 兼容、垃圾容错、WebCheckpointSink 注入且不污染 summary、`_restore_state_from_checkpoint` 从 CheckpointData 恢复。
+
+### 验证结果
+- 单测：10 passed（往返 + 注入 + 恢复）。
+- **Tier-1 真实 DB 往返**：真 CheckpointService + sqlite，scan_results(semgrep+logic_vuln) → `save_checkpoint`(DB JSON 列 + hash) → `load_checkpoint` → **hash 验证通过** → 恢复 2 findings 字段保真（含 metadata/evidence_strength/location）。RESULT: **PASS ✅**（修 bug 前 save_checkpoint 直接 False）。
+- **Tier-2 真实 Celery 跨进程**：docker redis + 真 celery worker（redis broker）。Task A（独立 worker 进程）存 2 findings → Task B（**独立 worker 调用**）load + **hash_verified=True** + 恢复双引擎 2 findings + metadata 跨进程保真。RESULT: **PASS ✅**。
+- 静态：改动文件 `ast.parse` OK；`checkpoint_service.py` ruff F 全清；orchestrator 的 2 个 F 警告为既有（非本次）。
+- 回归：`test_pause_resume.py`/`test_checkpoint_service.py` 既有 errors 不变（同源 fixture/环境问题，与本次无关）；E5 的 27 测试仍绿。
+- 临时脚本/docker redis 验证后已清理。
+
+

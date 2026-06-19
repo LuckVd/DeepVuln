@@ -4,9 +4,9 @@ stage: "in_progress"
 status: "in_progress"
 design_confirmed: true
 blocked_by: []
-open_questions:
-  - "D3: 完整 skip 需 Celery 中断→resume 场景验证（用户已授权可自装 Celery）"
+open_questions: []
 resolved_questions:
+  - "D3: 完整 skip 已用真实 Celery(redis broker via docker)+sqlite 验证 save→resume 跨任务恢复(hash 验证+字段保真);并修 checkpoint_service 两个阻塞 bug"
   - "D4: 根因是 TerminationDecider 零数据早停(net_benefit=0-ε<0)，非 Round1 semgrep；已加首轮必跑护栏修复，0→10 candidates"
   - "Web 主路径 semgrep 0 findings: 两层根因(rule_gating 不认 dict + orchestrator 无 --config)，均已修;基线恢复 10 findings。CLI 已弃用(web-only)"
 implementation_steps:
@@ -15,15 +15,14 @@ implementation_steps:
   - "D5 打分统一: ✅ round_four confidence_score 改用 multi_dim(result.confidence*100),ConfidenceScorer 降级为审计证据;200 测试绿(含 test_scoring 40)"
   - "D1 pipeline 接入(仅 Web): ✅ execute_scan 改用 ScanPipeline+_build_scan_phases+WebProgressSink/WebCheckpointSink;基线改前/改后 phase 事件+findings 逐字段一致;CLI 弃用不接入"
   - "E5 AI 补漏逻辑漏洞: ✅ 已建——prompts/logic_vuln.py + LogicVulnerabilityDetector(入口可达 limited-scope + 三要素硬证据 + 置信度封顶0.6 + SPECULATIVE) + ScanPhase.LOGIC_VULN_DISCOVERY(EXPLOIT 后/ADJUDICATION 前) + config flag logic_vuln(默认关);27 单测绿 + GLM 端到端检出 IDOR 不误报"
-  - "D3 断点续扫完整 skip: save/clean/resume_from 机制已通,findings 持久化恢复待续 ⏳ todo"
-  - "E5 AI 补漏逻辑漏洞: 新功能,设计 logic_vuln prompt + LogicVulnDetector ⏳ todo"
+  - "D3 断点续扫 findings 持久化: ✅ 已建——_serialize/_restore_scan_results + WebCheckpointSink.save 注入 resume_data + execute_scan resume 恢复;修 checkpoint_service 两个既有 bug(session context manager `()()` + datetime `mode=\"json\"`,此前 checkpoint 根本没存进 DB);10 单测 + 真实 sqlite DB 往返(hash 验证) + 真实 Celery(redis broker) 跨任务 save→resume 全 PASS"
   - "D6 CPG CFG 可达性: 大工程,path_finder reaches_sink 固定 True 待实现 ⏳ todo"
 test_scope:
   - "多引擎端到端(semgrep+agent+GLM) ✅"
   - "pipeline 单测 6/6 ✅"
   - "3 个 Python 漏洞函数内数据流 reachable ✅"
   - "D4 四轮 RoundController 流程跑通(不 fallback) ✅"
-test_result: "D4(0→10候选)/Web semgrep(0→10)/D1(pipeline)/D4遗留(agent种子)/D5(打分统一)/E5(logic_vuln 27单测+GLM端到端) 均已完成验证;待办 D3/D6"
+test_result: "D4(0→10候选)/Web semgrep(0→10)/D1(pipeline)/D4遗留(agent种子)/D5(打分统一)/E5(logic_vuln 27单测+GLM端到端)/D3(续扫 10单测+真实DB往返+真实Celery跨进程) 均已完成验证;待办 D6"
 new_files:
   - "src/layers/pipeline/ (6 文件: scan_pipeline/context/phases/progress/checkpoint/__init__)"
   - "src/web/core/limiter.py"

@@ -319,9 +319,13 @@ class ScanOrchestrator:
                 if ckpt and await self._checkpoint_service.verify_checkpoint(ckpt):
                     strategy = await self._checkpoint_service.get_resume_strategy(ckpt)
                     self._completed_phases = set(strategy.skip_phases)
+                    # D3: restore findings produced by completed (now-skipped)
+                    # phases so downstream verification/adjudication have data.
+                    self._restore_state_from_checkpoint(ckpt)
                     logger.info(
                         f"Scan {self.scan_id}: resuming from {resume_from}; "
-                        f"previously completed phases: {sorted(self._completed_phases)}"
+                        f"previously completed phases: {sorted(self._completed_phases)}; "
+                        f"restored {sum(len(r.findings) for r in self.scan_results.values())} findings"
                     )
         except Exception as e:
             logger.warning(f"Checkpoint load failed for scan {self.scan_id}: {e}")
@@ -521,6 +525,55 @@ class ScanOrchestrator:
             await self._checkpoint_service.clean_checkpoint(self.scan_id)
         except Exception as e:
             logger.warning(f"Checkpoint clean failed: {e}")
+
+    # ------------------------------------------------------------------
+    # D3: findings persistence for checkpoint resume
+    # ------------------------------------------------------------------
+    def _serialize_scan_results(self) -> list[dict[str, Any]]:
+        """Serialize ``self.scan_results`` into a JSON-safe list for checkpointing.
+
+        Each engine maps to ``{"engine": name, "scan_result": <model_dump>}``.
+        ``mode="json"`` keeps the payload directly storable in the DB JSON
+        column and the checkpoint file backup. Engines that fail to serialize
+        are skipped (best-effort) so one bad engine never blocks a checkpoint.
+        """
+        out: list[dict[str, Any]] = []
+        for engine, result in self.scan_results.items():
+            try:
+                out.append(
+                    {"engine": engine, "scan_result": result.model_dump(mode="json")}
+                )
+            except Exception as exc:
+                logger.warning(f"checkpoint: failed to serialize {engine} findings: {exc}")
+        return out
+
+    def _restore_scan_results(self, serialized: list[dict[str, Any]] | None) -> None:
+        """Restore ``self.scan_results`` from a serialized list (resume path).
+
+        Tolerant of missing/malformed entries: a single bad engine is skipped
+        rather than aborting the resume.
+        """
+        if not serialized:
+            return
+        for entry in serialized:
+            if not isinstance(entry, dict):
+                continue
+            engine = entry.get("engine")
+            raw = entry.get("scan_result")
+            if not engine or not isinstance(raw, dict):
+                continue
+            try:
+                self.scan_results[engine] = ScanResult.model_validate(raw)
+            except Exception as exc:
+                logger.warning(f"checkpoint: failed to restore {engine} findings: {exc}")
+
+    def _restore_state_from_checkpoint(self, ckpt: Any) -> None:
+        """Restore resumable orchestrator state (currently: findings) from a checkpoint."""
+        try:
+            resume_data = getattr(ckpt, "resume_data", None) or {}
+            self._restore_scan_results(resume_data.get("scan_results"))
+        except Exception as exc:
+            logger.warning(f"checkpoint: state restore failed: {exc}")
 
     # ========================================================================
     # Source Preparation

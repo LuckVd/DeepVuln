@@ -6,7 +6,6 @@ It enables scan tasks to be paused and resumed from their last state.
 """
 
 import hashlib
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from src.web.models.database import get_session_local
-from src.web.models.scan import Scan, ScanPhase, ScanStatus, PhaseName
+from src.web.models.scan import PhaseName
 from src.web.repositories.scan import ScanRepository
 from src.web.repositories.event import ScanPhaseRepository
 
@@ -169,7 +168,7 @@ class CheckpointService:
             True if save succeeded, False otherwise
         """
         try:
-            async with get_session_local() as db:
+            async with get_session_local()() as db:
                 scan = await self.scan_repo.get(db, id=scan_id)
                 if scan is None:
                     logger.error(f"Scan {scan_id} not found for checkpoint save")
@@ -199,8 +198,10 @@ class CheckpointService:
                     )
                     checkpoint.phases[p.phase_name] = phase_checkpoint
 
-                # Save to database
-                checkpoint_dict = checkpoint.model_dump()
+                # Save to database. mode="json" renders datetimes as ISO strings
+                # so the DB JSON column can serialize the payload (and matches
+                # get_hash()'s model_dump_json form for stable integrity).
+                checkpoint_dict = checkpoint.model_dump(mode="json")
                 checkpoint_dict["hash"] = checkpoint.get_hash()
 
                 await self.scan_repo.update(
@@ -231,7 +232,7 @@ class CheckpointService:
             CheckpointData if found, None otherwise
         """
         try:
-            async with get_session_local() as db:
+            async with get_session_local()() as db:
                 scan = await self.scan_repo.get(db, id=scan_id)
                 if scan is None:
                     logger.warning(f"Scan {scan_id} not found for checkpoint load")
@@ -310,7 +311,7 @@ class CheckpointService:
             True if cleanup succeeded, False otherwise
         """
         try:
-            async with get_session_local() as db:
+            async with get_session_local()() as db:
                 scan = await self.scan_repo.get(db, id=scan_id)
                 if scan is None:
                     return False
