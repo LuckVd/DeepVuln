@@ -320,6 +320,8 @@ class StrategyEngine:
         groups: dict[str, TargetGroup] = {}
 
         for level in AuditPriorityLevel:
+            if level == AuditPriorityLevel.SKIP:
+                continue  # SKIP-priority targets are not audited
             level_targets = [
                 t for t in targets
                 if t.priority and t.priority.level == level
