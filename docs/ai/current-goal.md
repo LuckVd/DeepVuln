@@ -66,16 +66,15 @@
 
 ---
 
-### D5 — 三套打分统一（P1，精度核心）
+### D5 — 三套打分统一（P1，精度核心）✅ 已完成（本会话）
 
-**现状**：confidence_scorer（0-100）/ final_score.py（加权）/ multi_dim_scorer（0-1）三套并存，round_four 同时产出两个 confidence。
-**卡点**：动 confidence 计算回归风险高（影响所有 finding 最终分），**必须先建 confidence 端到端测试**。
-**步骤**：
-1. 先加测试：对一组 fixture finding，断言 round_four 产出的最终 confidence（固化当前行为）。
-2. 让 round_four 的最终 confidence 以 `multi_dim_scorer.final_confidence` 为准（confidence_scorer 降为辅助/审计）。
-3. 跑测试确认无回归。
-**验证**：现有 `tests/unit/test_l3/test_scoring/`（40 用例）+ 新增 confidence 端到端测试通过。
-**风险**：中（回归）。
+**根因**：`round_four._apply_verification_result` 把 `finding.confidence_score` 设为 **ConfidenceScorer**（`confidence_report.score`，0-100 int），而状态判定用 `result.confidence`（multi_dim，0-1）——两套分裂、会不一致。
+
+**修复**（round_four.py:1422）：`confidence_score = round(result.confidence * 100)`——以 **multi_dim 为唯一来源**，×100 保持 0-100 量纲（reporting 阈值 50 / int 类型 / 前端不破）；ConfidenceScorer 降级为 `confidence_scorer_audit` 审计证据。
+- 量纲确认：`final_score.calculate_finding_score` 不直接读 `confidence_score`（从 `confidence` 推导），唯一直接消费者 `reporting.py:558` 阈值 `<50` 仍按 0-100 成立。
+
+**TDD**：`test_rounds.py::TestRoundFourConfidenceUnification` 2 用例（multi_dim×100 主导 + 无 report 时仍设值）。
+**验证**：test_scoring 40 + test_rounds/round_four_llm/round_four_codeql 共 **200 绿**，无回归；AST/ruff 我的新代码零问题。
 
 ### D1 — Web 接入 ScanPipeline（P1，架构统一）✅ 已完成（本会话，Web-only）
 

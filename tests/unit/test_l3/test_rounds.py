@@ -50,6 +50,12 @@ from src.layers.l3_analysis.rounds.correlation import (
     VerificationStatus,
 )
 from src.layers.l3_analysis.rounds.round_three import RoundThreeExecutor
+from src.layers.l3_analysis.rounds.round_four import (
+    ExploitabilityResult,
+    ExploitabilityStatus,
+    RoundFourExecutor,
+)
+from src.layers.l3_analysis.confidence_scorer import ConfidenceReport
 from src.layers.l3_analysis.rounds.termination import (
     DecisionMetrics,
     DEFAULT_TERMINATION_CONFIG,
@@ -561,6 +567,77 @@ class TestRoundOneExecutor:
         # 2 semgrep findings (mocked empty) + 2 seeded agent findings
         assert result.total_candidates == 2
         assert result.engine_stats["agent"].findings_count == 2
+
+
+class TestRoundFourConfidenceUnification:
+    """D5: finding.confidence_score is unified to the multi-dim confidence
+    (result.confidence * 100); ConfidenceScorer (confidence_report) is demoted
+    to audit evidence and no longer overrides the persisted score."""
+
+    @pytest.fixture
+    def executor(self, tmp_path):
+        return RoundFourExecutor(source_path=tmp_path)
+
+    @pytest.fixture
+    def candidate(self):
+        finding = Finding(
+            id="f1",
+            severity=SeverityLevel.HIGH,
+            title="t",
+            description="d",
+            location=CodeLocation(file="a.py", line=1),
+            source="semgrep",
+        )
+        return VulnerabilityCandidate(
+            id="c1",
+            finding=finding,
+            confidence=ConfidenceLevel.MEDIUM,
+            discovered_in_round=1,
+        )
+
+    def test_confidence_score_uses_multi_dim_not_confidence_scorer(self, executor, candidate):
+        """confidence_score derives from result.confidence (multi-dim, *100),
+        NOT from confidence_report.score (ConfidenceScorer)."""
+        report = ConfidenceReport(
+            score=72,  # ConfidenceScorer: 72
+            level=ConfidenceLevel.MEDIUM,
+            level_description="medium",
+            factors=[],
+        )
+        result = ExploitabilityResult(
+            finding_id="f1",
+            status=ExploitabilityStatus.EXPLOITABLE,
+            confidence=0.85,  # multi-dim: 0.85
+            confidence_report=report,
+        )
+
+        executor._apply_verification_result(candidate, result)
+
+        # Unified: round(0.85 * 100) = 85, NOT 72 (ConfidenceScorer demoted).
+        assert candidate.finding.confidence_score == 85
+        # ConfidenceLevel still driven by result.confidence (0.85 >= 0.8 -> HIGH).
+        assert candidate.confidence == ConfidenceLevel.HIGH
+        # ConfidenceScorer preserved as audit evidence (not lost).
+        audit_entries = [
+            e for e in candidate.evidence
+            if e.get("source") == "confidence_scorer_audit"
+        ]
+        assert len(audit_entries) == 1
+        assert audit_entries[0]["data"]["score"] == 72
+
+    def test_confidence_score_without_confidence_report(self, executor, candidate):
+        """Even without a ConfidenceReport, confidence_score is set from multi-dim."""
+        result = ExploitabilityResult(
+            finding_id="f1",
+            status=ExploitabilityStatus.UNLIKELY,
+            confidence=0.3,
+            confidence_report=None,
+        )
+
+        executor._apply_verification_result(candidate, result)
+
+        assert candidate.finding.confidence_score == 30  # 0.3 * 100
+        assert candidate.confidence == ConfidenceLevel.LOW
 
 
 class TestSourceType:

@@ -1419,12 +1419,22 @@ class RoundFourExecutor:
                 f"({adj.reason})"
             )
 
-        # P6-04d: Store confidence score and factors on finding
+        # D5: confidence_score is unified to the multi-dim confidence
+        # (result.confidence, 0-1) scaled to 0-100 — the single source of truth.
+        # The legacy ConfidenceScorer (confidence_report) is demoted to audit
+        # evidence so the persisted score and the status-deciding confidence no
+        # longer diverge. multi-dim dimension breakdown is already stored as
+        # the "multi_dim_scoring" evidence by _verify_exploitability.
+        candidate.finding.confidence_score = round(result.confidence * 100)
+        candidate.finding.confidence_factors = []
         if result.confidence_report:
-            candidate.finding.confidence_score = result.confidence_report.score
-            candidate.finding.confidence_factors = [
-                (f.name, f.score_delta) for f in result.confidence_report.factors
-            ]
+            candidate.add_evidence("confidence_scorer_audit", {
+                "score": result.confidence_report.score,
+                "level": result.confidence_report.level.value,
+                "factors": [
+                    (f.name, f.score_delta) for f in result.confidence_report.factors
+                ],
+            })
 
         # P6-04c: Store taint analysis report on finding
         if result.taint_analysis_report:

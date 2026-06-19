@@ -14,7 +14,7 @@ resolved_questions:
 implementation_steps:
   - "本会话已完成并 commit(4 个): 安全+P0bug(ec15c12) / 证据引擎+函数内数据流+AI grounding(95178ae) / taint误报修复+多语言框架+性能(4700adf) / 四轮SKIP崩溃修复(87c7083) ✅"
   - "D4 四轮候选产出: ✅ 已修——根因 TerminationDecider 零数据早停(termination.py 加首轮必跑护栏);audit probe 0→10 candidates;TDD 22 测试绿"
-  - "D5 打分统一: 先建 confidence 端到端测试固化,再以 multi_dim_scorer 为主 ⏳ todo"
+  - "D5 打分统一: ✅ round_four confidence_score 改用 multi_dim(result.confidence*100),ConfidenceScorer 降级为审计证据;200 测试绿(含 test_scoring 40)"
   - "D1 pipeline 接入(仅 Web): ✅ execute_scan 改用 ScanPipeline+_build_scan_phases+WebProgressSink/WebCheckpointSink;基线改前/改后 phase 事件+findings 逐字段一致;CLI 弃用不接入"
   - "D3 断点续扫完整 skip: save/clean/resume_from 机制已通,findings 持久化恢复待续 ⏳ todo"
   - "E5 AI 补漏逻辑漏洞: 新功能,设计 logic_vuln prompt + LogicVulnDetector ⏳ todo"
