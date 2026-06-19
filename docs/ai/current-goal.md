@@ -5,7 +5,7 @@
 > **Goal ID**: phase17-ai-static-deepening
 > **创建日期**: 2026-06-19
 >
-> **🧭 冷启动 TL;DR（2026-06-19 第二轮收尾）**：Phase 17 已完成 **D4 / Web-semgrep(0→10) / D1(ScanPipeline) / D5(打分统一) / D4 遗留(agent 种子) / CLI 移除(web-only)**，全部 ✅ 并 **push 到 origin**。**待办 3 项**：E5（AI 补漏逻辑漏洞，新能力）/ D3（断点续扫，需 Celery，用户已授权可装）/ D6（CPG CFG 可达性，低优先大工程）。**环境**：web-only；`export OPENAI_API_KEY="$ANTHROPIC_AUTH_TOKEN"; export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"`；glm-4.5-air；本机 1.9GB（**无 CodeQL**）；测试用 sqlite。分支 `feat/static-evidence-grounding` 与 origin 同步。
+> **🧭 冷启动 TL;DR（2026-06-19 第三轮收尾）**：Phase 17 已完成 **D4 / Web-semgrep(0→10) / D1(ScanPipeline) / D5(打分统一) / D4 遗留(agent 种子) / CLI 移除(web-only) / E5(AI 补漏逻辑漏洞) / D3(断点续扫 findings 持久化)**，全部 ✅ 并 **push 到 origin**（HEAD `8cb6277`）。**待办 1 项**：D6（CPG CFG 可达性，低优先大工程）。D3 顺带修了 `checkpoint_service`/`phase_manager` 两个阻塞 session bug（此前 checkpoint 根本没存进 DB）。**环境**：web-only；`export OPENAI_API_KEY="$ANTHROPIC_AUTH_TOKEN"; export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"`；glm-4.5-air；本机 1.9GB（**无 CodeQL**）；测试用 sqlite。分支 `feat/static-evidence-grounding` 与 origin 同步。
 
 ---
 
@@ -249,10 +249,9 @@ asyncio.run(main())
 | Web semgrep | `core/rule_gating.py` `_extract_tech_stack_info`(dict 兼容)；`scan_orchestrator.py` `_build_engine_options`(`use_auto_config`) | 0→10 findings 修复 | ✅ |
 | D1 | `scan_orchestrator.py` `execute_scan`/`_build_scan_phases`；`web/services/scan_pipeline_adapters.py` | ScanPipeline 编排（Web-only） | ✅ |
 | D5 | `round_four.py` `_apply_verification_result`(`confidence_score=round(confidence*100)`) | 打分统一到 multi_dim | ✅ |
-| **E5** | （待建）`prompts/logic_vuln.py` + `LogicVulnDetector`（复用 `_llm_assisted_assessment`） | AI 补漏逻辑漏洞 | ⏳ |
-| **D3** | `scan_orchestrator.py` `_save_checkpoint_phase`/`_clean_checkpoint`；`checkpoint_service.py`；pipeline `CheckpointSink` | 断点续扫（findings 持久化恢复待续；需 Celery） | ⏳ |
+| **E5** | `prompts/logic_vuln.py` + `engines/logic_vuln_detector.py`（入口可达 limited-scope + 三要素硬证据 + 置信度封顶0.6）+ `ScanPhase.LOGIC_VULN_DISCOVERY` + flag `logic_vuln`（默认关） | AI 补漏逻辑漏洞 | ✅ `cb348cb` |
+| **D3** | `scan_orchestrator._serialize/_restore_scan_results` + `WebCheckpointSink.save` 注入 `resume_data` + execute_scan resume 恢复；修 `checkpoint_service` session/datetime 两 bug | 断点续扫 findings 持久化与恢复 | ✅ `2a0e568` |
 | **D6** | `path_finder/finder.py` reaches_sink（固定 True）；`cpg/path_provider.py` GoCPGProvider | CFG 可达性（大工程低优先） | ⏳ |
-| D3 | `scan_orchestrator.py` `_save_checkpoint_phase`/`_clean_checkpoint` + `checkpoint_service.py` | 断点续扫（机制通，缺 findings 持久化） |
 
 ---
 

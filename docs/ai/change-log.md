@@ -1,5 +1,47 @@
 # Change Log
 
+## 2026-06-19
+
+### Phase 17 — E5 AI 补漏逻辑漏洞（LogicVulnDetector）✅
+
+- **Goal ID**: phase17-ai-static-deepening（E5）
+- **Summary**: 新增 limited-scope、证据锚定的 AI 补漏检测器，补静态引擎漏掉的逻辑漏洞（缺失授权/认证绕过/IDOR/业务逻辑/复杂注入）。反误报四重护栏：入口可达 limited-scope + 三要素硬证据（missing_check/entry_point/attack_path）+ 置信度封顶 0.6 + `evidence_strength=SPECULATIVE`
+- **Impact**:
+  - 新增 `src/layers/l3_analysis/prompts/logic_vuln.py`（`build_logic_vuln_prompt` + `parse_logic_vuln_response`，全量 5 类 + JSON 容错 + 三要素强制）
+  - 新增 `src/layers/l3_analysis/engines/logic_vuln_detector.py`（`LogicVulnerabilityDetector`：入口筛选→LLM→Finding）
+  - `models.py`：`Finding.source` Literal 增 `"logic_vuln"`
+  - `phases.py`：`ScanPhase.LOGIC_VULN_DISCOVERY`（插 EXPLOIT 后/ADJUDICATION 前）
+  - `scan_orchestrator.py`：`_run_logic_vuln_discovery` + PhaseSpec（`skip_when = not logic_vuln`，默认关）
+  - `schemas.py`：`ScanConfig.logic_vuln=False`
+- **Tests**: 27 passed（prompt 19 + detector 8）；GLM(glm-4.5-air) 端到端检出 IDOR、不误报受保护入口
+- **Dead Code**: 无（新公开函数全部被引用）
+- **Security**: 无硬编码密钥；flag 默认关，不影响存量扫描
+- **Commit**: cb348cb
+
+### Phase 17 — D3 断点续扫 findings 持久化与恢复 ✅
+
+- **Goal ID**: phase17-ai-static-deepening（D3）
+- **Summary**: 续扫时已完成 phase 被跳过但 findings 未恢复 → 后续无数据。新增 serialize→checkpoint resume_data→restore 链路。摸排暴露并修复 `checkpoint_service` 两个既有阻塞 bug（此前 checkpoint 根本没存进过 DB）
+- **Impact**:
+  - `scan_orchestrator.py`：`_serialize_scan_results`（`model_dump(mode="json")` 逐引擎）+ `_restore_scan_results` + `_restore_state_from_checkpoint`；`execute_scan` resume 恢复 findings
+  - `scan_pipeline_adapters.py`：`WebCheckpointSink.save` 注入 `resume_data`（不污染 progress summary）
+  - `checkpoint_service.py` bug 1：`async with get_session_local() as db` 缺 `()`（maker 非 context manager）→ `()()`
+  - `checkpoint_service.py` bug 2：`model_dump()` 保留 datetime → DB JSON 列 TypeError → `mode="json"`
+- **Tests**: 10 passed；真实 sqlite DB 往返（hash 验证通过）；真实 Celery（docker redis broker）跨任务 save→resume 全 PASS
+- **Dead Code**: 无
+- **Security**: 无硬编码密钥；findings 只进 checkpoint（resume_data），不进前端 progress 事件
+- **Commit**: 2a0e568
+
+### Phase 17 — phase_manager session bug 修复 ✅
+
+- **Goal ID**: phase17-ai-static-deepening（D3 附带）
+- **Summary**: 与 D3 的 checkpoint_service 同一根因：`phase_manager.py` 7 处 `async with get_session_local() as db` 缺 `()` → phase 状态读写全部抛 TypeError
+- **Impact**: `src/web/services/phase_manager.py` 7 处改 `()()`
+- **Tests**: ast/ruff OK；真实 sqlite 跑 `PhaseManager().get_phase_status()` 修前抛错、修后正常
+- **Dead Code**: 无
+- **Security**: 无
+- **Commit**: 8cb6277
+
 ## 2026-04-25
 
 ### Phase 16 — 全面质量修复（深度审视 40 项问题） ✅
