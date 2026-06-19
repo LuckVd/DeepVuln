@@ -1,6 +1,6 @@
 # Project Summary
 
-Status: Phase 6.5 - code-audit 集成
+Status: Phase 17 - web-only（CLI 已移除，仅 Web 接口）
 
 ## Purpose
 
@@ -11,7 +11,7 @@ DeepVuln 是多层（L1 情报 + L3 分析）架构的智能漏洞挖掘系统�
 - **L1 Intelligence**: 源码获取、工作空间管理、技术栈识别、攻击面探测、威胁情报同步
 - **L3 Analysis**: 四引擎执行（Semgrep/CodeQL/AST Engine/Agent）、多轮审计、裁决融合、增量扫描
 - **Core**: 规则裁剪引擎、误报熔断、统一评分、文件过滤
-- **CLI**: 交互式命令行界面，支持 git/local/scan/intel 等子命令
+- **Web**: Web 接口（`scan_orchestrator` + `pipeline` + FastAPI），唯一用户入口（CLI 已移除）
 
 ## Tech Stack
 
@@ -27,7 +27,7 @@ DeepVuln 是多层（L1 情报 + L3 分析）架构的智能漏洞挖掘系统�
 - `src/layers/l1_intelligence/` - 情报收集与工作空间
 - `src/layers/l3_analysis/` - 静态分析与引擎
 - `src/core/` - 基础设施与通用工具
-- `src/cli/` - 用户交互入口
+- `src/web/` - Web 接口与扫描编排（唯一入口，web-only）
 - `docs/ROADMAP.md` - 项目真实路线图（事实来源）
 
 ## Recent Maintenance Notes

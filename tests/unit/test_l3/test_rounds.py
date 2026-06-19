@@ -1686,6 +1686,33 @@ class TestTerminationDecider:
         decision = decider.should_continue(session_with_candidates)
         assert decision.should_continue is True
 
+    def test_should_continue_first_round_always_runs(self, decider, sample_session):
+        """D4: with zero rounds completed the first round must always run.
+
+        Reproduces the production condition set by ``RoundController.start_session``
+        (``started_at = now``): at session start benefit is 0 while cost is slightly
+        > 0 (elapsed time), so net benefit < 0 stopped the audit *before* Round 1
+        could produce any candidates -> "0 candidates". Zero rounds means there is
+        no data to assess benefit/cost, so the first round must be forced.
+        """
+        sample_session.started_at = datetime.now(UTC)
+        sample_session.status = RoundStatus.RUNNING
+
+        decision = decider.should_continue(sample_session)
+
+        assert decision.metrics.rounds_completed == 0
+        assert decision.should_continue is True
+
+    def test_should_continue_respects_max_rounds_before_first_round(self, decider, sample_session):
+        """max_rounds is honoured even when zero rounds have completed."""
+        sample_session.current_round = sample_session.max_rounds
+        sample_session.started_at = datetime.now(UTC)
+
+        decision = decider.should_continue(sample_session)
+
+        assert decision.should_continue is False
+        assert decision.reason == TerminationReason.MAX_ROUNDS_REACHED
+
     def test_should_continue_confidence_threshold(self, decider_strict, sample_session, sample_finding_local):
         """Test stopping when confidence threshold is met."""
         # Create many high confidence candidates

@@ -71,9 +71,6 @@ web = [
     "redis>=5.0.0",
 ]
 
-[project.scripts]
-deepvuln = "src.cli:main"
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]

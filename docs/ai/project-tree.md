@@ -4,7 +4,6 @@ Keep this file compact. Only include important paths.
 
 ```text
 src/
-├── cli/main.py              # CLI 入口点
 ├── core/
 │   ├── config/              # 配置管理
 │   ├── llm/                 # LLM 客户端
@@ -38,8 +37,7 @@ docs/
 
 ## Key Entry Points
 
-- `src/cli/main.py:main()` - 主 CLI 入口
-- `src/cli/main.py:run_full_security_scan()` - 完整安全扫描
+- `src/web/services/scan_orchestrator.py:ScanOrchestrator.execute_scan()` - Web 扫描主入口（web-only）
 - `src/layers/l3_analysis/smart_scanner.py:SmartScanner` - 智能扫描器
 
 ## Key Config Files

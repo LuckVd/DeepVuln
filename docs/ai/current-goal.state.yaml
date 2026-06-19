@@ -5,15 +5,17 @@ status: "in_progress"
 design_confirmed: true
 blocked_by: []
 open_questions:
-  - "D4: Round1-3 产出 0 candidates 的根因（targets 空 vs Round1 execute 内部）"
   - "D1: 重写 CLI/Web 主路径需测试环境验证回归"
   - "D3: 完整 skip 需 Celery 中断→resume 场景验证"
-resolved_questions: []
+  - "D4 遗留(非阻塞): Round1/2 未传 agent_executor + 无 CodeQL 时链路停在 Round2，属多轮深化增强项"
+resolved_questions:
+  - "D4: 根因是 TerminationDecider 零数据早停(net_benefit=0-ε<0)，非 Round1 semgrep；已加首轮必跑护栏修复，0→10 candidates"
+  - "Web 主路径 semgrep 0 findings: 两层根因(rule_gating 不认 dict + orchestrator 无 --config)，均已修;基线恢复 10 findings。CLI 已弃用(web-only)"
 implementation_steps:
   - "本会话已完成并 commit(4 个): 安全+P0bug(ec15c12) / 证据引擎+函数内数据流+AI grounding(95178ae) / taint误报修复+多语言框架+性能(4700adf) / 四轮SKIP崩溃修复(87c7083) ✅"
-  - "D4 四轮候选产出: RoundController 流程跑通,但 0 candidates 待修(查 targets 生成/Round1 execute 候选产出) 🔧 in_progress"
+  - "D4 四轮候选产出: ✅ 已修——根因 TerminationDecider 零数据早停(termination.py 加首轮必跑护栏);audit probe 0→10 candidates;TDD 22 测试绿"
   - "D5 打分统一: 先建 confidence 端到端测试固化,再以 multi_dim_scorer 为主 ⏳ todo"
-  - "D1 pipeline 接入 CLI/Web: ScanPipeline 模块就绪但未接入主路径(grep 无匹配),渐进 Web→CLI ⏳ todo"
+  - "D1 pipeline 接入(仅 Web): ✅ execute_scan 改用 ScanPipeline+_build_scan_phases+WebProgressSink/WebCheckpointSink;基线改前/改后 phase 事件+findings 逐字段一致;CLI 弃用不接入"
   - "D3 断点续扫完整 skip: save/clean/resume_from 机制已通,findings 持久化恢复待续 ⏳ todo"
   - "E5 AI 补漏逻辑漏洞: 新功能,设计 logic_vuln prompt + LogicVulnDetector ⏳ todo"
   - "D6 CPG CFG 可达性: 大工程,path_finder reaches_sink 固定 True 待实现 ⏳ todo"

@@ -250,31 +250,3 @@ class TestScanResultIntegration:
         summary = result.to_summary()
         assert isinstance(summary, str)
         assert "Total Findings" in summary
-
-
-class TestCLIIntegration:
-    """Integration tests for CLI commands."""
-
-    def test_semgrep_command_available(self):
-        """Test that semgrep command is available."""
-        from click.testing import CliRunner
-        from src.cli.main import main
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["--help"])
-
-        assert result.exit_code == 0
-        assert "semgrep" in result.output.lower()
-
-    def test_semgrep_command_help(self):
-        """Test semgrep command help."""
-        from click.testing import CliRunner
-        from src.cli.main import main
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["semgrep", "--help"])
-
-        assert result.exit_code == 0
-        assert "--path" in result.output
-        assert "--rules" in result.output
-        assert "--rule-sets" in result.output

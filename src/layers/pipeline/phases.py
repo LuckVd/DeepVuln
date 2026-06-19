@@ -23,9 +23,10 @@ class ScanPhase(str, Enum):
     SOURCE_PREPARATION = "source_preparation"
     ENGINE_SELECTION = "engine_selection"
     ENGINE_EXECUTION = "engine_execution"
-    # Multi-round exploitability adjudication (rounds 1-4). Supersedes the old
-    # standalone "exploitability_verification" phase.
-    ROUNDS_AUDIT = "rounds_audit"
+    # Exploitability verification (Round-4 / multi-round adjudication). The value
+    # matches the live Web progress event name + frontend i18n key, so the pipeline
+    # can drive progress without a frontend rename.
+    EXPLOITABILITY_VERIFICATION = "exploitability_verification"
     ADJUDICATION = "deduplication_adjudication"
     ADVERSARIAL = "adversarial_verification"
     RESULT_MERGE = "result_merging"

@@ -36,17 +36,33 @@
 
 ## 剩余目标（6 项，按优先级，分会话推进）
 
-### D4 — 四轮 Round1-3 候选产出（P0，最兑现宣传）
+### D4 — 四轮 Round1-3 候选产出（P0，最兑现宣传）✅ 已修复（本会话）
 
-**现状**：RoundController 流程跑通（87c7083 修了 SKIP 崩溃），但 Round1-3 **产出 0 candidates**（`Audit session completed: 0 candidates`）。
-**卡点**：Round1 execute（Semgrep+Agent）对 strategy targets 不产出 VulnerabilityCandidate。
-**步骤**：
-1. 在 `_run_full_rounds_audit`（`scan_orchestrator.py:1100-1180`）调试：打印 `strategy.total_targets` + Round1 execute 返回的 `RoundResult.total_candidates`。
-2. 若 targets=0：查 `StrategyEngine.create_strategy(attack_surface=...)` 的 `_convert_entry_points`（attack_surface_report_obj 是否传入 + entry_points→targets 转换）。
-3. 若 targets>0 但 candidates=0：查 `RoundOneExecutor.execute`（round_one.py）内部（SemgrepEngine/Agent 调用 + VulnerabilityCandidate 构造）。
-4. 修复产出，重跑确认 candidates>0。
-**验证**：`enable_full_rounds=True` 跑 /tmp/vuln_test，`session.all_candidates` 非空。
-**复用**：RoundOne/Two/ThreeExecutor 已有完整代码 + `tests/unit/test_l3/test_rounds.py` 单测。
+**真实根因（实证修正，推翻原假设）**：并非 Round1 不产出候选，而是 `TerminationDecider.should_continue`（`termination.py`）在 **0 个 round 已完成**时就停机。启动时 `benefit=0`、`cost=elapsed_time·ε>0` → `net_benefit<0` → check #6（`net_benefit_score<0`，termination.py:340）触发 `diminishing_returns` 停机 → `RoundController._should_continue()` 首次即返回 False → 循环体一次都不进 → **Round1 从未运行** → 0 candidates。Round1 的 Semgrep 本身能产 10 findings（插桩实测 `rule_sets=["security"]`→`--config auto` 命中 eval/SQLi/cmd），只是没机会跑。
+- 插桩证据：`benefit=0.0 / cost=1e-8 / net=-1e-8 / should_continue=False reason=diminishing_returns`；修复后 audit probe 显示 `RoundOneExecutor.execute -> total_candidates=10`、`RESULT(verified)=10`（从 0→10）。
+- 原 A（种子注入）/B（修独立 semgrep）方案均打错层，已废弃。
+
+**修复**：`termination.py` 的 `should_continue` 在 max_rounds 检查（check #1）之后加「首轮必跑」护栏——`rounds_completed==0` 时强制 `should_continue=True`（零数据时收益/成本/边际递减启发式无意义，首轮必须执行才能拿到候选供后续判定）。
+
+**TDD**：`tests/unit/test_l3/test_rounds.py::TestTerminationDecider` 新增 `test_should_continue_first_round_always_runs`（红→绿，精确复现 DIMINISHING_RETURNS 早停）+ `test_should_continue_respects_max_rounds_before_first_round`（护栏不覆盖 max_rounds）；TestTerminationDecider + controller 集成共 22 测试全绿；ruff/ast 无新增问题。
+
+**遗留观察（非 D4，留待后续）**：`_run_full_rounds_audit` 创建 `RoundOneExecutor(source_path=...)` 时未传 `agent_executor`（Round1/2 agent 阶段 skip），且无 CodeQL 时 Round2 产出 0 会让链路停在 Round2（Round3/4 不触发）。这是「多轮深化质量」的增强项，非「0 candidates」bug——D4 验收（`session.all_candidates` 非空）已满足。
+
+### 附加修复 — Web 主路径 semgrep 0 findings（本会话发现并修复）✅
+
+**背景**：为 D1 建基线时发现 Web orchestrator 的 semgrep 对 `/tmp/vuln_proj`（eval/SQLi/命令注入）返回 **0 findings**，而独立 `rule_sets=["security"]` 与 CLI 都能找到 10。Web 主扫描对漏洞致盲——web-only 方向的关键 bug（之前只验证过 CLI 路径）。
+
+**根因（两层，均已修）**：
+1. **`RuleGatingEngine` 不认 dict tech_stack**（`src/core/rule_gating.py:_extract_tech_stack_info`）：用 `hasattr(dict, ...)` 属性访问，但 orchestrator 传的是 dict → `primary_language` 恒 None → 关掉所有语言包。**修**：加 `_field()` 辅助同时支持 dict（`.get`）与对象（`getattr`），enum 取 `.value` 兜底 `str`。TDD `tests/unit/test_core/test_rule_gating.py` 4 用例。
+2. **orchestrator semgrep 无 `--config`**（`scan_orchestrator.py:_build_engine_options`，主因）：既没设 `rule_sets` 也没 `use_auto_config` → semgrep 用 minimal default 规则 → 0 findings。**修**：semgrep 分支加 `options["use_auto_config"] = True`。
+
+**验证**：`/tmp/d1_baseline.py`（semgrep-only，`/tmp/vuln_proj`）改前 `success:false/0 findings` → 改后 `engine_execution: semgrep 10 findings → dedup 3 → success:true, findings_count:3`。ruff/ast 改动区间零新增问题；test_pause_resume 的 17 ERROR 为既有（`scan_executor.AsyncSessionLocal` 缺失，无关）。
+
+**行为变化（生产需知）**：Web semgrep 现跑 `--config auto`（全量 registry），单次变慢（~142s）、耗 token（~10k）、依赖网络——"能找漏洞"的必要代价；如需更可控可改 `rule_sets=["security"]` 显式配置。
+
+**遗留（非阻塞）**：file_filtering 的 `--exclude test` 会误伤路径含 "test" 的目录（如夹具 `/tmp/vuln_test`）；属既有 semgrep exclude 语义，D1 基线改用 `/tmp/vuln_proj` 规避。
+
+---
 
 ### D5 — 三套打分统一（P1，精度核心）
 
@@ -59,17 +75,18 @@
 **验证**：现有 `tests/unit/test_l3/test_scoring/`（40 用例）+ 新增 confidence 端到端测试通过。
 **风险**：中（回归）。
 
-### D1 — CLI/Web 接入 ScanPipeline（P1，架构统一）
+### D1 — Web 接入 ScanPipeline（P1，架构统一）✅ 已完成（本会话，Web-only）
 
-**现状**：ScanPipeline 模块（`src/layers/pipeline/`）建好+6 单测，但 `cli/main.py`(4751 行) 和 `scan_orchestrator.py` 都**没用它**（grep `ScanPipeline` 无匹配），仍各自硬编码 phase。
-**卡点**：重写两个大函数用 pipeline 编排，高风险，**必须跑完整扫描回归对比**（改前 vs 改后 findings 一致）。
-**步骤**（渐进，Web 先 CLI 后）：
-1. Web：`ScanOrchestrator.execute_scan` 收缩为构造 ScanContext + phase 列表（runner 复用现有 `_run_*`）+ WebProgressSink（包装 progress_callback）+ CheckpointHook → `ScanPipeline.execute(resume_from)`。
-2. 跑 Web 扫描回归（sqlite+GLM，对比 findings）。
-3. CLI：`run_full_security_scan` 同样收缩 + RichProgressSink。
-4. 跑 CLI 扫描回归。
-**验证**：改前/改后扫同一项目 findings 一致；pipeline 单测仍 6/6。
-**风险**：高（重写主路径）。建议有完整测试环境时做。
+> CLI 已弃用（web-only 决策），D1 收窄为 **Web 单边**：`ScanOrchestrator.execute_scan` 改用 ScanPipeline 编排；CLI 不再接入（也不再维护）。
+
+**改动**：
+- `scan_orchestrator.py`：`execute_scan` 的 9-phase 硬编码循环 → `_build_scan_phases(ctx)` 构造 `PhaseSpec` 列表（runner 复用现有 `_run_*`，summary 复刻原 progress payload，条件 phase 用 `skip_when`，checkpoint phase 设 `checkpoint_key`）→ `ScanPipeline.execute(resume_from)`。并发管理器初始化/on_scan_complete/token 拆分/错误契约（try/except→`{success:False}`）保持不变。
+- `src/web/services/scan_pipeline_adapters.py`（新）：`WebProgressSink`（映射 pipeline 事件→`ProgressCallback`，`on_phase_complete` 的 `**data`→位置 dict；skipped/failed/progress no-op 保现状）+ `WebCheckpointSink`（包 `_save_checkpoint_phase`/`_clean_checkpoint`，`skip_phases` 取自 `_completed_phases`）。
+- `phases.py`：`ScanPhase` 枚举的 `ROUNDS_AUDIT` → `EXPLOITABILITY_VERIFICATION`（保留前端在用旧名，避免 i18n/progress_broadcaster 回归）。
+
+**验证**：改前/改后基线（`/tmp/vuln_proj` semgrep-only）phase 事件序列 + 各 payload **逐字段一致**，`semgrep 10→dedup 3→success:true findings:3`；pipeline 6 + rule_gating 4 = 10 测试绿；ruff/ast 我的新代码零问题。
+
+**遗留（非 D1）**：~~CLI `run_full_security_scan` 仍硬编码……~~ → **本会话已彻底移除 CLI**（`src/cli/` + `tests/unit/test_cli/` + `pyproject` 的 `deepvuln` 入口 + `test_semgrep_integration.py::TestCLIIntegration`），web-only 落地。历史文档（roadmap/change-log/docker*.md）保留过往记录未改。
 
 ### D3 — 断点续扫完整 skip（P2）
 

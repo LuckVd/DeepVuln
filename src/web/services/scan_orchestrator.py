@@ -21,7 +21,14 @@ from src.layers.l3_analysis.engines.base import BaseEngine
 from src.layers.l3_analysis.models import ScanResult, Finding
 from src.layers.l1_intelligence.tech_stack_detector.detector import TechStackDetector
 from src.layers.l3_analysis.llm.client import LLMClient
+from src.layers.pipeline.context import ScanContext
+from src.layers.pipeline.phases import PhaseSpec, ScanPhase
+from src.layers.pipeline.scan_pipeline import ScanPipeline
 from src.web.models.database import get_session_local
+from src.web.services.scan_pipeline_adapters import (
+    WebCheckpointSink,
+    WebProgressSink,
+)
 from src.web.models.finding import Finding as FindingModel
 from src.web.services.archive_utils import safe_unpack_archive
 from src.web.services.progress_broadcaster import (
@@ -136,6 +143,135 @@ class ScanOrchestrator:
                 db_session=None,
             )
         return self._attack_surface_service
+
+    def _build_scan_phases(self, ctx: ScanContext) -> list[PhaseSpec]:
+        """Build the ordered scan phases driven by ScanPipeline.
+
+        Each runner delegates to an existing ``_run_*`` helper (no behaviour
+        change); each summary reproduces the exact progress payload the frontend
+        expects. Conditional phases use ``skip_when``; ``checkpoint_key`` marks
+        phases whose completion is persisted for resume (via WebCheckpointSink).
+        """
+
+        async def _l1(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            await self._run_l1_preparation()
+
+        async def _source(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            await self._prepare_source()
+
+        async def _engine_select(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            ctx.extra["engines"] = await self._select_engines()
+
+        async def _engine_exec(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            await self._execute_engines(ctx.extra.get("engines") or {})
+            details: dict[str, Any] = {}
+            for name, result in self.scan_results.items():
+                details[name] = {
+                    "findings": len(result.findings),
+                    "duration_seconds": getattr(result, "duration_seconds", 0) or 0,
+                    "tokens_used": 0,
+                }
+                if isinstance(result.raw_output, dict):
+                    details[name]["tokens_used"] = result.raw_output.get("total_tokens", 0)
+                    if name == "agent":
+                        details[name]["files_analyzed"] = result.raw_output.get("files_analyzed", 0)
+                        details[name]["agent_total_files"] = result.raw_output.get("total_files", 0)
+                        details[name]["analyzed_file_paths"] = result.raw_output.get("analyzed_file_paths", [])
+            ctx.extra["per_engine_details"] = details
+
+        async def _exploit(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            ctx.extra["verified_count"] = await self._run_exploitability_verification()
+
+        async def _adjudication(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            ctx.extra["adjudication_summary"] = await self._run_adjudication()
+
+        async def _adversarial(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            ctx.extra["adversarial_summary"] = await self._run_adversarial_verification()
+
+        async def _merge(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            await self._finalize_results()
+
+        async def _tokens(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            ctx.extra["token_stats"] = await self._update_token_statistics()
+
+        def _total_findings() -> int:
+            return sum(len(r.findings) for r in self.scan_results.values())
+
+        return [
+            PhaseSpec(
+                phase=ScanPhase.L1_PREPARATION,
+                runner=_l1,
+                summary=lambda c: {
+                    "languages": self.tech_stack.get("languages", []),
+                    "frameworks": self.tech_stack.get("frameworks", []),
+                    "primary_language": self.tech_stack.get("primary_language"),
+                    "total_files": self.tech_stack.get("total_files", 0),
+                    "file_counts": self.tech_stack.get("file_counts", {}),
+                    "attack_surface": self.attack_surface_report.get("total_entry_points", 0)
+                    if self.attack_surface_report
+                    else 0,
+                },
+            ),
+            PhaseSpec(
+                phase=ScanPhase.SOURCE_PREPARATION,
+                runner=_source,
+                summary=lambda c: {"total_files": self.total_files},
+            ),
+            PhaseSpec(
+                phase=ScanPhase.ENGINE_SELECTION,
+                runner=_engine_select,
+                summary=lambda c: {"engines": list((c.extra.get("engines") or {}).keys())},
+            ),
+            PhaseSpec(
+                phase=ScanPhase.ENGINE_EXECUTION,
+                runner=_engine_exec,
+                checkpoint_key="engine_execution",
+                summary=lambda c: {
+                    "findings": _total_findings(),
+                    "per_engine_details": c.extra.get("per_engine_details") or {},
+                },
+            ),
+            PhaseSpec(
+                phase=ScanPhase.EXPLOITABILITY_VERIFICATION,
+                runner=_exploit,
+                skip_when=lambda c: not self.config.get("llm_verify", True),
+                checkpoint_key="exploitability_verification",
+                summary=lambda c: {"verified_findings": c.extra.get("verified_count", 0)},
+            ),
+            PhaseSpec(
+                phase=ScanPhase.ADJUDICATION,
+                runner=_adjudication,
+                checkpoint_key="deduplication_adjudication",
+                summary=lambda c: {
+                    "unique_findings": (c.extra.get("adjudication_summary") or {}).get("unique_findings", 0),
+                    "duplicates_removed": (c.extra.get("adjudication_summary") or {}).get("duplicates_removed", 0),
+                },
+            ),
+            PhaseSpec(
+                phase=ScanPhase.ADVERSARIAL,
+                runner=_adversarial,
+                skip_when=lambda c: not self.config.get("adversarial", False),
+                summary=lambda c: {
+                    "verified_findings": (c.extra.get("adversarial_summary") or {}).get("verified_count", 0),
+                    "confirmed": (c.extra.get("adversarial_summary") or {}).get("confirmed", 0),
+                    "rejected": (c.extra.get("adversarial_summary") or {}).get("rejected", 0),
+                },
+            ),
+            PhaseSpec(
+                phase=ScanPhase.RESULT_MERGE,
+                runner=_merge,
+                checkpoint_key="result_merging",
+                summary=lambda c: {"total_findings": self.total_findings},
+            ),
+            PhaseSpec(
+                phase=ScanPhase.TOKEN_STATS,
+                runner=_tokens,
+                summary=lambda c: {
+                    "total_tokens": (c.extra.get("token_stats") or {}).get("total_tokens", 0),
+                    "estimated_cost": (c.extra.get("token_stats") or {}).get("estimated_cost", 0),
+                },
+            ),
+        ]
 
     async def execute_scan(self, resume_from: str | None = None) -> Dict[str, Any]:
         """
@@ -274,130 +410,23 @@ class ScanOrchestrator:
             logger.warning(f"Failed to initialize adaptive concurrency: {e}")
 
         try:
-            # Phase 0: L1_Preparation (P14-01 新增)
-            # 包含 TechStackDetection + AttackSurfaceDetection
-            await self.progress_callback.on_phase_start("l1_preparation")
-            await self._run_l1_preparation()
-            await self.progress_callback.on_phase_complete(
-                "l1_preparation",
-                {
-                    "languages": self.tech_stack.get("languages", []),
-                    "frameworks": self.tech_stack.get("frameworks", []),
-                    "primary_language": self.tech_stack.get("primary_language"),
-                    "total_files": self.tech_stack.get("total_files", 0),
-                    "file_counts": self.tech_stack.get("file_counts", {}),
-                    "attack_surface": self.attack_surface_report.get(
-                        "total_entry_points", 0
-                    ) if self.attack_surface_report else 0,
-                }
+            # Drive the scan through ScanPipeline. Each phase delegates to the
+            # existing _run_* helpers (see _build_scan_phases); summaries
+            # reproduce the exact progress payloads the frontend expects. A
+            # phase exception propagates here → on_scan_failed, preserving the
+            # prior error contract of returning {success: False}.
+            ctx = ScanContext(
+                scan_id=self.scan_id,
+                source_path=Path(str(self.source_path)),
+                config=self.config,
             )
-
-            # Phase 1: Prepare source code
-            await self.progress_callback.on_phase_start("source_preparation")
-            await self._prepare_source()
-            await self.progress_callback.on_phase_complete(
-                "source_preparation",
-                {"total_files": self.total_files}
+            pipeline = ScanPipeline(
+                ctx,
+                self._build_scan_phases(ctx),
+                WebProgressSink(self.progress_callback),
+                WebCheckpointSink(self),
             )
-
-            # Phase 2: Select engines
-            await self.progress_callback.on_phase_start("engine_selection")
-            engines = await self._select_engines()
-            await self.progress_callback.on_phase_complete(
-                "engine_selection",
-                {"engines": list(engines.keys())}
-            )
-
-            # Phase 3: Execute engines (concurrent)
-            await self.progress_callback.on_phase_start("engine_execution")
-            await self._execute_engines(engines)
-            # Build per-engine detail summary
-            per_engine_details = {}
-            for name, result in self.scan_results.items():
-                per_engine_details[name] = {
-                    "findings": len(result.findings),
-                    "duration_seconds": getattr(result, 'duration_seconds', 0) or 0,
-                    "tokens_used": 0,
-                }
-                if isinstance(result.raw_output, dict):
-                    per_engine_details[name]["tokens_used"] = result.raw_output.get("total_tokens", 0)
-                    # Extract agent file analysis data
-                    if name == "agent":
-                        per_engine_details[name]["files_analyzed"] = result.raw_output.get("files_analyzed", 0)
-                        per_engine_details[name]["agent_total_files"] = result.raw_output.get("total_files", 0)
-                        per_engine_details[name]["analyzed_file_paths"] = result.raw_output.get("analyzed_file_paths", [])
-            await self.progress_callback.on_phase_complete(
-                "engine_execution",
-                {
-                    "findings": sum(
-                        len(r.findings) for r in self.scan_results.values()
-                    ),
-                    "per_engine_details": per_engine_details,
-                }
-            )
-            await self._save_checkpoint_phase(
-                "engine_execution",
-                {"findings": sum(len(r.findings) for r in self.scan_results.values())},
-            )
-
-            # Phase 3.5: Exploitability Verification (P14-02)
-            if self.config.get("llm_verify", True):
-                await self.progress_callback.on_phase_start("exploitability_verification")
-                verified_count = await self._run_exploitability_verification()
-                await self.progress_callback.on_phase_complete(
-                    "exploitability_verification",
-                    {"verified_findings": verified_count}
-                )
-                await self._save_checkpoint_phase(
-                    "exploitability_verification", {"verified_findings": verified_count}
-                )
-
-            # Phase 4: Deduplication and Adjudication (P14-03)
-            await self.progress_callback.on_phase_start("deduplication_adjudication")
-            adjudication_summary = await self._run_adjudication()
-            await self.progress_callback.on_phase_complete(
-                "deduplication_adjudication",
-                {
-                    "unique_findings": adjudication_summary.get("unique_findings", 0),
-                    "duplicates_removed": adjudication_summary.get("duplicates_removed", 0),
-                }
-            )
-            await self._save_checkpoint_phase("deduplication_adjudication", adjudication_summary)
-
-            # Phase 5: Adversarial Verification (P14-04)
-            if self.config.get("adversarial", False):
-                await self.progress_callback.on_phase_start("adversarial_verification")
-                adversarial_summary = await self._run_adversarial_verification()
-                await self.progress_callback.on_phase_complete(
-                    "adversarial_verification",
-                    {
-                        "verified_findings": adversarial_summary.get("verified_count", 0),
-                        "confirmed": adversarial_summary.get("confirmed", 0),
-                        "rejected": adversarial_summary.get("rejected", 0),
-                    }
-                )
-
-            # Phase 6: Merge and save results
-            await self.progress_callback.on_phase_start("result_merging")
-            await self._finalize_results()
-            await self.progress_callback.on_phase_complete(
-                "result_merging",
-                {"total_findings": self.total_findings}
-            )
-            await self._save_checkpoint_phase(
-                "result_merging", {"total_findings": self.total_findings}
-            )
-
-            # Phase 7: Token statistics (P14-05)
-            await self.progress_callback.on_phase_start("token_statistics")
-            token_stats = await self._update_token_statistics()
-            await self.progress_callback.on_phase_complete(
-                "token_statistics",
-                {
-                    "total_tokens": token_stats["total_tokens"],
-                    "estimated_cost": token_stats["estimated_cost"],
-                }
-            )
+            await pipeline.execute(resume_from=resume_from)
 
             # Calculate duration
             duration_seconds = (
@@ -410,14 +439,13 @@ class ScanOrchestrator:
                 usage = self.llm_client.get_total_usage()
                 tokens_used = usage.total_tokens
 
-            # Build per-phase token breakdown for scan_complete
+            token_stats = ctx.extra.get("token_stats") or {}
+            per_engine_details = ctx.extra.get("per_engine_details") or {}
             per_phase_tokens = {
                 "agent_scan": token_stats.get("agent_scan_tokens", 0),
                 "adversarial": self._adversarial_tokens_used,
                 "total": token_stats.get("total_tokens", 0),
             }
-
-            # Extract agent analysis data from per_engine_details
             agent_detail = per_engine_details.get("agent", {})
 
             await self.progress_callback.on_scan_complete(
@@ -427,9 +455,8 @@ class ScanOrchestrator:
                 agent_files_analyzed=agent_detail.get("files_analyzed", 0),
             )
 
-            # Scan finished successfully — drop the checkpoint so the next run starts fresh.
-            await self._clean_checkpoint()
-
+            # Checkpoint is cleaned on full success by WebCheckpointSink.clean()
+            # (invoked at the end of ScanPipeline.execute).
             return {
                 "success": True,
                 "findings_count": self.total_findings,
@@ -952,6 +979,11 @@ class ScanOrchestrator:
             options["tech_stack"] = self.tech_stack
             options["use_rule_gating"] = True
             options["use_finding_budget"] = True
+            # Load the Semgrep registry rules. Without an explicit config source
+            # Semgrep falls back to its minimal built-in defaults and finds
+            # nothing — the Web main path returned 0 findings because this was
+            # missing (the CLI path worked only because it set rule sets itself).
+            options["use_auto_config"] = True
 
             # Framework-aware rule selection
             frameworks = self.tech_stack.get("frameworks", [])

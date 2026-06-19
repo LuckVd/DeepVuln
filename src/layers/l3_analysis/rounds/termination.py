@@ -297,6 +297,20 @@ class TerminationDecider:
                 explanation=f"Maximum rounds ({session.max_rounds}) reached",
             )
 
+        # 1b. Guarantee the first round always runs. With zero rounds completed
+        # there is no data to assess benefit vs. cost: benefit is always 0 while
+        # cost is slightly > 0 (elapsed time since start), so net benefit < 0
+        # would otherwise stop the audit before Round 1 can produce any
+        # candidates (D4 root cause: "0 candidates"). The heuristics below only
+        # become meaningful once at least one round has executed.
+        if metrics.rounds_completed == 0:
+            return self._make_decision(
+                should_continue=True,
+                reason=None,
+                metrics=metrics,
+                explanation="No rounds completed yet; running first round to gather candidates",
+            )
+
         # 2. Check for no candidates
         if current_round and not current_round.next_round_candidates:
             return self._make_decision(

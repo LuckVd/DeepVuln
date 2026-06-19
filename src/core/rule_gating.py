@@ -265,28 +265,41 @@ class RuleGatingEngine:
         return result
 
     def _extract_tech_stack_info(self, result: RuleGatingResult) -> None:
-        """Extract information from tech stack."""
+        """Extract information from tech stack.
+
+        Accepts either a ``TechStack`` object (attribute access) or a plain
+        ``dict`` (as produced by ``ScanOrchestrator._detect_tech_stack_impl``).
+        The dict case previously silently dropped ``primary_language`` because
+        ``hasattr(dict, ...)`` is False, which disabled every language pack and
+        made the Web main-path Semgrep scan return 0 findings.
+        """
         if not self.tech_stack:
             return
 
+        def _field(name: str) -> Any:
+            ts = self.tech_stack
+            if isinstance(ts, dict):
+                return ts.get(name)
+            return getattr(ts, name, None)
+
+        def _as_str(value: Any) -> str:
+            # Language/ProjectType are str enums; accept plain strings too.
+            return value.value if hasattr(value, "value") else str(value)
+
         # Get primary language
-        if hasattr(self.tech_stack, "primary_language") and self.tech_stack.primary_language:
-            result.primary_language = self.tech_stack.primary_language.value
+        primary = _field("primary_language")
+        if primary:
+            result.primary_language = _as_str(primary)
 
         # Get secondary languages
-        if hasattr(self.tech_stack, "secondary_languages"):
-            result.secondary_languages = [
-                lang.value for lang in self.tech_stack.secondary_languages
-            ]
+        secondary = _field("secondary_languages")
+        if secondary:
+            result.secondary_languages = [_as_str(lang) for lang in secondary]
 
         # Check if CLI project
-        if hasattr(self.tech_stack, "project_type") and self.tech_stack.project_type:
-            project_type_value = (
-                self.tech_stack.project_type.value
-                if hasattr(self.tech_stack.project_type, "value")
-                else str(self.tech_stack.project_type)
-            )
-            result.is_cli_project = project_type_value.lower() == "cli"
+        project_type = _field("project_type")
+        if project_type:
+            result.is_cli_project = _as_str(project_type).lower() == "cli"
 
     def _extract_attack_surface_info(self, result: RuleGatingResult) -> None:
         """Extract information from attack surface.
