@@ -19,7 +19,6 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 from src.layers.l3_analysis.models import Finding, SeverityLevel
 
@@ -102,18 +101,6 @@ class VerificationGatekeeper:
             for pattern, desc in false_positive_patterns
         ]
 
-        strong_evidence_patterns = [
-            r"poc:",
-            r"proof.*concept",
-            r"exploit:",
-            r"working.*exploit",
-        ]
-
-        self._strong_evidence_regex = [
-            re.compile(pattern, re.IGNORECASE)
-            for pattern in strong_evidence_patterns
-        ]
-
     def should_verify(self, finding: Finding) -> GatekeeperResult:
         """
         Determine if a finding needs adversarial verification.
@@ -150,15 +137,18 @@ class VerificationGatekeeper:
                     should_verify=False,
                 )
 
-        # Check 4: High confidence + exploitability = confirmed
+        # Check 4: High confidence + exploitability + strong evidence = confirmed.
+        # Require _has_strong_evidence because the "exploitable" label itself
+        # can be produced by LLM assessment without a real PoC.
         if finding.confidence >= 0.85:
-            if finding.exploitability and finding.exploitability in [
-                "exploitable",
-                "confirmed",
-            ]:
+            if (
+                finding.exploitability
+                and finding.exploitability in ["exploitable", "confirmed"]
+                and self._has_strong_evidence(finding)
+            ):
                 return GatekeeperResult(
                     decision=AutoDecision.CONFIRMED,
-                    reason="High confidence + confirmed exploitability - auto-confirm",
+                    reason="High confidence + exploitability + strong evidence - auto-confirm",
                     should_verify=False,
                 )
 
@@ -210,32 +200,27 @@ class VerificationGatekeeper:
         """
         Check if finding has strong evidence (PoC).
 
+        Only structured metadata counts. Free-text description/title indicators
+        (e.g. the word "poc") are intentionally NOT trusted: an LLM can write
+        them in prose without any real proof, which would let it bypass
+        adversarial verification merely by phrasing.
+
         Args:
             finding: The finding to check.
 
         Returns:
             True if strong evidence found.
         """
-        # Check metadata for PoC
         if finding.metadata:
-            if finding.metadata.get("poc"):
-                return True
             if finding.metadata.get("working_poc"):
                 return True
             if finding.metadata.get("exploit_proven"):
                 return True
-
-        # Check description for PoC indicators
-        desc = (finding.description or "").lower()
-
-        for regex in self._strong_evidence_regex:
-            if regex.search(desc):
+            poc = finding.metadata.get("poc")
+            # Structured PoC record (dict/bool) counts; a plain string does not,
+            # to avoid trusting prose like poc="see description".
+            if poc and not isinstance(poc, str):
                 return True
-
-        # Check title
-        title = (finding.title or "").lower()
-        if "poc" in title or "exploit" in title:
-            return True
 
         return False
 

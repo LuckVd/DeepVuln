@@ -13,15 +13,32 @@ logger = get_logger(__name__)
 class AttackSurfaceScorer:
     """Score based on attack surface entry point type."""
 
-    # Entry point type weights
+    # Entry point type weights. Direct entry points score high; indirect
+    # matches (from round_four._is_in_attack_surface tiers) carry a _SAME_FILE
+    # or _IMPORTED suffix and are deliberately downweighted — they are weaker
+    # evidence of actual reachability.
     ENTRY_POINT_WEIGHTS = {
-        "HTTP": 1.0,  # Web endpoints are most exploitable
+        "HTTP": 1.0,  # Direct web endpoints - most exploitable
         "API": 1.0,
         "WEB": 1.0,
+        "RPC": 0.9,
+        "GRPC": 0.9,
+        "MQ": 0.85,
+        "WEBSOCKET": 0.8,
+        "SCHEDULED": 0.7,
+        "CRON": 0.7,
         "CLI": 0.7,  # CLI requires local access
         "DAEMON": 0.6,
+        "FILE": 0.5,
         "LIBRARY": 0.3,  # Library functions require caller context
         "UNKNOWN": 0.5,  # Unknown type - medium risk
+        # Indirect (tiered) matches - downweighted
+        "HTTP_SAME_FILE": 0.55, "API_SAME_FILE": 0.55, "WEB_SAME_FILE": 0.55,
+        "RPC_SAME_FILE": 0.5, "MQ_SAME_FILE": 0.5, "WEBSOCKET_SAME_FILE": 0.5,
+        "SCHEDULED_SAME_FILE": 0.45, "CLI_SAME_FILE": 0.45, "DAEMON_SAME_FILE": 0.4,
+        "FILE_SAME_FILE": 0.35, "SAME_FILE": 0.4,
+        "HTTP_IMPORTED": 0.4, "API_IMPORTED": 0.4, "WEB_IMPORTED": 0.4,
+        "RPC_IMPORTED": 0.35, "MQ_IMPORTED": 0.35, "IMPORTED": 0.35,
     }
 
     def score(
@@ -55,11 +72,15 @@ class AttackSurfaceScorer:
             "weight": weight,
         }
 
-        # Higher confidence for well-known types (except UNKNOWN which is uncertain)
+        # Higher confidence for direct, well-known types; lower for indirect
+        # tiered matches and unknown types.
         if entry_type in self.ENTRY_POINT_WEIGHTS:
             if entry_type == "UNKNOWN":
                 confidence = 0.5
                 evidence["note"] = "Unknown entry point type - low confidence"
+            elif "_SAME_FILE" in entry_type or "_IMPORTED" in entry_type or entry_type in ("SAME_FILE", "IMPORTED"):
+                confidence = 0.5
+                evidence["note"] = "Indirect attack-surface match - downweighted confidence"
             else:
                 confidence = 0.9
         else:

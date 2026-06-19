@@ -11,18 +11,16 @@ instead of CLI subprocess approach (reference: DeepAudit design).
 import asyncio
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from celery import Task
 
 from src.web.core.celery_app import get_celery_app
 from src.web.models.database import get_session_local
-from src.web.models.scan import Scan, ScanStatus
+from src.web.models.scan import ScanStatus
 from src.web.repositories.scan import ScanRepository
 from src.web.services.scan_orchestrator import ScanOrchestrator
 from src.web.services.progress_broadcaster import ProgressBroadcaster
-from src.layers.l3_analysis.llm import OpenAIClient
 
 logger = logging.getLogger(__name__)
 
@@ -120,8 +118,8 @@ async def _execute_scan_async(
             source_type=scan.source_type,
         )
 
-        # Execute scan
-        result = await orchestrator.execute_scan()
+        # Execute scan (pass resume_from so checkpoint-based resume is honored)
+        result = await orchestrator.execute_scan(resume_from=resume_from)
 
         # Update final scan status based on result
         async with async_session_maker() as db:
@@ -259,7 +257,6 @@ async def _check_scan_progress_async(scan_id: int) -> Dict[str, Any]:
     Returns:
         Dictionary containing current scan status
     """
-    from src.web.models.database import get_session_local
 
     async_session_maker = get_session_local()
     scan_repo = ScanRepository()

@@ -247,6 +247,37 @@ You MUST respond with valid JSON:
 """
 
 
+def _format_taint_evidence(finding: dict[str, Any]) -> str:
+    """Format objective taint evidence (proven source→sink) for an LLM prompt.
+
+    Returns an empty string when no taint evidence is present, so callers can
+    always do ``prompt += _format_taint_evidence(finding)`` unconditionally.
+    """
+    ta = finding.get("taint_analysis")
+    if not ta:
+        return ""
+    path = ta.get("path") or []
+    sanitizers = ta.get("sanitizers") or []
+    lines = [
+        "\n## Objective Static Taint Evidence (proven, not inferred)",
+        "",
+        f"- Source: {ta.get('source', 'N/A')}",
+        f"- Sink: {ta.get('sink', 'N/A')}",
+        f"- source→sink reachable: {ta.get('is_reachable', False)}",
+        f"- sanitized on path: {ta.get('is_sanitized', False)}",
+        f"- exploitable (reachable & not sanitized): {ta.get('is_exploitable', False)}",
+    ]
+    if path:
+        lines.append(f"- Taint path: {' → '.join(str(p) for p in path[:8])}")
+    if sanitizers:
+        lines.append(f"- Sanitizers: {', '.join(str(s) for s in sanitizers[:5])}")
+    lines.append(
+        "This is OBJECTIVE dataflow analysis — if is_exploitable=True a real "
+        "source→sink path was proven. Use it as grounded evidence."
+    )
+    return "\n".join(lines) + "\n"
+
+
 def get_attacker_user_prompt(
     finding: dict[str, Any],
     code_context: str,
@@ -281,6 +312,8 @@ def get_attacker_user_prompt(
 {code_context}
 ```
 """
+
+    prompt += _format_taint_evidence(finding)
 
     if call_chain:
         prompt += f"""
@@ -614,6 +647,8 @@ def get_defender_user_prompt(
 {code_context}
 ```
 """
+
+    prompt += _format_taint_evidence(finding)
 
     if call_chain:
         prompt += f"""

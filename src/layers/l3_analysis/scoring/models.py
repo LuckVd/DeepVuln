@@ -141,6 +141,18 @@ class MultiDimConfig:
     exploitable_threshold: float = 0.6  # Score above this = exploitable (lowered for better coverage)
     not_exploitable_threshold: float = 0.3  # Score below this = not exploitable
 
+    # Evidence gate (precision-first): EXPLOITABLE requires at least
+    # ``min_evidence_dimensions`` of the hard-evidence dimensions (CodeQL
+    # dataflow / taint tracking / reachability) to be available. The
+    # attack_surface dimension is a label, NOT hard evidence, so it cannot
+    # confirm a vulnerability on its own.
+    evidence_dimensions: tuple[str, ...] = (
+        ScoringDimension.CODEQL.value,
+        ScoringDimension.TAINT_TRACKING.value,
+        ScoringDimension.REACHABILITY.value,
+    )
+    min_evidence_dimensions: int = 1
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -150,4 +162,6 @@ class MultiDimConfig:
             "require_min_dimensions": self.require_min_dimensions,
             "exploitable_threshold": self.exploitable_threshold,
             "not_exploitable_threshold": self.not_exploitable_threshold,
+            "evidence_dimensions": list(self.evidence_dimensions),
+            "min_evidence_dimensions": self.min_evidence_dimensions,
         }

@@ -52,11 +52,9 @@ from src.layers.l3_analysis.task.context_builder import (
 from src.layers.l3_analysis.confidence_scorer import (
     ConfidenceScorer,
     ConfidenceReport,
-    calculate_finding_confidence,
 )
 from src.layers.l3_analysis.taint_report import (
     TaintAnalysisReport,
-    build_taint_report_from_finding,
 )
 
 
@@ -250,6 +248,9 @@ class RoundFourExecutor:
         self._call_graph_analyzer: CallGraphAnalyzer | None = None
         self._taint_tracker: TaintTracker | None = None
         self._source_code_map: dict[str, str] = {}  # Cache for source code
+        # Cached call graph (built once per scan, shared across all findings).
+        # Previously build_graph ran per-finding; caching makes large projects tractable.
+        self._cached_graph = None
 
         try:
             self._call_graph_analyzer = CallGraphAnalyzer(
@@ -482,11 +483,11 @@ class RoundFourExecutor:
 
         for entry_file, imports in self._entry_point_imports.items():
             for imp in imports:
-                # Check if the import matches the file
-                if imp == file_module or imp.endswith(f".{base_name}") or imp == base_name:
-                    return True, entry_file
-                # Check partial match (e.g., "authsrv" in "copyparty.authsrv")
-                if base_name in imp.split("."):
+                # Precise module match only. We deliberately do NOT use
+                # `base_name in imp.split(".")` (segment membership) because
+                # common file names (util, models, common, base...) match far
+                # too many imports and inflate the attack surface.
+                if imp == file_module or imp.endswith(f".{file_module}") or imp == base_name:
                     return True, entry_file
 
         return False, None
@@ -692,6 +693,87 @@ class RoundFourExecutor:
             round_result.mark_failed(str(e))
             return round_result
 
+    def _get_call_graph(self):
+        """Build the call graph once per scan and cache it (shared across findings)."""
+        if self._cached_graph is None and self._call_graph_analyzer is not None:
+            try:
+                self._cached_graph = self._call_graph_analyzer.build_graph(self.source_path)
+            except Exception as e:
+                self.logger.warning(f"Call graph build failed: {e}")
+                self._cached_graph = None
+        return self._cached_graph
+
+    # SinkCategory -> TaintTracker vuln_type (TaintTracker supports xss/sqli/cmdi/path_traversal/ldap)
+    _SINK_CATEGORY_TO_VULN_TYPE = {
+        "rce": "cmdi",
+        "sqli": "sqli",
+        "xss": "xss",
+        "path_traversal": "path_traversal",
+        "ldap": "ldap",
+    }
+
+    def _infer_vuln_type(self, finding) -> str:
+        """Infer the vuln_type for taint tracking from the sink category.
+
+        Prefers rule_id prefix; otherwise matches the sink snippet against the
+        sink registry and maps SinkCategory → vuln_type; falls back to 'xss'.
+        """
+        if finding.rule_id and "." in finding.rule_id:
+            return finding.rule_id.split(".")[0]
+        try:
+            from src.layers.l3_analysis.sinks_sources import get_sink_registry
+            snippet = finding.location.snippet if finding.location else ""
+            if snippet:
+                registry = get_sink_registry()
+                for lang in ("python", "javascript", "java", "go", "php"):
+                    matches = registry.match_function(function_call=snippet, language=lang)
+                    if matches:
+                        cat = getattr(matches[0].category, "value", str(matches[0].category))
+                        return self._SINK_CATEGORY_TO_VULN_TYPE.get(cat, "xss")
+        except Exception:
+            pass
+        return "xss"
+
+    def _persist_evidence_to_finding(self, finding, taint_trace_result, reachability_result) -> None:
+        """Write precise structured evidence onto the finding.
+
+        Grounds downstream AI adjudication / reports / exports in real
+        source→sink × reachability × sanitizer evidence (uses the reserved
+        finding.taint_analysis and finding.cpg_path fields).
+        """
+        try:
+            if taint_trace_result is not None:
+                sanitizers = [
+                    getattr(s, "function_name", None) or str(s)
+                    for s in (taint_trace_result.sanitizers or [])
+                ]
+                finding.taint_analysis = {
+                    "source": taint_trace_result.source_id,
+                    "sink": taint_trace_result.sink_id,
+                    "path": taint_trace_result.call_chain or taint_trace_result.path,
+                    "sanitizers": sanitizers,
+                    "effective_sanitizer": (
+                        getattr(taint_trace_result.effective_sanitizer, "function_name", None)
+                        if taint_trace_result.effective_sanitizer else None
+                    ),
+                    "is_reachable": taint_trace_result.is_reachable,
+                    "is_sanitized": taint_trace_result.is_sanitized,
+                    "is_exploitable": taint_trace_result.is_exploitable,
+                    "confidence": taint_trace_result.confidence,
+                }
+            if reachability_result is not None:
+                finding.cpg_path = {
+                    "entry_point": reachability_result.source_id,
+                    "sink": reachability_result.target_id,
+                    "path": reachability_result.call_chain or reachability_result.path,
+                    "confidence": reachability_result.confidence,
+                    "reaches_sink": reachability_result.is_reachable,
+                    "entry_point_type": reachability_result.entry_point_type,
+                    "path_length": reachability_result.path_length,
+                }
+        except Exception as e:
+            self.logger.warning(f"Failed to persist evidence to finding {finding.id}: {e}")
+
     async def _verify_exploitability(
         self,
         candidate: VulnerabilityCandidate,
@@ -763,29 +845,39 @@ class RoundFourExecutor:
         confidence = 0.0
         reasoning = ""
 
-        # P5-01c: Get taint tracking result
+        # P5-01c: Get taint tracking + precise reachability (cached call graph)
         taint_trace_result = None
-        if self._taint_tracker and self._call_graph_analyzer:
-            try:
-                # Build or get call graph for taint tracking
-                graph = self._call_graph_analyzer.build_graph(
-                    self.source_path,
-                )
-                taint_trace_result = self._taint_tracker.trace_from_sink(
-                    graph=graph,
-                    sink_file=location.file,
-                    sink_function=function_name or "unknown",
-                    sink_line=location.line,
-                    vuln_type=finding.rule_id.split(".")[0] if "." in finding.rule_id else "xss",
-                    source_code_map=self._source_code_map,
-                )
-                self.logger.debug(
-                    f"Taint tracking result for {finding.id}: "
-                    f"reachable={taint_trace_result.is_reachable}, "
-                    f"sanitized={taint_trace_result.is_sanitized}"
-                )
-            except Exception as e:
-                self.logger.warning(f"Taint tracking failed for {finding.id}: {e}")
+        reachability_result = None
+        graph = self._get_call_graph()  # cached, built once per scan
+        if graph is not None:
+            # Precise reachability from entry points (CallGraphAnalyzer) —
+            # replaces the lightweight context_builder CallChainInfo as the
+            # authoritative reachability evidence source.
+            if self._call_graph_analyzer:
+                try:
+                    reachability_result = self._call_graph_analyzer.check_reachability(
+                        graph, location.file, function_name
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Reachability check failed for {finding.id}: {e}")
+            if self._taint_tracker:
+                try:
+                    taint_trace_result = self._taint_tracker.trace_from_sink(
+                        graph=graph,
+                        sink_file=location.file,
+                        sink_function=function_name or "unknown",
+                        sink_line=location.line,
+                        vuln_type=self._infer_vuln_type(finding),
+                        source_code_map=self._source_code_map,
+                        source_path=str(self.source_path),
+                    )
+                    self.logger.debug(
+                        f"Taint tracking result for {finding.id}: "
+                        f"reachable={taint_trace_result.is_reachable}, "
+                        f"sanitized={taint_trace_result.is_sanitized}"
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Taint tracking failed for {finding.id}: {e}")
 
         if self._multi_dim_scorer:
             try:
@@ -800,6 +892,7 @@ class RoundFourExecutor:
                     taint_trace_result=taint_trace_result,
                     call_chain=call_chain,
                     attack_surface_type=attack_surface_type,
+                    reachability_result=reachability_result,
                 )
 
                 # Use multi-dim results
@@ -868,6 +961,10 @@ class RoundFourExecutor:
                 data_flow=data_flow,
                 finding=finding,
             )
+
+        # Persist precise structured evidence onto the finding BEFORE the LLM
+        # assessment so the LLM is grounded in real source→sink evidence.
+        self._persist_evidence_to_finding(finding, taint_trace_result, reachability_result)
 
         # If NEEDS_REVIEW and LLM is available, use LLM-assisted assessment
         if status == ExploitabilityStatus.NEEDS_REVIEW and self._enable_llm_assessment:
@@ -1016,6 +1113,7 @@ class RoundFourExecutor:
                 call_chain=call_chain_dict,
                 data_flow=data_flow_list,
                 source_code=source_code,
+                taint_analysis=finding.taint_analysis,
             )
         except Exception as e:
             self.logger.error(f"Failed to build exploitability prompt: {e}")
@@ -1689,12 +1787,12 @@ class RoundFourExecutor:
 
         scorer.add_static_analysis(static_factors)
 
-        # Dynamic verification factors (based on analysis results)
+        # Dynamic verification factors (based on analysis results).
+        # NOTE: poc_success must only be set from an actually-executed PoC
+        # (written into finding.metadata by the verifier), never inferred from
+        # the EXPLOITABLE label — that would be circular reasoning (using the
+        # conclusion as its own evidence).
         verification_factors: dict[str, bool] = {}
-
-        # If status is EXPLOITABLE with high confidence, treat as PoC success
-        if status == ExploitabilityStatus.EXPLOITABLE and confidence >= 0.85:
-            verification_factors["poc_success"] = True
 
         # If we have CodeQL dataflow, that's strong verification
         codeql_finding = self._get_codeql_dataflow(finding)
@@ -1762,7 +1860,6 @@ class RoundFourExecutor:
             SanitizerCheck,
             SourceType,
             SinkType,
-            SanitizerType,
             Controllability,
         )
 

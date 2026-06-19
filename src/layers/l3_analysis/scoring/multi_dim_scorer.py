@@ -67,6 +67,7 @@ class MultiDimScorer:
         taint_trace_result: TaintTraceResult | None = None,
         call_chain: CallChainInfo | None = None,
         attack_surface_type: str | None = None,
+        reachability_result=None,
     ) -> MultiDimScore:
         """
         Compute multi-dimensional score for a vulnerability candidate.
@@ -86,7 +87,7 @@ class MultiDimScorer:
         # 1. Score each dimension
         codeql_score = self.codeql_scorer.score(finding, codeql_dataflow)
         taint_score = self.taint_scorer.score(taint_trace_result)
-        reachability_score = self.reachability_scorer.score(call_chain)
+        reachability_score = self.reachability_scorer.score(call_chain, reachability_result)
         attack_surface_score = self.attack_surface_scorer.score(attack_surface_type)
 
         # 2. Compute fused score
@@ -105,7 +106,7 @@ class MultiDimScorer:
         missing_dimensions = [d.dimension for d in dimensions if not d.available]
 
         # 5. Derive exploitability status
-        exploitability_status = self._derive_status(final_score, final_confidence)
+        exploitability_status = self._derive_status(final_score, final_confidence, dimensions_used)
 
         # 6. Build result
         result = MultiDimScore(
@@ -143,20 +144,28 @@ class MultiDimScorer:
         self,
         score: float,
         confidence: float,
+        dimensions_used: list[str] | None = None,
     ) -> ExploitabilityStatus:
-        """
-        Derive exploitability status from score and confidence.
+        """Derive exploitability status from score, confidence, and evidence.
 
         Rules:
-        - score >= exploitable_threshold → EXPLOITABLE
-        - score <= not_exploitable_threshold → NOT_EXPLOITABLE
         - confidence < min_confidence → NEEDS_REVIEW
+        - score >= exploitable_threshold → EXPLOITABLE, but ONLY if enough
+          hard-evidence dimensions are available (evidence gate). A high score
+          backed only by the attack-surface label downgrades to NEEDS_REVIEW.
+        - score <= not_exploitable_threshold → NOT_EXPLOITABLE
         - otherwise → CONDITIONAL or UNLIKELY
         """
         if confidence < self.config.min_confidence:
             return ExploitabilityStatus.NEEDS_REVIEW
 
         if score >= self.config.exploitable_threshold:
+            # Precision-first evidence gate: require real dataflow/reachability/
+            # taint evidence, not just an attack-surface label.
+            used = set(dimensions_used or [])
+            hard_evidence = [d for d in self.config.evidence_dimensions if d in used]
+            if len(hard_evidence) < self.config.min_evidence_dimensions:
+                return ExploitabilityStatus.NEEDS_REVIEW
             return ExploitabilityStatus.EXPLOITABLE
 
         if score <= self.config.not_exploitable_threshold:

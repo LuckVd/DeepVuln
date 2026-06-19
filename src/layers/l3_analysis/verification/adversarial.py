@@ -182,6 +182,8 @@ class AdversarialVerifier:
                 "user_controlled": finding.metadata.get("user_controlled"),
                 "cwe": finding.cwe,
                 "language": finding.metadata.get("language", ""),
+                "taint_analysis": finding.taint_analysis,
+                "cpg_path": finding.cpg_path,
             }
             finding_id = finding.id
         else:

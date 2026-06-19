@@ -73,6 +73,7 @@ class TaintTracker:
         sink_line: int | None = None,
         vuln_type: str = "xss",
         source_code_map: dict[str, str] | None = None,
+        source_path: str | None = None,
     ) -> TaintTraceResult:
         """
         Perform backward taint tracking from sink to entry points.
@@ -95,6 +96,15 @@ class TaintTracker:
         # Find sink node
         sink_node = self._find_sink_node(graph, sink_file, sink_function, sink_line)
         if not sink_node:
+            # The graph has no node for this function (CallGraphBuilder may
+            # have failed to parse it). Still try intra-function taint straight
+            # from source — source→sink within one function is exploitable
+            # regardless of the call graph.
+            intra = self._trace_intra_function_raw(
+                sink_file, sink_function, source_code_map or {}, vuln_type, source_path
+            )
+            if intra is not None:
+                return intra
             return TaintTraceResult(
                 sink_id=f"{sink_file}:{sink_function}",
                 is_reachable=False,
@@ -102,7 +112,15 @@ class TaintTracker:
                 confidence=0.0,
             )
 
-        # Perform backward BFS to find entry points and sanitizers
+        # 1. Intra-procedural: detect source→sink WITHIN the same function.
+        #    The call-graph BFS below is inter-procedural only and misses the
+        #    common case where source and sink share a function
+        #    (e.g. ``x = request.args.get(...); eval(x)``).
+        intra = self._trace_intra_function(sink_node, source_code_map or {}, vuln_type, source_path)
+        if intra is not None:
+            return intra
+
+        # 2. Inter-procedural: backward BFS over the call graph
         return self._backward_bfs(
             graph,
             sink_node,
@@ -117,23 +135,23 @@ class TaintTracker:
         sink_function: str,
         sink_line: int | None = None,
     ) -> CallNode | None:
-        """Find the sink node in the graph."""
-        for node in graph.nodes.values():
-            # Check file match (allow partial match for relative paths)
-            if not self._path_match(node.file_path, sink_file):
-                continue
+        """Find the sink node in the graph.
 
-            # Check function match
-            if node.name != sink_function:
-                continue
-
-            # Check line match if specified
-            if sink_line and node.line != sink_line:
-                continue
-
-            return node
-
-        return None
+        Matches by file + function name. ``sink_line`` (the line of the sink
+        *call* inside the function) is used only as a tiebreaker among
+        multiple same-name functions — a graph node's line is the function's
+        def line, which is not expected to equal the sink call line.
+        """
+        candidates = [
+            node
+            for node in graph.nodes.values()
+            if self._path_match(node.file_path, sink_file) and node.name == sink_function
+        ]
+        if not candidates:
+            return None
+        if sink_line and len(candidates) > 1:
+            candidates.sort(key=lambda n: abs((n.line or 0) - sink_line))
+        return candidates[0]
 
     def _path_match(self, node_path: str, target_path: str) -> bool:
         """Check if two paths match (handles relative/absolute differences)."""
@@ -150,6 +168,188 @@ class TaintTracker:
             return True
 
         return False
+
+    # --- Intra-procedural taint analysis (source→sink within one function) ---
+    # The inter-procedural BFS only traces cross-function edges; it misses the
+    # very common case where taint source and sink live in the SAME function.
+    # This pass parses the sink function's body and tracks single-level
+    # variable propagation: ``var = <source>; <sink>(... var ...)``.
+
+    _PY_SOURCE_PATTERNS = [
+        r"request\.args\.get", r"request\.args\[", r"request\.form\.get", r"request\.form\[",
+        r"request\.values", r"request\.cookies", r"request\.headers", r"request\.GET",
+        r"request\.POST", r"request\.data", r"request\.json", r"flask\.request",
+        r"os\.environ", r"os\.getenv", r"sys\.argv", r"\binput\(", r"raw_input\(",
+    ]
+    _PY_SINK_PATTERNS: dict[str, list[str]] = {
+        "cmdi": [r"\beval\(", r"\bexec\(", r"os\.system\(", r"os\.popen\(",
+                 r"subprocess\.[\w.]*\(.*shell\s*=\s*True", r"commands\.\w+\("],
+        "sqli": [r"\.execute\(", r"\.executemany\(", r"\.executescript\("],
+        "path_traversal": [r"\bopen\(", r"\.read\(", r"\.readlines\("],
+        "ldap": [r"ldap\.\w+\(", r"\.search_s\(", r"\.search_ext\("],
+        "xss": [],  # XSS sinks are output calls; intra flow not modeled here
+    }
+    # Normalize vuln_type aliases (e.g. rule_id prefixes) to canonical sink keys
+    _VULN_TYPE_ALIASES = {
+        "rce": "cmdi", "command": "cmdi", "os_command": "cmdi", "code_exec": "cmdi",
+        "sql": "sqli", "sql_injection": "sqli",
+        "path": "path_traversal", "lfi": "path_traversal", "rfi": "path_traversal",
+    }
+
+    def _trace_intra_function(self, sink_node, source_code_map, vuln_type, source_path=None):
+        """Detect source→sink dataflow WITHIN the sink function.
+
+        Returns a TaintTraceResult (reachable) if a same-function source→sink
+        flow is found, otherwise None (caller falls back to inter-procedural BFS).
+        """
+        source = self._get_node_source(sink_node, source_code_map, source_path)
+        if not source:
+            return None
+        func_body = self._extract_python_function(source, sink_node.name)
+        if not func_body:
+            return None
+        reachable, evidence = self._find_intra_taint(func_body, vuln_type)
+        if not reachable:
+            return None
+        chain = evidence.get("chain") or [sink_node.id]
+        return TaintTraceResult(
+            sink_id=sink_node.id,
+            source_id=evidence.get("source"),
+            is_reachable=True,
+            is_sanitized=False,
+            path=[sink_node.id],
+            call_chain=chain,
+            confidence=0.7,
+            entry_point_type=sink_node.entry_point_type,
+        )
+
+    def _trace_intra_function_raw(self, sink_file, sink_function, source_code_map, vuln_type, source_path=None):
+        """Intra-function taint WITHOUT a graph node (reads source directly).
+
+        Fallback used when CallGraphBuilder failed to produce a node for the
+        sink function — source→sink within one function is exploitable
+        independent of the call graph.
+        """
+        source = source_code_map.get(sink_file) if source_code_map else None
+        if not source:
+            candidates = [sink_file]
+            if source_path:
+                candidates.append(str(Path(source_path) / sink_file))
+            for c in candidates:
+                try:
+                    p = Path(c)
+                    if p.exists():
+                        source = p.read_text(encoding="utf-8", errors="replace")
+                        break
+                except Exception:
+                    continue
+        if not source:
+            return None
+        func_body = self._extract_python_function(source, sink_function)
+        if not func_body:
+            return None
+        reachable, evidence = self._find_intra_taint(func_body, vuln_type)
+        if not reachable:
+            return None
+        return TaintTraceResult(
+            sink_id=f"{sink_file}:{sink_function}",
+            source_id=evidence.get("source"),
+            is_reachable=True,
+            is_sanitized=False,
+            path=[f"{sink_file}:{sink_function}"],
+            call_chain=evidence.get("chain", []),
+            confidence=0.7,
+        )
+
+    def _get_node_source(self, node, source_code_map, source_path=None):
+        """Get source code for a node's file.
+
+        Tries the source_code map, then the raw file_path, then
+        ``source_path / file_path`` (call-graph nodes often store relative paths).
+        """
+        src = source_code_map.get(node.file_path) if source_code_map else None
+        if src:
+            return src
+        candidates = [node.file_path]
+        if source_path:
+            candidates.append(str(Path(source_path) / node.file_path))
+        for c in candidates:
+            try:
+                p = Path(c)
+                if p.exists():
+                    return p.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+        return None
+
+    def _extract_python_function(self, file_source, func_name):
+        """Extract a Python function body by name (def + indent heuristic)."""
+        import re
+
+        lines = file_source.splitlines()
+        start = None
+        for i, line in enumerate(lines):
+            if re.match(rf"\s*(async\s+)?def\s+{re.escape(func_name)}\s*\(", line):
+                start = i
+                break
+        if start is None:
+            return None
+        body = [lines[start]]
+        for line in lines[start + 1:]:
+            if line.strip() == "":
+                body.append(line)
+                continue
+            # Stop at the next top-level def / class / decorator
+            if re.match(r"\S", line) and re.match(r"(def |class |@|async def )", line):
+                break
+            body.append(line)
+        return "\n".join(body)
+
+    def _find_intra_taint(self, func_body, vuln_type):
+        """Find source→sink taint within a function body.
+
+        Tracks single-level variable propagation (``var = <source>``) and also
+        catches the direct case (``sink(<source>)`` on one line). Returns
+        (reachable, evidence).
+        """
+        import re
+
+        vuln_type = self._VULN_TYPE_ALIASES.get(vuln_type, vuln_type)
+        sink_pats = self._PY_SINK_PATTERNS.get(vuln_type, [])
+        if not sink_pats:
+            return False, {}
+        src_re = [re.compile(p) for p in self._PY_SOURCE_PATTERNS]
+        sink_re = [re.compile(p) for p in sink_pats]
+
+        # 1. Collect variables assigned from a source call
+        tainted_vars: dict[str, str] = {}
+        assign_re = re.compile(r"^\s*(\w+)\s*=\s*(.+)$")
+        for line in func_body.splitlines():
+            for r in src_re:
+                if r.search(line):
+                    m = assign_re.match(line)
+                    if m:
+                        tainted_vars[m.group(1)] = r.pattern
+
+        # 2. For each sink call, check whether a tainted var or a source
+        #    appears on the same statement
+        for line in func_body.splitlines():
+            for r in sink_re:
+                if not r.search(line):
+                    continue
+                for var, pat in tainted_vars.items():
+                    if re.search(r"\b" + re.escape(var) + r"\b", line):
+                        return True, {
+                            "source": pat,
+                            "chain": [f"source({pat}) -> var({var}) -> sink"],
+                        }
+                for sr in src_re:
+                    if sr.search(line):
+                        return True, {
+                            "source": sr.pattern,
+                            "chain": [f"source({sr.pattern}) -> sink"],
+                        }
+        return False, {}
 
     def _backward_bfs(
         self,

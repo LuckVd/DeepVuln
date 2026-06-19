@@ -17,13 +17,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
+from src.layers.l3_analysis.engines.base import BaseEngine
 from src.layers.l3_analysis.models import ScanResult, Finding
 from src.layers.l1_intelligence.tech_stack_detector.detector import TechStackDetector
 from src.layers.l3_analysis.llm.client import LLMClient
 from src.web.models.database import get_session_local
-from src.web.models.scan import ScanStatus
 from src.web.models.finding import Finding as FindingModel
+from src.web.services.archive_utils import safe_unpack_archive
 from src.web.services.progress_broadcaster import (
     ProgressCallback,
     ProgressBroadcaster,
@@ -35,16 +35,12 @@ from src.web.services.attack_surface_service import (
 )
 from src.core.models.attack_surface import AttackSurfaceReport
 from src.web.services.verification_service import (
-    VerificationService,
     create_verification_service,
 )
 from src.web.services.adjudication_service import (
-    AdjudicationService,
     create_adjudication_service,
 )
 from src.web.services.adversarial_service import (
-    AdversarialService,
-    create_adversarial_service,
     create_adversarial_service_from_db,
 )
 from src.web.services.incremental_scan import (
@@ -141,11 +137,18 @@ class ScanOrchestrator:
             )
         return self._attack_surface_service
 
-    async def execute_scan(self) -> Dict[str, Any]:
+    async def execute_scan(self, resume_from: str | None = None) -> Dict[str, Any]:
         """
         Execute the complete scan workflow.
 
         This is the main entry point that orchestrates all scan phases.
+
+        Args:
+            resume_from: Optional phase name to resume from. When set, the
+                checkpoint for this scan is loaded and already-completed phases
+                are recorded. (Full zero-rerun skip requires intermediate-state
+                persistence, which is layered on top of this via the shared
+                pipeline's CheckpointSink.)
 
         Returns:
             Dictionary with scan results:
@@ -158,6 +161,25 @@ class ScanOrchestrator:
             Exception: If the scan fails critically
         """
         self.start_time = datetime.now(timezone.utc)
+
+        # Resume support: load any prior checkpoint so progress is recorded and
+        # resume_from is honored (no longer silently dropped).
+        self._completed_phases: set[str] = set()
+        self._checkpoint_service = None
+        try:
+            from src.web.services.checkpoint_service import get_checkpoint_service
+            self._checkpoint_service = get_checkpoint_service()
+            if resume_from:
+                ckpt = await self._checkpoint_service.load_checkpoint(self.scan_id)
+                if ckpt and await self._checkpoint_service.verify_checkpoint(ckpt):
+                    strategy = await self._checkpoint_service.get_resume_strategy(ckpt)
+                    self._completed_phases = set(strategy.skip_phases)
+                    logger.info(
+                        f"Scan {self.scan_id}: resuming from {resume_from}; "
+                        f"previously completed phases: {sorted(self._completed_phases)}"
+                    )
+        except Exception as e:
+            logger.warning(f"Checkpoint load failed for scan {self.scan_id}: {e}")
 
         # Set scan configuration for progress callback
         # This enables dynamic weight calculation for optional phases
@@ -313,6 +335,10 @@ class ScanOrchestrator:
                     "per_engine_details": per_engine_details,
                 }
             )
+            await self._save_checkpoint_phase(
+                "engine_execution",
+                {"findings": sum(len(r.findings) for r in self.scan_results.values())},
+            )
 
             # Phase 3.5: Exploitability Verification (P14-02)
             if self.config.get("llm_verify", True):
@@ -321,6 +347,9 @@ class ScanOrchestrator:
                 await self.progress_callback.on_phase_complete(
                     "exploitability_verification",
                     {"verified_findings": verified_count}
+                )
+                await self._save_checkpoint_phase(
+                    "exploitability_verification", {"verified_findings": verified_count}
                 )
 
             # Phase 4: Deduplication and Adjudication (P14-03)
@@ -333,6 +362,7 @@ class ScanOrchestrator:
                     "duplicates_removed": adjudication_summary.get("duplicates_removed", 0),
                 }
             )
+            await self._save_checkpoint_phase("deduplication_adjudication", adjudication_summary)
 
             # Phase 5: Adversarial Verification (P14-04)
             if self.config.get("adversarial", False):
@@ -353,6 +383,9 @@ class ScanOrchestrator:
             await self.progress_callback.on_phase_complete(
                 "result_merging",
                 {"total_findings": self.total_findings}
+            )
+            await self._save_checkpoint_phase(
+                "result_merging", {"total_findings": self.total_findings}
             )
 
             # Phase 7: Token statistics (P14-05)
@@ -394,6 +427,9 @@ class ScanOrchestrator:
                 agent_files_analyzed=agent_detail.get("files_analyzed", 0),
             )
 
+            # Scan finished successfully — drop the checkpoint so the next run starts fresh.
+            await self._clean_checkpoint()
+
             return {
                 "success": True,
                 "findings_count": self.total_findings,
@@ -431,6 +467,24 @@ class ScanOrchestrator:
                     await verify_manager.stop_recovery_loop()
             except Exception:
                 pass
+
+    async def _save_checkpoint_phase(self, phase: str, data: dict | None = None) -> None:
+        """Persist phase completion for resume support. Best-effort, never raises."""
+        if not getattr(self, "_checkpoint_service", None):
+            return
+        try:
+            await self._checkpoint_service.save_checkpoint(self.scan_id, phase, data or {})
+        except Exception as e:
+            logger.warning(f"Checkpoint save failed for phase {phase}: {e}")
+
+    async def _clean_checkpoint(self) -> None:
+        """Remove the scan checkpoint after successful completion."""
+        if not getattr(self, "_checkpoint_service", None):
+            return
+        try:
+            await self._checkpoint_service.clean_checkpoint(self.scan_id)
+        except Exception as e:
+            logger.warning(f"Checkpoint clean failed: {e}")
 
     # ========================================================================
     # Source Preparation
@@ -476,7 +530,7 @@ class ScanOrchestrator:
 
             try:
                 logger.info(f"Extracting ZIP: {source_path} -> {self.temp_dir}")
-                shutil.unpack_archive(source_path, self.temp_dir)
+                safe_unpack_archive(source_path, self.temp_dir)
 
                 # Find actual code directory
                 self.source_path = self._find_code_directory(self.temp_dir)
@@ -1009,6 +1063,20 @@ class ScanOrchestrator:
             logger.info("No findings to verify")
             return 0
 
+        # Multi-round audit (experimental): drive the full RoundController
+        # (rounds 1-4) when ``enable_full_rounds`` is set. Rounds 1-3 were
+        # previously unreachable; this wires them in behind a flag. On any
+        # failure we fall back to the standard single Round-4 verification, so
+        # the scan is never broken. Default off = current behavior unchanged.
+        if self.config.get("enable_full_rounds", False):
+            try:
+                return await self._run_full_rounds_audit()
+            except Exception as e:
+                logger.warning(
+                    f"Full multi-round audit failed ({e}); "
+                    f"falling back to Round-4 verification"
+                )
+
         # Collect all findings from all engines
         all_findings: list[Finding] = []
         for engine_name, scan_result in self.scan_results.items():
@@ -1083,6 +1151,97 @@ class ScanOrchestrator:
 
         logger.info(f"Verified {verified_count} findings for exploitability")
         return verified_count
+
+    async def _run_full_rounds_audit(self) -> int:
+        """Drive the full 4-round audit via RoundController (experimental).
+
+        Rounds 1-3 (reconnaissance / CodeQL dataflow / evidence correlation)
+        plus Round 4 (exploitability calibration) were previously dead code —
+        only Round 4's ``_verify_exploitability`` was called directly. This
+        wires the whole controller in, behind the ``enable_full_rounds`` flag.
+
+        Any exception propagates to the caller, which falls back to single
+        Round-4 verification, so the scan is never broken by an issue in the
+        (previously unexercised) Round 1-3 path.
+        """
+        from src.layers.l3_analysis.rounds.controller import RoundController
+        from src.layers.l3_analysis.rounds.round_one import RoundOneExecutor
+        from src.layers.l3_analysis.rounds.round_two import RoundTwoExecutor
+        from src.layers.l3_analysis.rounds.round_three import RoundThreeExecutor
+        from src.layers.l3_analysis.rounds.round_four import RoundFourExecutor
+        from src.layers.l3_analysis.strategy.engine import StrategyEngine
+
+        codeql_findings = (
+            self.scan_results["codeql"].findings if "codeql" in self.scan_results else []
+        )
+
+        # Build an audit strategy from the attack surface (falls back to
+        # file-based targets inside the engine if no attack surface).
+        strategy_engine = StrategyEngine()
+        strategy = strategy_engine.create_strategy(
+            source_path=self.source_path,
+            attack_surface=self.attack_surface_report_obj,
+        )
+
+        r1 = RoundOneExecutor(source_path=self.source_path)
+        r2 = RoundTwoExecutor(source_path=self.source_path)
+        r3 = RoundThreeExecutor(source_path=self.source_path)
+        r4 = RoundFourExecutor(
+            source_path=self.source_path,
+            llm_client=self.llm_client,
+            enable_llm_assessment=True,
+            attack_surface_report=self.attack_surface_report_obj,
+            codeql_results=codeql_findings,
+        )
+        executors = {1: r1, 2: r2, 3: r3, 4: r4}
+
+        def executor_factory(round_number: int):
+            return executors.get(round_number, r4).execute
+
+        def _on_round_complete(result):
+            try:
+                asyncio.create_task(
+                    self.progress_callback.broadcast_event(
+                        "round_complete",
+                        {
+                            "round": getattr(result, "round_number", 0),
+                            "candidates": getattr(result, "total_candidates", 0),
+                        },
+                    )
+                )
+            except Exception:
+                pass
+
+        controller = RoundController(max_rounds=4, on_round_complete=_on_round_complete)
+        controller.start_session(
+            self.source_path, strategy, project_name=self.source_path.name
+        )
+        session = await controller.execute_all_rounds(executor_factory)
+
+        # Map exploitability verdicts from the session back onto engine findings.
+        verified = 0
+        for candidate in getattr(session, "all_candidates", []) or []:
+            finding = getattr(candidate, "finding", None)
+            if finding is None:
+                continue
+            finding.metadata = finding.metadata or {}
+            finding.metadata["exploitability_verification"] = {
+                "status": (
+                    getattr(candidate, "exploitability", None)
+                    or str(getattr(candidate, "status", "") or "")
+                    or None
+                ),
+                "confidence": float(getattr(candidate, "confidence_score", 0.0) or 0.0),
+                "source": "multi_round_audit",
+            }
+            verified += 1
+
+        logger.info(
+            f"Multi-round audit completed: "
+            f"{len(getattr(session, 'all_candidates', []) or [])} candidates, "
+            f"{verified} mapped to findings"
+        )
+        return verified
 
     async def _run_adjudication(self) -> dict[str, int]:
         """Run deduplication and adjudication on findings (P14-03).
@@ -1627,7 +1786,7 @@ class ScanOrchestrator:
             )
             try:
                 logger.info(f"Phase 0: Extracting ZIP: {source_path} -> {self.temp_dir}")
-                shutil.unpack_archive(source_path, self.temp_dir)
+                safe_unpack_archive(source_path, self.temp_dir)
                 self.source_path = self._find_code_directory(self.temp_dir)
                 logger.info(f"Phase 0: Using code directory: {self.source_path}")
             except Exception as e:
