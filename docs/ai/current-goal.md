@@ -132,4 +132,100 @@ python3 -c "import ast,pathlib;[ast.parse(f.read_text()) for f in pathlib.Path('
 ruff check src/ --select F
 ```
 
-**测试项目** `/tmp/vuln_test/app.py`：含 3 个漏洞（eval RCE / SQL 拼接 / os.system 命令注入），Flask 路由入口。如不存在，重新创建（见本会话历史）。
+**测试项目** `/tmp/vuln_test/app.py`（如不存在，用以下内容创建——本次所有验证的基准）：
+```python
+import os, sqlite3
+from flask import Flask, request
+app = Flask(__name__)
+
+@app.route("/run")
+def run_code():
+    code = request.args.get("code", "")
+    return str(eval(code))          # RCE: eval 用户输入
+
+@app.route("/user")
+def get_user():
+    uid = request.args.get("id", "")
+    cur = sqlite3.connect("db.sqlite").cursor()
+    cur.execute("SELECT * FROM users WHERE id = " + uid)   # SQL 注入
+    return str(cur.fetchall())
+
+@app.route("/file")
+def cat_file():
+    name = request.args.get("f", "")
+    os.system("cat " + name)        # 命令注入
+    return "ok"
+```
+
+---
+
+## 新 agent 接力指南（冷启动必读）
+
+### 1. 先读这些建立上下文（按顺序）
+1. **本文件**（current-goal.md）—— 当前 goal + 6 项拆解 + 本指南。
+2. `/root/.claude/projects/-opt-pro/memory/deepvuln-refactor-progress.md` —— 跨会话记忆（愿景 + 已完成阶段 + 环境）。
+3. `git log --oneline -6` + 各 commit diff —— 本次改了什么。
+4. `git branch --show-current` → 应是 `feat/static-evidence-grounding`（未 push）。
+
+### 2. 环境与已踩的坑（避免重复踩）
+- **LLM**：`export OPENAI_API_KEY="$ANTHROPIC_AUTH_TOKEN"; export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"`；**用 glm-4.5-air（快）**；glm-4.6/4.5 是 reasoning 模型，慢且 max_tokens 要给够、易超时。
+- **内存**：本机 1.9GB，**CodeQL 跑不了**（Java OOM）；用 sqlite（`sqlite+aiosqlite:///:memory:`）替代 postgres 测试。已装 semgrep/web 依赖/tree-sitter-javascript。
+- **enable_full_rounds（D4 关键坑）**：CLI 和 scan_tasks **都不传它**（已 grep 确认），**只能**构造 `ScanOrchestrator(scan_config={"enable_full_rounds": True, ...})` 传入。**不能用 CLI 测 D4**。
+- **构造 ScanOrchestrator 测试的坑**：
+  - `progress_callback` 必须用 `__getattr__` 兜底（接口方法多：on_phase_start/complete/progress/on_engine_*/on_scan_*/broadcast_event/set_scan_config/on_phase_skipped 等），否则缺方法报错。
+  - 建表：`async with engine.begin() as conn: await conn.run_sync(Base.metadata.create_all)`。
+  - concurrency 从 sqlite 读 llm_config 表会失败（warning）→ 自动 fallback default，**可忽略**。
+
+### 3. D4 调试脚本（可直接复跑，定位 0 candidates）
+保存为 `/tmp/d4_debug.py`，`python3 /tmp/d4_debug.py`（先 export OPENAI_* 两个变量）：
+```python
+import asyncio, os, traceback
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from src.web.services.scan_orchestrator import ScanOrchestrator
+from src.layers.l3_analysis.llm.openai_client import OpenAIClient
+from src.web.models.database import Base
+
+# 关键：patch _run_full_rounds_audit 打印真实异常（默认被 _run_exploitability_verification 的 try/except 吞掉）
+orig = ScanOrchestrator._run_full_rounds_audit
+async def patched(self):
+    try:
+        r = await orig(self)
+        print("Multi-round OK, verified:", r); return r
+    except Exception as e:
+        print("FULL_ROUNDS_EXCEPTION:", repr(e)); traceback.print_exc(); raise
+ScanOrchestrator._run_full_rounds_audit = patched
+
+class FakeProgress:
+    async def on_phase_start(self, *a, **k): pass
+    async def on_scan_failed(self, e): print("scan failed:", e)
+    async def broadcast_event(self, *a, **k): pass
+    def set_scan_config(self, c): pass
+    def __getattr__(self, n):           # 兜底所有未实现方法（必需）
+        async def _noop(*a, **k): pass
+        return _noop
+
+async def main():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    sm = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    llm = OpenAIClient(model="glm-4.5-air", api_key=os.environ["OPENAI_API_KEY"], base_url=os.environ["OPENAI_BASE_URL"])
+    orch = ScanOrchestrator(scan_id=1, source_path="/tmp/vuln_test",
+        scan_config={"enable_full_rounds": True, "engines": ["agent"], "llm_verify": True},
+        progress_callback=FakeProgress(), db_session_factory=sm, llm_client=llm, source_type="local")
+    print("RESULT:", await orch.execute_scan())
+
+asyncio.run(main())
+```
+**当前症状**：`Audit session completed: 0 candidates`（RoundController 流程通，但 Round1-3 产出空）。
+**下一步排查**：① `_run_full_rounds_audit` 里 `strategy.total_targets` 是否 0（→ 查 `strategy/engine.py:211 _convert_entry_points` 是否把 entry_points 转成 targets）；② 若 targets>0，在 `round_one.py:84 execute` 内打印 candidate 构造点，看为什么没产出 VulnerabilityCandidate。
+
+### 4. 关键文件:行号锚点
+| 项 | 文件:行 | 说明 |
+|---|---|---|
+| D4 | `scan_orchestrator.py:1048` `_run_exploitability_verification`、`:1071` enable_full_rounds 检查、`:1155` `_run_full_rounds_audit` | 四轮接通点 |
+| D4 | `round_one.py:84` `execute`（round_two/three 同结构） | Round1-3 候选产出（0 candidates 源头） |
+| D4 | `strategy/engine.py:125` `create_strategy`、`:211` `_convert_entry_points` | targets 生成 |
+| D1 | `scan_orchestrator.py:140` `execute_scan`、`cli/main.py:739` `run_full_security_scan` | pipeline 待接入的两处编排（均未 import ScanPipeline） |
+| D5 | `round_four.py:~909` `_calculate_confidence_score` + `scoring/multi_dim_scorer.py` + `core/final_score.py` | 三套打分 |
+| D3 | `scan_orchestrator.py` `_save_checkpoint_phase`/`_clean_checkpoint` + `checkpoint_service.py` | 断点续扫（机制通，缺 findings 持久化） |
