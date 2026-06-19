@@ -1,7 +1,6 @@
 """Web service core configuration."""
 
 from functools import lru_cache
-from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -101,6 +100,12 @@ class WebSettings(BaseSettings):
         default="/opt/projects/deepvuln/uploads",
         description="Directory for uploaded files"
     )
+    max_upload_mb: int = Field(
+        default=100,
+        ge=1,
+        le=2048,
+        description="Maximum upload size in MB for scan source archives"
+    )
 
     # Pagination
     default_page_size: int = Field(
@@ -165,6 +170,11 @@ class SecuritySettings(BaseSettings):
     auth_enabled: bool = Field(
         default=True,
         description="Enable JWT authentication (disable for development)"
+    )
+    dev_mode: bool = Field(
+        default=False,
+        description="Development mode: relax startup security checks (e.g. allow "
+        "the default JWT secret). Set DEEPVULN_SECURITY_DEV_MODE=true locally.",
     )
 
     # Rate limiting

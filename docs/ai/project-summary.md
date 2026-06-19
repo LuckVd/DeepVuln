@@ -4,12 +4,12 @@ Status: Phase 6.5 - code-audit 集成
 
 ## Purpose
 
-DeepVuln 是三层核心架构智能漏洞挖掘系统，以 AI Agent 为主、SAST 工具为辅，实现攻击面驱动与可利用性优先裁决。支持 Semgrep、CodeQL 和 LLM Agent 三引擎联合扫描，多轮审计，增量分析。
+DeepVuln 是多层（L1 情报 + L3 分析）架构的智能漏洞挖掘系统，以 AI Agent 为主、SAST 工具为辅，实现攻击面驱动与可利用性优先裁决。支持 Semgrep、CodeQL、AST Engine（tree-sitter）和 LLM Agent 四引擎联合扫描，多轮审计，增量分析。
 
 ## Core Modules
 
 - **L1 Intelligence**: 源码获取、工作空间管理、技术栈识别、攻击面探测、威胁情报同步
-- **L3 Analysis**: 三引擎执行（Semgrep/CodeQL/Agent）、多轮审计、裁决融合、增量扫描
+- **L3 Analysis**: 四引擎执行（Semgrep/CodeQL/AST Engine/Agent）、多轮审计、裁决融合、增量扫描
 - **Core**: 规则裁剪引擎、误报熔断、统一评分、文件过滤
 - **CLI**: 交互式命令行界面，支持 git/local/scan/intel 等子命令
 

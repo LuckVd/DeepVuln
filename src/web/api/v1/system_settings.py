@@ -3,11 +3,11 @@
 from typing import Dict, Any
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.web.api.deps import get_db
-from src.web.core.security import require_api_key
+from src.web.core.security import optional_api_key, require_auth
 from src.web.models.system_schemas import (
     SystemSettingResponse,
     SystemSettingsBatch,
@@ -15,7 +15,7 @@ from src.web.models.system_schemas import (
 )
 from src.web.repositories.system_setting import SystemSettingRepository
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 # Define default settings
@@ -102,7 +102,7 @@ async def get_system_settings(
 async def update_system_settings(
     batch: SystemSettingsBatch,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ):
     """Batch update system settings."""
     repo = SystemSettingRepository()

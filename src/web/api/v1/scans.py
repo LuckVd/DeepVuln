@@ -5,13 +5,14 @@ import logging
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, Form, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from src.web.api.deps import get_db
-from src.web.core.security import require_api_key, optional_api_key
+from src.web.core.security import require_auth
+from src.web.core.security import optional_api_key
 
 logger = logging.getLogger(__name__)
 from src.web.models.schemas import (
@@ -37,7 +38,7 @@ from src.web.repositories.scan import ScanRepository
 from src.web.repositories.finding import FindingRepository
 from src.web.repositories.event import ScanPhaseRepository, ScanEventRepository
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -97,22 +98,44 @@ async def create_scan_from_zip(
     Returns:
         Created scan with generated ID and timestamps
     """
-    import os
-    import shutil
     import uuid
     from pathlib import Path
 
     from src.web.core.config import get_web_settings
 
     # Save uploaded file
-    upload_dir = Path(get_web_settings().upload_dir) / "scans"
+    web_settings = get_web_settings()
+    upload_dir = Path(web_settings.upload_dir) / "scans"
     upload_dir.mkdir(parents=True, exist_ok=True)
+
+    # Validate filename extension (only archives we can safely extract later)
+    original_name = (file.filename or "").lower()
+    if not original_name.endswith((".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported archive type. Allowed: zip, tar, tar.gz, tgz, tar.bz2",
+        )
 
     file_id = str(uuid.uuid4())
     file_path = upload_dir / f"{file_id}.zip"
 
+    # Stream to disk with a size cap to prevent disk-exhaustion DoS.
+    max_bytes = web_settings.max_upload_mb * 1024 * 1024
+    total = 0
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                buffer.close()
+                file_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"Upload exceeds the {web_settings.max_upload_mb} MB limit",
+                )
+            buffer.write(chunk)
 
     # Create scan with ZIP file reference
     scan_repo = ScanRepository()
@@ -140,7 +163,7 @@ async def create_scan_from_zip(
 async def start_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_api_key)] = None,
+    _: Annotated[None, Depends(optional_api_key)] = None,
 ) -> dict:
     """
     Start a scan by dispatching it to Celery.
@@ -954,7 +977,7 @@ async def update_finding_status(
     finding_id: int,
     status_update: FindingUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ) -> FindingResponse:
     """
     Update the status of a finding.
@@ -972,7 +995,7 @@ async def update_finding_status(
         HTTPException 404: If scan or finding not found
         HTTPException 400: If status is invalid
     """
-    from src.web.models.finding import Finding, FindingStatus
+    from src.web.models.finding import FindingStatus
 
     scan_repo = ScanRepository()
     finding_repo = FindingRepository()
@@ -1165,7 +1188,7 @@ async def export_scan_report_pdf(
 async def pause_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ) -> PauseScanResponse:
     """
     Pause a running scan.
@@ -1212,7 +1235,7 @@ async def pause_scan(
 async def resume_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ) -> ResumeScanResponse:
     """
     Resume a paused scan.
@@ -1259,7 +1282,7 @@ async def resume_scan(
 async def cancel_scan(
     scan_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ) -> CancelScanResponse:
     """
     Cancel a scan.

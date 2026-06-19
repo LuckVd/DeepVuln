@@ -1,6 +1,6 @@
 # DeepVuln
 
-> 七层智能漏洞挖掘系统 - AI 驱动的高精度代码安全分析平台
+> 多层智能漏洞挖掘系统 - AI 驱动的高精度代码安全分析平台（L1 情报层 + L3 分析层 + 共享 ScanPipeline 编排）
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -52,6 +52,12 @@ DeepVuln 是一个**多层智能漏洞挖掘系统**，以 **AI Agent 为主、S
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+> **架构说明**: 当前实际落地为 L1 情报层 + L3 分析层(并非"七层")。扫描编排由共享的
+> `src/layers/pipeline/`(`ScanPipeline`)统一驱动,支持阶段级进度广播与基于检查点
+> (checkpoint)的**断点续扫**;四轮多轮审计(Round 1-4)通过 `RoundController` 编排,
+> 可经 `enable_full_rounds` 开关启用;可利用性裁决采用**证据把关**(EXPLOITABLE 须有
+> CodeQL/taint/reachability 等硬证据维度,攻击面标签不可单独确认)。
 
 ---
 

@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 
 from src.web.api.deps import get_db
-from src.web.api.v1.scans import router as scans_router
+from src.web.core.security import require_auth
 from src.web.models.scan import Scan, ScanStatus
 from src.web.models.finding import Finding
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 @router.get("/stats/dashboard")

@@ -6,13 +6,12 @@ before CodeQL database creation.
 
 import asyncio
 import os
-import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from src.core.logger.logger import get_logger
-from src.layers.l3_analysis.build.detector import BuildConfig, BuildSystem
+from src.layers.l3_analysis.build.detector import BuildConfig
 
 logger = get_logger(__name__)
 
@@ -186,13 +185,36 @@ class BuildExecutor:
         start_time = time.time()
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
+            # Prefer exec (no shell injection). The build command originates from
+            # our detector (package.json/Makefile/pom.xml/etc.), not direct user
+            # input, but a malicious scanned project could craft a hostile build
+            # command — exec neutralizes that surface. Fall back to shell only
+            # for commands that genuinely require shell features (&&, |, >, ...).
+            import shlex
+
+            needs_shell = any(
+                tok in command for tok in ("&&", "||", "|", ";", ">", "<", "`", "$(")
             )
+            tokens = shlex.split(command)
+            if not needs_shell and tokens:
+                process = await asyncio.create_subprocess_exec(
+                    *tokens,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    env=env,
+                )
+            else:
+                logger.warning(
+                    "Executing build command via shell (compound command): %s", command
+                )
+                process = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    env=env,
+                )
 
             try:
                 stdout, stderr = await asyncio.wait_for(

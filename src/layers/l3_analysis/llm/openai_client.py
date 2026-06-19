@@ -305,11 +305,25 @@ class OpenAIClient(LLMClient):
                 # Handle other errors
                 if response.status_code != 200:
                     error_body = response.text[:1000]  # Truncate error body
+                    # 5xx server errors and 408 timeout are transient: retry with
+                    # backoff instead of raising immediately (the is_retryable flag
+                    # was previously set but never actually consumed for retries).
+                    is_retryable = response.status_code >= 500 or response.status_code == 408
+                    if is_retryable and attempt < self.max_retries - 1:
+                        backoff = min(2 ** attempt, 60)
+                        await asyncio.sleep(backoff)
+                        last_error = LLMError(
+                            f"OpenAI API error (status {response.status_code}): {error_body}",
+                            is_retryable=True,
+                            context={**error_context, "status_code": response.status_code},
+                            suggestion="Check API status or try again later.",
+                        )
+                        continue
                     raise LLMError(
                         f"OpenAI API error (status {response.status_code}): {error_body}",
-                        is_retryable=response.status_code >= 500,  # Server errors are retryable
+                        is_retryable=is_retryable,
                         context={**error_context, "status_code": response.status_code},
-                        suggestion="Check API status or try again later." if response.status_code >= 500 else "Check your request parameters.",
+                        suggestion="Check API status or try again later." if is_retryable else "Check your request parameters.",
                     )
 
                 # Parse response

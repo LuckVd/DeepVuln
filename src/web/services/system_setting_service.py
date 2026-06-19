@@ -4,9 +4,7 @@ import logging
 from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from src.web.models.system_setting import SystemSetting
 from src.web.repositories.system_setting import SystemSettingRepository
 
 logger = logging.getLogger(__name__)
@@ -23,7 +21,8 @@ class SystemSettingService:
         "threat_intel.nvd_api_key": "",
     }
 
-    @staticmethod async def get(db: AsyncSession, key: str, default: Optional[str] = None) -> Optional[str]:
+    @staticmethod
+    async def get(db: AsyncSession, key: str, default: Optional[str] = None) -> Optional[str]:
         """
         Get a system setting value.
 
@@ -42,7 +41,8 @@ class SystemSettingService:
             return default or SystemSettingService.DEFAULTS.get(key)
         return setting.value
 
-    @staticmethod async def get_int(db: AsyncSession, key: str, default: int = 0) -> int:
+    @staticmethod
+    async def get_int(db: AsyncSession, key: str, default: int = 0) -> int:
         """
         Get a system setting value as integer.
 
@@ -62,7 +62,8 @@ class SystemSettingService:
         except (ValueError, TypeError):
             return default
 
-    @staticmethod async def get_all(db: AsyncSession, category: Optional[str] = None) -> dict[str, str]:
+    @staticmethod
+    async def get_all(db: AsyncSession, category: Optional[str] = None) -> dict[str, str]:
         """
         Get all system settings, optionally filtered by category.
 
@@ -83,7 +84,8 @@ class SystemSettingService:
 
         return result
 
-    @staticmethod async def get_scan_config(db: AsyncSession) -> dict[str, Any]:
+    @staticmethod
+    async def get_scan_config(db: AsyncSession) -> dict[str, Any]:
         """
         Get scan configuration from database.
 
@@ -98,7 +100,8 @@ class SystemSettingService:
             "max_concurrent_files": await SystemSettingService.get_int(db, "scan.max_concurrent_files", 10),
         }
 
-    @staticmethod async def get_verification_config(db: AsyncSession) -> dict[str, Any]:
+    @staticmethod
+    async def get_verification_config(db: AsyncSession) -> dict[str, Any]:
         """
         Get verification configuration from database.
 
@@ -113,7 +116,8 @@ class SystemSettingService:
         """
         return {}
 
-    @staticmethod async def get_threat_intel_config(db: AsyncSession) -> dict[str, Any]:
+    @staticmethod
+    async def get_threat_intel_config(db: AsyncSession) -> dict[str, Any]:
         """
         Get threat intelligence configuration from database.
 

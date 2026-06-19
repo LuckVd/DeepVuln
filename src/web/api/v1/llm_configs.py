@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from src.web.api.deps import get_db
-from src.web.core.security import require_api_key
+from src.web.core.security import optional_api_key, require_auth
 from src.web.models.llm_config import LLMConfig
 from src.web.models.llm_schemas import (
     LLMConfigCreate,
@@ -23,7 +23,7 @@ from src.web.models.llm_schemas import (
 )
 from src.web.repositories.llm_config import LLMConfigRepository
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 # ============================================================================
@@ -85,7 +85,7 @@ async def list_llm_configs(
 async def create_llm_config(
     config: LLMConfigCreate,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ):
     """Create a new LLM configuration."""
     repo = LLMConfigRepository()
@@ -150,7 +150,7 @@ async def update_llm_config(
     config_id: int,
     config_update: LLMConfigUpdate,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ):
     """Update an LLM configuration."""
     repo = LLMConfigRepository()
@@ -199,7 +199,7 @@ async def update_llm_config(
 async def delete_llm_config(
     config_id: int,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ):
     """Delete an LLM configuration."""
     repo = LLMConfigRepository()
@@ -225,7 +225,7 @@ async def validate_llm_config(
     config_id: int,
     request: LLMConfigValidate = LLMConfigValidate(),
     db: Annotated[AsyncSession, Depends(get_db)] = None,
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ):
     """Validate an LLM configuration by testing the connection."""
     repo = LLMConfigRepository()
@@ -303,7 +303,7 @@ async def list_available_models(
 async def detect_context_size(
     config_id: int,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
-    _: None = Depends(require_api_key),
+    _: None = Depends(optional_api_key),
 ):
     """Auto-detect context size for the configured model."""
     repo = LLMConfigRepository()

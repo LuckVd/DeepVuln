@@ -20,8 +20,7 @@ Integration Point:
 
 import hashlib
 import logging
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from src.layers.l3_analysis.models import Finding
 
@@ -90,43 +89,48 @@ class InMemoryDeduplicator:
         self.stats.total_input += len(findings)
         deduped = []
 
+        # Stage 1: call-chain deduplication (cross-file, same vuln type).
+        # Keep the highest-scored finding per vuln hash; drop duplicates.
+        survivors: list[Finding] = []
         for finding in findings:
-            # 1. File-level deduplication
-            line_key = (file_path, finding.location.line)
-
-            if line_key in self.current_file_cache:
-                existing = self.current_file_cache[line_key]
-                if finding.final_score and existing.final_score:
-                    if finding.final_score > existing.final_score:
-                        # New finding has higher score, replace
-                        if existing in deduped:
-                            deduped.remove(existing)
-                        deduped.append(finding)
-                        self.current_file_cache[line_key] = finding
-                        self.stats.file_filtered += 1
-                    # else: keep existing, skip new one
-                    self.stats.file_filtered += 1
-                else:
-                    # No score info, keep first one
-                    pass
-            else:
-                deduped.append(finding)
-                self.current_file_cache[line_key] = finding
-
-            # 2. Call-chain deduplication
             vuln_hash = self._get_vulnerability_hash(finding)
             if vuln_hash in self.call_chain_cache:
-                # Same vulnerability type already seen
                 existing = self.call_chain_cache[vuln_hash]
-                if finding.final_score and existing.final_score:
-                    if finding.final_score > existing.final_score:
-                        # New finding has higher score, update cache
-                        self.call_chain_cache[vuln_hash] = finding
-                        # Note: finding is already in deduped list
-                    # else: keep first/highest in cache
-                self.stats.chain_filtered += 1
+                new_score = finding.final_score or 0
+                old_score = existing.final_score or 0
+                if new_score > old_score:
+                    # New finding is better: replace the cached one and swap it
+                    # out of the current output set too.
+                    self.call_chain_cache[vuln_hash] = finding
+                    if existing in survivors:
+                        survivors.remove(existing)
+                    survivors.append(finding)
+                else:
+                    # Duplicate of an already-kept (equal/higher) finding: drop it.
+                    self.stats.chain_filtered += 1
             else:
                 self.call_chain_cache[vuln_hash] = finding
+                survivors.append(finding)
+
+        # Stage 2: file-level deduplication (same file + same line).
+        # Keep the highest-scored finding per (file, line); drop duplicates.
+        for finding in survivors:
+            line_key = (file_path, finding.location.line)
+            if line_key in self.current_file_cache:
+                existing = self.current_file_cache[line_key]
+                new_score = finding.final_score or 0
+                old_score = existing.final_score or 0
+                if new_score > old_score:
+                    self.current_file_cache[line_key] = finding
+                    if existing in deduped:
+                        deduped.remove(existing)
+                    deduped.append(finding)
+                else:
+                    # Same position with an equal/higher-scored finding already kept.
+                    self.stats.file_filtered += 1
+            else:
+                self.current_file_cache[line_key] = finding
+                deduped.append(finding)
 
         self.stats.total_output += len(deduped)
 

@@ -17,7 +17,7 @@ import logging
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any, TypeVar
@@ -149,6 +149,13 @@ class LLMConcurrencyManager:
         self._change_callbacks: list[Callable] = []
         # Track which semaphore each task acquired for safe release
         self._acquired_semaphores: dict[asyncio.Task, asyncio.Semaphore] = {}
+        # Permits borrowed (acquired-but-not-released) to shrink effective
+        # concurrency at runtime. Real available concurrency =
+        # max_concurrent - _borrowed. The semaphore object is NEVER replaced,
+        # so all tasks always share one instance — this fixes the race where
+        # reassigning _semaphore stranded waiters on a stale reference and let
+        # real concurrency exceed the limit right after a decrease.
+        self._borrowed: int = 0
 
     @property
     def max_concurrent(self) -> int:
@@ -157,12 +164,34 @@ class LLMConcurrencyManager:
 
     @max_concurrent.setter
     def max_concurrent(self, value: int) -> None:
-        """Set the maximum concurrent requests (requires re-initialization)."""
+        """Set the maximum concurrent requests.
+
+        Adjusts effective capacity without replacing the semaphore object:
+        enlarging releases previously-borrowed permits, shrinking borrows more.
+        Safe at runtime; if no event loop is running (init time) and no
+        semaphore exists yet, it is recreated from scratch.
+        """
         if value < 1:
             raise ValueError("max_concurrent must be at least 1")
+        old = self._max_concurrent
         self._max_concurrent = value
-        # Recreate semaphore with new limit
-        self._semaphore = asyncio.Semaphore(value)
+        self._adaptive_config.max_concurrent = value
+        delta = value - old
+        if self._semaphore is not None and delta != 0:
+            if delta > 0:
+                for _ in range(delta):
+                    self._semaphore.release()
+                self._borrowed = max(0, self._borrowed - delta)
+            else:
+                borrow = -delta
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._borrow_permits(borrow))
+                    self._borrowed += borrow
+                except RuntimeError:
+                    self._semaphore = asyncio.Semaphore(value)
+                    self._borrowed = 0
+        self._current_concurrent = min(self._current_concurrent, value)
 
     @property
     def provider(self) -> LLMProvider:
@@ -309,7 +338,12 @@ class LLMConcurrencyManager:
             self._decrease_concurrency()
 
     def _decrease_concurrency(self) -> None:
-        """Decrease current concurrency by one step."""
+        """Decrease effective concurrency by one step.
+
+        Borrows permits from the (fixed) semaphore rather than replacing it.
+        Borrowed permits are acquired but never released by us, so real
+        available concurrency drops by the borrowed amount.
+        """
         config = self._adaptive_config
         if self._current_concurrent <= config.min_concurrent:
             return
@@ -321,8 +355,15 @@ class LLMConcurrencyManager:
         )
         self._is_throttled = True
 
-        # Replace the semaphore (in-flight requests complete on the old one)
-        self._semaphore = asyncio.Semaphore(self._current_concurrent)
+        borrow = old - self._current_concurrent
+        self._borrowed += borrow
+        # Asynchronously acquire the borrowed permits (blocks until slots free
+        # up — exactly the throttling behavior we want).
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._borrow_permits(borrow))
+        except RuntimeError:
+            logger.warning("Cannot borrow permits: no running event loop")
 
         logger.warning(
             f"Adaptive concurrency decreased: {old} -> {self._current_concurrent} "
@@ -331,7 +372,10 @@ class LLMConcurrencyManager:
         self._notify_change(old, self._current_concurrent)
 
     def _increase_concurrency(self) -> None:
-        """Increase current concurrency by one step (recovery)."""
+        """Increase effective concurrency by one step (recovery).
+
+        Returns previously-borrowed permits to the semaphore.
+        """
         config = self._adaptive_config
         if self._current_concurrent >= config.max_concurrent:
             self._is_throttled = False
@@ -343,7 +387,14 @@ class LLMConcurrencyManager:
             self._current_concurrent + config.increase_step,
         )
 
-        self._semaphore = asyncio.Semaphore(self._current_concurrent)
+        returns = self._current_concurrent - old
+        self._borrowed = max(0, self._borrowed - returns)
+        semaphore = self._ensure_semaphore()
+        for _ in range(returns):
+            try:
+                semaphore.release()
+            except ValueError:
+                break  # guard against over-release
 
         logger.info(
             f"Adaptive concurrency recovered: {old} -> {self._current_concurrent}"
@@ -352,6 +403,18 @@ class LLMConcurrencyManager:
 
         if self._current_concurrent >= config.max_concurrent:
             self._is_throttled = False
+
+    async def _borrow_permits(self, n: int) -> None:
+        """Acquire n permits from the semaphore and never release them.
+
+        Shrinks effective concurrency at runtime without replacing the
+        semaphore object. Safe as a fire-and-forget task.
+        """
+        if n <= 0:
+            return
+        semaphore = self._ensure_semaphore()
+        for _ in range(n):
+            await semaphore.acquire()
 
     async def start_recovery_loop(self) -> None:
         """Start the background recovery check task."""
@@ -555,17 +618,6 @@ def set_verification_concurrency_manager(manager: LLMConcurrencyManager) -> None
     """
     global _verification_manager
     _verification_manager = manager
-
-
-def set_global_concurrency_manager(manager: LLMConcurrencyManager) -> None:
-    """
-    Set the global concurrency manager.
-
-    Args:
-        manager: The LLMConcurrencyManager to use globally.
-    """
-    global _global_manager
-    _global_manager = manager
 
 
 def configure_global_concurrency(

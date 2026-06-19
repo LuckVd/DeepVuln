@@ -3,7 +3,7 @@
 import hmac
 from typing import Optional, Any
 
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 from src.web.models.user import User
@@ -177,6 +177,83 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
+        )
+
+    return user
+
+
+def _dev_user() -> User:
+    """Return a lightweight stand-in user used when auth is disabled (dev mode)
+    or when authenticating with an API key (stateless, no DB record)."""
+    return User(
+        id=0,
+        username="api",
+        password_hash="",
+        must_change_password=False,
+        is_active=True,
+    )
+
+
+async def require_auth(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
+    api_key: Optional[str] = Security(get_api_key_header),
+) -> User:
+    """Unified authentication dependency for all business endpoints.
+
+    Accepts either a valid JWT Bearer token or — when API-key auth is enabled —
+    a valid API key. When JWT auth is disabled (``auth_enabled=False``, dev),
+    returns a dev user without checking credentials.
+
+    Users flagged ``must_change_password=True`` are blocked from business
+    endpoints with 403; they must first complete /auth/change-password (which
+    uses get_current_user, not this dependency).
+    """
+    from src.web.core.config import get_security_settings
+    from src.web.services.auth_service import verify_token
+
+    settings = get_security_settings()
+
+    if not settings.auth_enabled:
+        return _dev_user()
+
+    user: Optional[User] = None
+
+    # 1. Try JWT Bearer token
+    if credentials is not None:
+        payload = verify_token(
+            credentials.credentials, settings.jwt_secret, settings.jwt_algorithm
+        )
+        if payload is not None:
+            uid = payload.get("sub")
+            if uid is not None:
+                from src.web.models.database import get_session_local
+                from sqlalchemy import select
+
+                session_local = get_session_local()
+                async with session_local() as session:
+                    result = await session.execute(
+                        select(User).where(User.id == int(uid))
+                    )
+                    user = result.scalar_one_or_none()
+
+    # 2. Fall back to API key (stateless — no user record)
+    if user is None and settings.api_key_enabled and api_key is not None:
+        valid_keys = settings.get_api_keys()
+        if any(hmac.compare_digest(api_key, k) for k in valid_keys):
+            return _dev_user()
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 3. Force a password change before any business access
+    if user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password change required before accessing the API.",
         )
 
     return user

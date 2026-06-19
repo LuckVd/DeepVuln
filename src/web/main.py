@@ -6,8 +6,12 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
-from src.web.core.config import get_database_settings, get_web_settings
+from src.web.core.config import get_database_settings, get_security_settings, get_web_settings
+from src.web.core.limiter import limiter
 from src.web.models.database import init_db, close_db
 
 logger = logging.getLogger(__name__)
@@ -38,6 +42,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Initialize database
         await init_db(db_settings.url)
         logger.info("Database initialized")
+
+        # Guardrail: refuse to start in production with the insecure default JWT secret.
+        security_settings = get_security_settings()
+        _DEFAULT_JWT_SECRET = "deepvuln-jwt-secret-change-in-production"
+        if (
+            security_settings.auth_enabled
+            and not security_settings.dev_mode
+            and security_settings.jwt_secret == _DEFAULT_JWT_SECRET
+        ):
+            logger.error(
+                "Refusing to start: JWT auth is enabled but jwt_secret is still "
+                "the insecure default. Set DEEPVULN_SECURITY_JWT_SECRET to a strong "
+                "random value, or set DEEPVULN_SECURITY_DEV_MODE=true for local dev."
+            )
+            raise SystemExit(1)
 
         # Seed default admin user
         try:
@@ -96,6 +115,12 @@ def create_app() -> FastAPI:
         allow_methods=web_settings.cors_allow_methods,
         allow_headers=web_settings.cors_allow_headers,
     )
+
+    # Rate limiting (slowapi). The limiter's `enabled` flag honors
+    # rate_limit_enabled from settings, so it no-ops when disabled.
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
 
     # Include routers
     _include_routers(app)

@@ -1,6 +1,6 @@
 """Authentication API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,9 +12,9 @@ from src.web.services.auth_service import (
     change_password,
     create_access_token,
     seed_default_user,
-    verify_password,
 )
 from src.web.core.security import get_current_user
+from src.web.core.limiter import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -52,7 +52,8 @@ class UserInfoResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate user and return JWT token."""
     settings = get_security_settings()
 
@@ -62,7 +63,7 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
             detail="Authentication is disabled",
         )
 
-    user = await authenticate(db, request.username, request.password)
+    user = await authenticate(db, body.username, body.password)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
