@@ -46,7 +46,9 @@
 
 **TDD**：`tests/unit/test_l3/test_rounds.py::TestTerminationDecider` 新增 `test_should_continue_first_round_always_runs`（红→绿，精确复现 DIMINISHING_RETURNS 早停）+ `test_should_continue_respects_max_rounds_before_first_round`（护栏不覆盖 max_rounds）；TestTerminationDecider + controller 集成共 22 测试全绿；ruff/ast 无新增问题。
 
-**遗留观察（非 D4，留待后续）**：`_run_full_rounds_audit` 创建 `RoundOneExecutor(source_path=...)` 时未传 `agent_executor`（Round1/2 agent 阶段 skip），且无 CodeQL 时 Round2 产出 0 会让链路停在 Round2（Round3/4 不触发）。这是「多轮深化质量」的增强项，非「0 candidates」bug——D4 验收（`session.all_candidates` 非空）已满足。
+**遗留观察（部分已闭合）**：
+- ✅ **Round1 agent findings 已接通（本会话，种子注入）**：`_run_full_rounds_audit` 把主扫描 `scan_results["agent"].findings` 作为 `seed_findings` 传给 `RoundOneExecutor`；Round1 把它们注入为候选（`_add_seeded_candidates`），四轮现纳入 agent findings 而**不重跑 agent**（避免 2x token）。TDD `test_execute_seeds_findings_as_candidates` 绿；test_rounds 147 全绿。
+- ⏳ **Round2 agent 深度审仍 skip**（无 agent_executor，且与 Round4 可利用性验证重叠）——低价值，Round4 已覆盖裁决，暂不接。
 
 ### 附加修复 — Web 主路径 semgrep 0 findings（本会话发现并修复）✅
 

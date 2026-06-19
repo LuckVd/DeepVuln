@@ -7,7 +7,7 @@ blocked_by: []
 open_questions:
   - "D1: 重写 CLI/Web 主路径需测试环境验证回归"
   - "D3: 完整 skip 需 Celery 中断→resume 场景验证"
-  - "D4 遗留(非阻塞): Round1/2 未传 agent_executor + 无 CodeQL 时链路停在 Round2，属多轮深化增强项"
+  - "D4 遗留(已闭合): Round1 agent findings 已用种子注入接通(scan_results[agent]→seed_findings，不重跑 agent)；Round2 深度审仍 skip(低价值，Round4 覆盖)"
 resolved_questions:
   - "D4: 根因是 TerminationDecider 零数据早停(net_benefit=0-ε<0)，非 Round1 semgrep；已加首轮必跑护栏修复，0→10 candidates"
   - "Web 主路径 semgrep 0 findings: 两层根因(rule_gating 不认 dict + orchestrator 无 --config)，均已修;基线恢复 10 findings。CLI 已弃用(web-only)"

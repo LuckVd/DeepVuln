@@ -1206,6 +1206,12 @@ class ScanOrchestrator:
         codeql_findings = (
             self.scan_results["codeql"].findings if "codeql" in self.scan_results else []
         )
+        # Reuse Agent findings the main scan already produced: seed them into
+        # Round 1 so the multi-round audit adjudicates them without re-running
+        # the Agent engine (D4 follow-up).
+        agent_findings = (
+            self.scan_results["agent"].findings if "agent" in self.scan_results else []
+        )
 
         # Build an audit strategy from the attack surface (falls back to
         # file-based targets inside the engine if no attack surface).
@@ -1215,7 +1221,9 @@ class ScanOrchestrator:
             attack_surface=self.attack_surface_report_obj,
         )
 
-        r1 = RoundOneExecutor(source_path=self.source_path)
+        r1 = RoundOneExecutor(
+            source_path=self.source_path, seed_findings=agent_findings
+        )
         r2 = RoundTwoExecutor(source_path=self.source_path)
         r3 = RoundThreeExecutor(source_path=self.source_path)
         r4 = RoundFourExecutor(

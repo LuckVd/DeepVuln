@@ -522,6 +522,46 @@ class TestRoundOneExecutor:
         assert result.status == RoundStatus.COMPLETED
         assert result.engine_stats["semgrep"].executed is True
 
+    @pytest.mark.asyncio
+    async def test_execute_seeds_findings_as_candidates(self, executor, sample_strategy):
+        """D4: main-scan Agent findings are seeded as Round-1 candidates.
+
+        The multi-round audit reuses findings the main scan already produced
+        (seed_findings) instead of re-running the Agent engine.
+        """
+        mock_semgrep = MagicMock()
+        mock_scan_result = MagicMock()
+        mock_scan_result.findings = []
+        mock_scan_result.duration_seconds = 1.0
+        mock_scan_result.metadata = {}
+        mock_semgrep.scan = AsyncMock(return_value=mock_scan_result)
+        executor._semgrep_engine = mock_semgrep
+        executor._seed_findings = [
+            Finding(
+                id="seed-1",
+                severity=SeverityLevel.HIGH,
+                title="Seeded",
+                description="d",
+                location=CodeLocation(file="a.py", line=1),
+                source="agent",
+            ),
+            Finding(
+                id="seed-2",
+                severity=SeverityLevel.CRITICAL,
+                title="Seeded 2",
+                description="d",
+                location=CodeLocation(file="b.py", line=2),
+                source="agent",
+            ),
+        ]
+
+        result = await executor.execute(sample_strategy)
+
+        assert result.status == RoundStatus.COMPLETED
+        # 2 semgrep findings (mocked empty) + 2 seeded agent findings
+        assert result.total_candidates == 2
+        assert result.engine_stats["agent"].findings_count == 2
+
 
 class TestSourceType:
     """Tests for SourceType enum."""

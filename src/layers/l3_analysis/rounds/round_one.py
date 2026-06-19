@@ -63,6 +63,7 @@ class RoundOneExecutor:
         task_generator: TaskGenerator | None = None,
         task_dispatcher: TaskDispatcher | None = None,
         agent_executor: Any | None = None,
+        seed_findings: list[Finding] | None = None,
     ):
         """
         Initialize the round one executor.
@@ -73,6 +74,8 @@ class RoundOneExecutor:
             task_generator: Task generator for Agent tasks.
             task_dispatcher: Task dispatcher for parallel execution.
             agent_executor: Async function to execute Agent tasks.
+            seed_findings: Pre-computed findings (e.g. main-scan Agent results)
+                to reuse as candidates instead of re-running the Agent engine.
         """
         self.logger = get_logger(__name__)
         self.source_path = source_path
@@ -80,6 +83,7 @@ class RoundOneExecutor:
         self._task_generator = task_generator or TaskGenerator()
         self._task_dispatcher = task_dispatcher or TaskDispatcher()
         self._agent_executor = agent_executor
+        self._seed_findings = seed_findings or []
 
     async def execute(
         self,
@@ -115,8 +119,13 @@ class RoundOneExecutor:
             # Phase 1: Semgrep Fast Scan
             semgrep_stats = await self._run_semgrep_scan(strategy, round_result, coverage)
 
-            # Phase 2: Agent Entry Point Analysis (high priority targets only)
-            agent_stats = await self._run_agent_analysis(strategy, round_result, coverage)
+            # Phase 2: Agent findings. Reuse findings already produced by the
+            # main scan (seed_findings) instead of re-running the Agent engine,
+            # so the multi-round audit adjudicates them without duplicate cost.
+            if self._seed_findings:
+                agent_stats = self._add_seeded_candidates(round_result, coverage)
+            else:
+                agent_stats = await self._run_agent_analysis(strategy, round_result, coverage)
 
             # Update engine stats
             round_result.engine_stats["semgrep"] = semgrep_stats
@@ -299,6 +308,40 @@ class RoundOneExecutor:
                 stats.end_time - stats.start_time
             ).total_seconds()
 
+        return stats
+
+    def _add_seeded_candidates(
+        self,
+        round_result: RoundResult,
+        coverage: CoverageStats,
+    ) -> EngineStats:
+        """Add pre-computed findings (e.g. main-scan Agent results) as candidates.
+
+        The multi-round audit reuses findings the main scan already produced
+        instead of re-running the Agent engine (D4 follow-up: avoids duplicate
+        Agent cost; the four-round audit builds on the main scan's output).
+        """
+        stats = EngineStats(engine="agent", enabled=True, start_time=datetime.now(UTC))
+        for finding in self._seed_findings:
+            candidate = self._create_candidate(
+                finding=finding,
+                round_number=1,
+                analysis_depth=AnalysisDepth.STANDARD,
+                needs_deep_analysis=True,
+            )
+            round_result.add_candidate(candidate)
+        stats.executed = True
+        stats.findings_count = len(self._seed_findings)
+        stats.candidates_count = len(self._seed_findings)
+        coverage.analyzed_targets = len(self._seed_findings)
+        stats.end_time = datetime.now(UTC)
+        if stats.start_time:
+            stats.duration_seconds = (
+                stats.end_time - stats.start_time
+            ).total_seconds()
+        self.logger.info(
+            f"Seeded {len(self._seed_findings)} main-scan findings as candidates"
+        )
         return stats
 
     def _create_candidate(
