@@ -253,3 +253,31 @@ asyncio.run(main())
 | **D3** | `scan_orchestrator.py` `_save_checkpoint_phase`/`_clean_checkpoint`；`checkpoint_service.py`；pipeline `CheckpointSink` | 断点续扫（findings 持久化恢复待续；需 Celery） | ⏳ |
 | **D6** | `path_finder/finder.py` reaches_sink（固定 True）；`cpg/path_provider.py` GoCPGProvider | CFG 可达性（大工程低优先） | ⏳ |
 | D3 | `scan_orchestrator.py` `_save_checkpoint_phase`/`_clean_checkpoint` + `checkpoint_service.py` | 断点续扫（机制通，缺 findings 持久化） |
+
+---
+
+## Feat Record: 2026-06-19 E5 — AI 补漏逻辑漏洞（LogicVulnerabilityDetector）
+
+### 需求描述
+E5（Phase 17 待办）：补静态引擎（semgrep/AST/taint）和现有 agent 全量审计都容易漏掉的**逻辑漏洞**——缺失授权/认证绕过/IDOR/业务逻辑/复杂注入。核心诉求：AI 生成型补漏，但**防误报**是硬约束。用户确认维度：v1 **全量范围** + **独立 pipeline phase** + **独立 flag 默认关**。
+
+### 实现方案
+新增 `LogicVulnerabilityDetector`——一个 limited-scope、证据锚定的 AI 补漏 pass。反误报四重护栏：① 只把**入口点可达**的源码区喂 LLM（复用 `attack_surface_report` 入口索引）② 强制**三要素硬证据** `missing_check` + `entry_point` + `attack_path`，缺一丢弃（prompt 层 + 解析层双重强制）③ 置信度**封顶 0.6** + `evidence_strength=SPECULATIVE` ④ 正常代码 0 误报为验收门槛。复用 `RoundFourExecutor._llm_assisted_assessment` 同款 LLM client + prompt build/parse 基础设施。接入为独立 `ScanPhase.LOGIC_VULN_DISCOVERY`（插在 `EXPLOITABILITY_VERIFICATION` 之后、`ADJUDICATION` 之前），逻辑漏洞自带证据、无 source→sink taint，故跳过 taint 验证直接进去重/裁决。
+
+### 修改文件
+- `src/layers/l3_analysis/prompts/logic_vuln.py`（新增）：`build_logic_vuln_prompt(regions)` → `(system, user)` + `parse_logic_vuln_response(text)` → `list[dict]`；全量 5 类 + 三要素 schema + JSON 容错（裸 list/单对象/code fence/正则兜底）+ 置信度 clamp。
+- `src/layers/l3_analysis/engines/logic_vuln_detector.py`（新增）：`LogicVulnerabilityDetector`；`select_entry_regions()`（按文件分组去重 + cap）、`discover()`（入口筛选→LLM→解析→Finding）、`_to_finding()`（source=logic_vuln、SPECULATIVE、置信度封顶、CWE 映射）。
+- `src/layers/l3_analysis/models.py`：`Finding.source` Literal 增 `"logic_vuln"`。
+- `src/layers/pipeline/phases.py`：`ScanPhase` 增 `LOGIC_VULN_DISCOVERY = "logic_vuln_discovery"`。
+- `src/web/services/scan_orchestrator.py`：`_run_logic_vuln_discovery()`（构造 detector、产 ScanResult 桶、异常不中断扫描）+ `_build_scan_phases` 注册 PhaseSpec（`skip_when = not config.get("logic_vuln", False)`，默认关）。
+- `src/web/models/schemas.py`：`ScanConfig` 增 `logic_vuln: bool = False`。
+- `tests/unit/test_l3/test_logic_vuln_prompt.py`（新增，19 测试）：prompt 构建 + 解析（多条/缺三要素丢弃/裸对象/裸列表/code fence/畸形→空/clamp/全 5 类）。
+- `tests/unit/test_l3/test_logic_vuln_detector.py`（新增，8 测试）：无攻击面/无 LLM 不调、入口筛选按文件去重、不可读文件跳过、source/evidence_strength 标记、置信度封顶、缺证据丢弃、cap。
+
+### 验证结果
+- 单测：`test_logic_vuln_prompt.py`（19）+ `test_logic_vuln_detector.py`（8）= **27 passed**。
+- 静态：6 个改动/新增文件 `ast.parse` OK；新文件 `ruff --select F` All checks passed（orchestrator 的 3 个 F 警告为既有，非本次引入）。
+- 回归：`tests/unit/test_pipeline/` + `test_l3/test_consistency.py` 全绿；`test_deduplicator.py` 5 个失败经 `git stash` 验证为**既有** async 未 await 问题（与本次无关）。
+- **端到端（本机 sqlite 无需，直连 GLM glm-4.5-air）**：构造 IDOR 入口 `get_user` + 受保护入口 `get_profile`（有 ownership check）。实测检出 1 条 `[high] IDOR in user lookup`（CWE-639, conf=0.6），三要素证据完整（attack_path 具体到「认证用户改 /api/users/2 取回他人记录」）；**未误报**受保护的 `get_profile`。RESULT: **PASS ✅**。
+- 临时 e2e 脚本（/tmp）验证后已删除；2 个单测文件为契约测试，保留。
+

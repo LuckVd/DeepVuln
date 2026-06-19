@@ -117,6 +117,15 @@ class ScanConfig(BaseModel):
         description="Timeout per round in seconds (default: 10 minutes)"
     )
 
+    # AI 补漏逻辑漏洞 (E5): opt-in supplement pass that asks the LLM to surface
+    # logic flaws static tools miss (missing authz/auth bypass/IDOR/business
+    # logic/complex injection) on entry-point-reachable code. Off by default to
+    # avoid false-positive noise on existing scans.
+    logic_vuln: bool = Field(
+        default=False,
+        description="Enable AI logic-vulnerability supplement pass (anti-FP: entry-scoped)",
+    )
+
     # 增量扫描 (P14-06)
     incremental: bool = Field(
         default=False,

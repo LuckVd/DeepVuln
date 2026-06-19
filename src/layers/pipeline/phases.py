@@ -27,6 +27,11 @@ class ScanPhase(str, Enum):
     # matches the live Web progress event name + frontend i18n key, so the pipeline
     # can drive progress without a frontend rename.
     EXPLOITABILITY_VERIFICATION = "exploitability_verification"
+    # E5: AI logic-vulnerability supplement pass. Opt-in (``logic_vuln`` flag).
+    # Runs after exploitability so logic findings (which carry their own grounded
+    # evidence and have no source→sink taint) skip taint verification and flow
+    # straight into deduplication/adjudication.
+    LOGIC_VULN_DISCOVERY = "logic_vuln_discovery"
     ADJUDICATION = "deduplication_adjudication"
     ADVERSARIAL = "adversarial_verification"
     RESULT_MERGE = "result_merging"

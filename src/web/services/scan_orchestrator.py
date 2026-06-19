@@ -182,6 +182,9 @@ class ScanOrchestrator:
         async def _exploit(_ctx: ScanContext, _pl: ScanPipeline) -> None:
             ctx.extra["verified_count"] = await self._run_exploitability_verification()
 
+        async def _logic(_ctx: ScanContext, _pl: ScanPipeline) -> None:
+            ctx.extra["logic_vuln_count"] = await self._run_logic_vuln_discovery()
+
         async def _adjudication(_ctx: ScanContext, _pl: ScanPipeline) -> None:
             ctx.extra["adjudication_summary"] = await self._run_adjudication()
 
@@ -237,6 +240,12 @@ class ScanOrchestrator:
                 skip_when=lambda c: not self.config.get("llm_verify", True),
                 checkpoint_key="exploitability_verification",
                 summary=lambda c: {"verified_findings": c.extra.get("verified_count", 0)},
+            ),
+            PhaseSpec(
+                phase=ScanPhase.LOGIC_VULN_DISCOVERY,
+                runner=_logic,
+                skip_when=lambda c: not self.config.get("logic_vuln", False),
+                summary=lambda c: {"logic_vuln_findings": c.extra.get("logic_vuln_count", 0)},
             ),
             PhaseSpec(
                 phase=ScanPhase.ADJUDICATION,
@@ -1076,6 +1085,51 @@ class ScanOrchestrator:
     # ========================================================================
     # Results Processing
     # ========================================================================
+
+    async def _run_logic_vuln_discovery(self) -> int:
+        """E5: AI supplement pass for logic vulnerabilities static tools miss.
+
+        Opt-in (``logic_vuln`` config flag, default off). Feeds only
+        entry-point-reachable regions to the LLM and emits grounded findings
+        tagged ``source="logic_vuln"``. Runs after exploitability so logic
+        findings skip taint verification and merge into adjudication directly.
+
+        Returns:
+            Number of logic-vulnerability findings discovered.
+        """
+        from src.layers.l3_analysis.engines.logic_vuln_detector import (
+            LogicVulnerabilityDetector,
+        )
+
+        if not self.llm_client:
+            logger.info("logic_vuln: skipped (no LLM client)")
+            return 0
+        if not self.attack_surface_report_obj:
+            logger.info("logic_vuln: skipped (no attack surface report)")
+            return 0
+
+        detector = LogicVulnerabilityDetector(
+            source_path=Path(str(self.source_path)),
+            llm_client=self.llm_client,
+            attack_surface_report=self.attack_surface_report_obj,
+            config=self.config,
+        )
+        try:
+            findings = await detector.discover()
+        except Exception as exc:  # noqa: BLE001 — supplement pass must not abort the scan
+            logger.warning(f"logic_vuln discovery failed: {exc}")
+            return 0
+
+        if findings:
+            self.scan_results["logic_vuln"] = ScanResult(
+                engine="logic_vuln",
+                source_path=str(self.source_path),
+                findings=findings,
+                total_findings=len(findings),
+                status="completed",
+            )
+        logger.info(f"logic_vuln: discovered {len(findings)} finding(s)")
+        return len(findings)
 
     async def _run_exploitability_verification(self) -> int:
         """Run exploitability verification on findings (P14-02).
