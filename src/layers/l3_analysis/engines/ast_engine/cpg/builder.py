@@ -29,6 +29,18 @@ class CPGBuilder:
     3. Fusion into unified CPG
     """
 
+    # AST node types that represent a function/method definition across the
+    # supported tree-sitter grammars.
+    FUNCTION_TYPES = frozenset(
+        {
+            "function_definition",  # Python, Go
+            "function_declaration",  # JavaScript
+            "function",
+            "method_definition",  # JavaScript methods
+            "method_declaration",  # Java
+        }
+    )
+
     def __init__(self) -> None:
         """Initialize the CPG builder."""
         self.logger = get_logger(__name__)
@@ -134,6 +146,7 @@ class CPGBuilder:
         self,
         ast_graph: ASTGraph,
         call_graph: CallGraph,
+        language: str | None = None,
     ) -> CodePropertyGraph:
         """
         Fuse AST Graph and Call Graph into a unified CPG.
@@ -141,6 +154,9 @@ class CPGBuilder:
         Args:
             ast_graph: The AST graph
             call_graph: The call graph
+            language: Optional explicit language (e.g. when building from a
+                code string). When ``None``, language is detected per function
+                node from its source file extension.
 
         Returns:
             Unified CodePropertyGraph
@@ -156,7 +172,73 @@ class CPGBuilder:
         # Create cross-graph edges (function -> body statements)
         self._create_function_body_edges(cpg, ast_graph)
 
+        # Build and merge per-function CFGs (D6: CPG CFG reachability).
+        self._build_and_merge_cfgs(cpg, ast_graph, default_language=language)
+
+        # Link each function's call-level node to its definition-level node
+        # (P9-01) so BFS can traverse entry -> body -> sink.
+        self._link_call_to_definition(cpg)
+
         return cpg
+
+    def _build_and_merge_cfgs(
+        self,
+        cpg: CodePropertyGraph,
+        ast_graph: ASTGraph,
+        default_language: str | None = None,
+    ) -> None:
+        """
+        Build per-function CFGs and merge them into the CPG (D6).
+
+        Registers each function's ControlFlowGraph on the CPG so that
+        ``AttackPathFinder`` can verify real CFG reachability. Per-function
+        failures are tolerated (logged) so one bad function cannot break the
+        CPG; languages without a CFG builder are skipped silently.
+
+        Args:
+            cpg: CodePropertyGraph to merge CFGs into
+            ast_graph: AST graph carrying function definition nodes
+            default_language: Language override (used when building from code);
+                otherwise detected per function from its file extension
+        """
+        from src.layers.l3_analysis.engines.ast_engine.cfg.factory import (
+            CFGBuilderFactory,
+        )
+
+        factory = CFGBuilderFactory()
+        builders: dict[str, Any] = {}  # language -> builder (cached, may be None)
+
+        merged = 0
+        for ast_node in ast_graph.nodes.values():
+            if ast_node.type not in self.FUNCTION_TYPES:
+                continue
+
+            file_path = ast_node.file or "<unknown>"
+            language = default_language or factory.detect_language_from_file(file_path)
+            if not language:
+                continue
+
+            if language not in builders:
+                builders[language] = factory.get_builder(language)
+            builder = builders[language]
+            if builder is None:
+                continue
+
+            try:
+                cfg = builder.build_cfg(
+                    function_ast_node=ast_node,
+                    ast_graph=ast_graph,
+                    function_id=ast_node.id,
+                    file_path=file_path,
+                )
+                if cfg and cfg.nodes:
+                    cpg.merge_cfg(cfg)
+                    merged += 1
+            except Exception as exc:  # noqa: BLE001 - tolerate per-function failure
+                self.logger.warning(f"CFG build failed for {ast_node.id}: {exc}")
+
+        if merged:
+            self.logger.debug(f"Merged {merged} CFG(s) into CPG")
 
     def _create_function_body_edges(
         self,
@@ -170,15 +252,8 @@ class CPGBuilder:
         (statement-level) for complete traversal.
         """
         # Find all function definition AST nodes
-        function_types = {
-            "function_definition",
-            "function_declaration",
-            "function",
-            "method_definition",
-        }
-
         for ast_node in ast_graph.nodes.values():
-            if ast_node.type in function_types:
+            if ast_node.type in self.FUNCTION_TYPES:
                 func_cpg = cpg.find_by_ast_id(ast_node.id)
 
                 if not func_cpg:
@@ -216,6 +291,55 @@ class CPGBuilder:
                 body_nodes.extend(self._get_all_descendants(child, ast_graph))
 
         return body_nodes
+
+    def _link_call_to_definition(self, cpg: CodePropertyGraph) -> None:
+        """
+        Link each function's call-level CPG node to its definition-level node.
+
+        The call graph and AST graph represent the same function as two
+        separate CPG nodes — a ``call_function`` node (call graph) and a
+        ``function_definition`` ``ast_statement`` node (AST graph) — with no
+        edge between them. Entry-point detection anchors on the call_function
+        node, while the function body ("contains" edges) hangs off the
+        function_definition node, so BFS started from an entry could never
+        reach the body or any sink.
+
+        This adds a ``defines`` edge from each call_function node to its
+        matching function_definition node. Matching uses the definition line
+        and a suffix-aware file comparison, which are stable across the two
+        analyzers despite their relative-vs-absolute path inconsistency.
+        """
+        call_nodes = cpg.get_nodes_by_type("call_function")
+        if not call_nodes:
+            return
+
+        ast_funcs = [
+            n
+            for n in cpg.nodes.values()
+            if n.node_type == "ast_statement" and n.ast_type in self.FUNCTION_TYPES
+        ]
+
+        for ast_func in ast_funcs:
+            for call_node in call_nodes:
+                if call_node.line != ast_func.line:
+                    continue
+                if not self._files_match(call_node.file, ast_func.file):
+                    continue
+                cpg.add_edge(
+                    CPGEdge(
+                        edge_type="defines",
+                        source=call_node.id,
+                        target=ast_func.id,
+                    )
+                )
+                break
+
+    @staticmethod
+    def _files_match(path_a: str, path_b: str) -> bool:
+        """Compare two file paths, tolerating relative-vs-absolute differences."""
+        if not path_a or not path_b:
+            return False
+        return path_a == path_b or path_a.endswith(path_b) or path_b.endswith(path_a)
 
     def _get_all_descendants(
         self,
@@ -265,8 +389,8 @@ class CPGBuilder:
 
         call_graph = CallGraph()
 
-        # 3. Fuse into CPG
-        cpg = self._fuse_graphs(ast_graph, call_graph)
+        # 3. Fuse into CPG (language is known explicitly here)
+        cpg = self._fuse_graphs(ast_graph, call_graph, language=language)
 
         self.logger.info(
             f"CPG built from code: {cpg.size()} nodes, {len(cpg.edges)} edges"

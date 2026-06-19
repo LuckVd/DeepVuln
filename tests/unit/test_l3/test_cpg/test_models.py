@@ -20,6 +20,12 @@ from src.layers.l3_analysis.call_graph.models import (
     CallNode,
     NodeType,
 )
+from src.layers.l3_analysis.engines.ast_engine.cfg.models import (
+    CFGEdge,
+    CFGEdgeType,
+    CFGNode,
+    ControlFlowGraph,
+)
 
 
 class TestCPGNode:
@@ -304,3 +310,140 @@ class TestCodePropertyGraph:
         assert result["nodes"][0]["id"] == "cpg:test:1"
         assert result["nodes"][0]["ast_type"] == "call_expression"
         assert len(result["edges"]) == 1
+
+
+def _make_simple_cfg(
+    function_id: str = "func1",
+    file: str = "test.py",
+) -> ControlFlowGraph:
+    """Build a small 3-block CFG (entry -> branch -> exit) for tests."""
+    cfg = ControlFlowGraph(
+        function_id=function_id,
+        function_name=function_id,
+        file=file,
+    )
+    b0 = CFGNode(
+        id=f"cfg:{file}:{function_id}:block0",
+        file=file,
+        start_line=1,
+        end_line=2,
+        is_entry=True,
+    )
+    b1 = CFGNode(
+        id=f"cfg:{file}:{function_id}:block1",
+        file=file,
+        start_line=3,
+        end_line=4,
+    )
+    b2 = CFGNode(
+        id=f"cfg:{file}:{function_id}:block2",
+        file=file,
+        start_line=5,
+        end_line=6,
+        is_exit=True,
+    )
+    cfg.add_node(b0)
+    cfg.add_node(b1)
+    cfg.add_node(b2)
+    cfg.add_edge(
+        CFGEdge(
+            edge_type=CFGEdgeType.CONDITIONAL_TRUE,
+            source=b0.id,
+            target=b1.id,
+            condition="x > 0",
+        )
+    )
+    cfg.add_edge(
+        CFGEdge(
+            edge_type=CFGEdgeType.UNCONDITIONAL,
+            source=b1.id,
+            target=b2.id,
+        )
+    )
+    return cfg
+
+
+class TestCFGFusion:
+    """Test CFG fusion into the CPG (D6: CPG CFG reachability)."""
+
+    def test_function_cfgs_default_empty(self):
+        """function_cfgs starts empty."""
+        cpg = CodePropertyGraph()
+        assert cpg.function_cfgs == {}
+
+    def test_merge_cfg_registers_function_cfg(self):
+        """merge_cfg registers the CFG by function_id for reachability queries."""
+        cpg = CodePropertyGraph()
+        cfg = _make_simple_cfg()
+
+        cpg.merge_cfg(cfg)
+
+        assert "func1" in cpg.function_cfgs
+        assert cpg.function_cfgs["func1"] is cfg
+
+    def test_merge_cfg_creates_cfg_block_nodes(self):
+        """merge_cfg creates one cfg_block CPGNode per CFG basic block."""
+        cpg = CodePropertyGraph()
+        cfg = _make_simple_cfg()
+
+        cpg.merge_cfg(cfg)
+
+        block_nodes = cpg.get_nodes_by_type("cfg_block")
+        assert len(block_nodes) == 3
+        block_lines = sorted(n.line for n in block_nodes)
+        assert block_lines == [1, 3, 5]
+
+    def test_merge_cfg_creates_cfg_edges(self):
+        """merge_cfg creates cfg CPGEdges mirroring CFG control-flow edges."""
+        cpg = CodePropertyGraph()
+        cfg = _make_simple_cfg()
+
+        cpg.merge_cfg(cfg)
+
+        cfg_edges = [e for e in cpg.edges if e.edge_type == "cfg"]
+        assert len(cfg_edges) == 2
+        # The conditional edge condition should be preserved in metadata.
+        conds = [e.metadata.get("condition") for e in cfg_edges]
+        assert "x > 0" in conds
+
+    def test_get_successors_no_filter_returns_all(self):
+        """get_successors() with no filter returns every successor (backward compat)."""
+        cpg = CodePropertyGraph()
+        n_call = CPGNode(id="src", node_type="call_function")
+        n_ast = CPGNode(id="ast_tgt", node_type="ast_statement")
+        n_cfg = CPGNode(id="cfg_tgt", node_type="cfg_block")
+
+        cpg.add_node(n_call)
+        cpg.add_node(n_ast)
+        cpg.add_node(n_cfg)
+        cpg.add_edge(CPGEdge(edge_type="calls", source="src", target="ast_tgt"))
+        cpg.add_edge(CPGEdge(edge_type="cfg", source="src", target="cfg_tgt"))
+
+        assert set(cpg.get_successors("src")) == {"ast_tgt", "cfg_tgt"}
+
+    def test_get_successors_filtered_by_edge_type(self):
+        """get_successors(edge_types=...) returns only successors of those types."""
+        cpg = CodePropertyGraph()
+        cpg.add_node(CPGNode(id="src", node_type="call_function"))
+        cpg.add_node(CPGNode(id="ast_tgt", node_type="ast_statement"))
+        cpg.add_node(CPGNode(id="cfg_tgt", node_type="cfg_block"))
+        cpg.add_edge(CPGEdge(edge_type="calls", source="src", target="ast_tgt"))
+        cpg.add_edge(CPGEdge(edge_type="cfg", source="src", target="cfg_tgt"))
+
+        call_only = cpg.get_successors("src", edge_types={"calls"})
+        assert call_only == ["ast_tgt"]
+
+        cfg_only = cpg.get_successors("src", edge_types={"cfg"})
+        assert cfg_only == ["cfg_tgt"]
+
+    def test_get_cfgs_for_file(self):
+        """get_cfgs_for_file returns CFGs whose source file matches."""
+        cpg = CodePropertyGraph()
+        cpg.merge_cfg(_make_simple_cfg(function_id="func1", file="a.py"))
+        cpg.merge_cfg(_make_simple_cfg(function_id="func2", file="b.py"))
+
+        a_cfgs = cpg.get_cfgs_for_file("a.py")
+        assert len(a_cfgs) == 1
+        assert a_cfgs[0].function_id == "func1"
+
+        assert cpg.get_cfgs_for_file("missing.py") == []

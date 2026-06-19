@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.layers.l3_analysis.call_graph.models import CallGraph
+from src.layers.l3_analysis.engines.ast_engine.cfg.models import ControlFlowGraph
 from src.layers.l3_analysis.engines.ast_engine.graph.models import ASTGraph, ASTNode
 
 
@@ -101,6 +102,10 @@ class CodePropertyGraph:
     # References to original graphs
     ast_graph: ASTGraph | None = None
     call_graph: CallGraph | None = None
+
+    # Per-function Control Flow Graphs (function_id -> CFG).
+    # Used for intra-function CFG reachability verification of attack paths.
+    function_cfgs: dict[str, ControlFlowGraph] = field(default_factory=dict)
 
     # Indexes for fast lookup
     _ast_index: dict[str, str] = field(default_factory=dict)  # ast_id -> cpg_id
@@ -217,6 +222,58 @@ class CodePropertyGraph:
                     )
                 )
 
+    def merge_cfg(self, cfg: ControlFlowGraph) -> None:
+        """
+        Merge a per-function Control Flow Graph into the CPG.
+
+        Registers the CFG by ``function_id`` for reachability queries, and
+        creates ``cfg_block`` CPGNodes plus ``cfg`` CPGEdges so control flow
+        is queryable alongside AST/call edges.
+
+        Args:
+            cfg: ControlFlowGraph for a single function
+        """
+        # Register for reachability queries (function_id -> CFG).
+        self.function_cfgs[cfg.function_id] = cfg
+
+        # Map CFG block id -> CPG node id (block ids already encode
+        # file + function + index, so prefixing with "cpg:" keeps them unique).
+        block_id_to_cpg_id = {block.id: f"cpg:{block.id}" for block in cfg.nodes.values()}
+
+        for block_id, block in cfg.nodes.items():
+            cpg_node = CPGNode(
+                id=block_id_to_cpg_id[block_id],
+                node_type="cfg_block",
+                file=block.file or cfg.file,
+                line=block.start_line,
+                metadata={
+                    "cfg_function_id": cfg.function_id,
+                    "cfg_block_id": block_id,
+                    "start_line": block.start_line,
+                    "end_line": block.end_line,
+                    "is_entry": block.is_entry,
+                    "is_exit": block.is_exit,
+                },
+            )
+            self.add_node(cpg_node)
+
+        for edge in cfg.edges:
+            source_cpg_id = block_id_to_cpg_id.get(edge.source)
+            target_cpg_id = block_id_to_cpg_id.get(edge.target)
+            if source_cpg_id and target_cpg_id:
+                self.add_edge(
+                    CPGEdge(
+                        edge_type="cfg",
+                        source=source_cpg_id,
+                        target=target_cpg_id,
+                        metadata={
+                            "cfg_function_id": cfg.function_id,
+                            "cfg_edge_type": edge.edge_type.value,
+                            "condition": edge.condition,
+                        },
+                    )
+                )
+
     def get_node(self, node_id: str) -> CPGNode | None:
         """Get a node by ID."""
         return self.nodes.get(node_id)
@@ -231,15 +288,54 @@ class CodePropertyGraph:
         node_ids = self._type_index.get(node_type, [])
         return [self.nodes.get(nid) for nid in node_ids if nid in self.nodes]
 
-    def get_successors(self, node_id: str) -> list[str]:
-        """Get successor node IDs."""
+    def get_successors(
+        self,
+        node_id: str,
+        edge_types: set[str] | None = None,
+    ) -> list[str]:
+        """
+        Get successor node IDs, optionally filtered by edge type.
+
+        Args:
+            node_id: Source node ID
+            edge_types: Optional set of edge types to include
+                (e.g. {"calls"}, {"cfg"}). ``None`` returns successors of all
+                edge types (backward compatible).
+
+        Returns:
+            List of successor node IDs
+        """
         node = self.get_node(node_id)
-        return node.successors if node else []
+        if not node:
+            return []
+        if edge_types is None:
+            return node.successors
+        # Filtered view: scan the edge list to honor the requested types.
+        result: list[str] = []
+        seen: set[str] = set()
+        for edge in self.edges:
+            if edge.source == node_id and edge.edge_type in edge_types:
+                if edge.target not in seen:
+                    seen.add(edge.target)
+                    result.append(edge.target)
+        return result
 
     def get_predecessors(self, node_id: str) -> list[str]:
         """Get predecessor node IDs."""
         node = self.get_node(node_id)
         return node.predecessors if node else []
+
+    def get_cfgs_for_file(self, file_path: str) -> list[ControlFlowGraph]:
+        """
+        Return all per-function CFGs whose source file matches.
+
+        Args:
+            file_path: Source file to match against ``ControlFlowGraph.file``
+
+        Returns:
+            List of matching ControlFlowGraphs (may be empty)
+        """
+        return [cfg for cfg in self.function_cfgs.values() if cfg.file == file_path]
 
     def find_by_ast_id(self, ast_id: str) -> CPGNode | None:
         """Find CPG node by AST node ID."""

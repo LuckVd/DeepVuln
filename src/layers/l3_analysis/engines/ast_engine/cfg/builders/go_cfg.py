@@ -71,6 +71,35 @@ class GoCFGBuilder(LanguageCFGBuilder):
         }
         return edge_mapping.get(stmt_type)
 
+    def _extract_function_body(self, function_ast_node: Any, ast_graph: Any) -> list[Any]:
+        """
+        Extract Go function body statements.
+
+        Tree-sitter Go wraps the body as ``function_declaration -> block ->
+        statement_list -> [statements]``. The base implementation stops at the
+        ``block`` and would return ``[statement_list]`` (a single grouping
+        node), collapsing the whole body into one basic block. This unwraps the
+        ``statement_list`` and returns the real statements.
+        """
+        for child_id in function_ast_node.children:
+            child = ast_graph.get_node(child_id)
+            if child and child.type == "block":
+                for grand_id in child.children:
+                    grand = ast_graph.get_node(grand_id)
+                    if grand and grand.type == "statement_list":
+                        return [
+                            ast_graph.get_node(sid)
+                            for sid in grand.children
+                            if ast_graph.get_node(sid)
+                        ]
+                # Fallback: block's direct children.
+                return [
+                    ast_graph.get_node(cid)
+                    for cid in child.children
+                    if ast_graph.get_node(cid)
+                ]
+        return super()._extract_function_body(function_ast_node, ast_graph)
+
     # ------------------------------------------------------------------
     # Basic block identification
     # ------------------------------------------------------------------

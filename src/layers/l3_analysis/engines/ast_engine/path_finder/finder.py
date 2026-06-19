@@ -124,6 +124,13 @@ class AttackPathFinder(PathFinder):
             if node.node_type == "ast_statement":
                 if node.ast_type in ("call_expression", "call"):
                     name = node.metadata.get("ast_name", "")
+                    # merge_ast_graph stores the source ASTNode under
+                    # metadata["ast_node"]; fall back to its name when the
+                    # legacy "ast_name" key is absent.
+                    if not name:
+                        ast_node = node.metadata.get("ast_node")
+                        if ast_node is not None:
+                            name = getattr(ast_node, "name", "") or ""
                     if pattern_lower in name.lower():
                         sinks.append(node_id)
 
@@ -204,14 +211,10 @@ class AttackPathFinder(PathFinder):
 
         is_sanitized = len(sanitizers) > 0
 
-        # Verify CFG reachability if CFG is available
-        reaches_sink = True  # Default to true
-        condition_paths = {}
-
-        # TODO: Add CFG reachability verification when CFG is integrated
-        # if cpg.has_cfg_for_path(path):
-        #     reaches_sink = self._verify_cfg_reachability(cpg, path)
-        #     condition_paths = self._extract_condition_paths(cpg, path)
+        # Verify CFG reachability (D6): real value when the CPG carries CFGs,
+        # otherwise falls back to True (no regression).
+        reaches_sink = self._verify_cfg_reachability(cpg, path)
+        condition_paths = self._extract_condition_paths(cpg, path)
 
         return AttackPath(
             entry_point=start,
@@ -249,16 +252,105 @@ class AttackPathFinder(PathFinder):
 
     def _verify_cfg_reachability(self, cpg: Any, path: list[str]) -> bool:
         """
-        Verify if the path is reachable using CFG information.
+        Verify whether the path is CFG-reachable.
 
-        This checks that all conditional branches can be satisfied
-        and that loops will execute.
+        For each path node that maps to a CFG basic block, that block must be
+        reachable from its function's CFG entry node. A sink that lives in a
+        dead / unreachable block (e.g. inside an always-false branch) makes the
+        whole path fail to reach the sink.
+
+        Falls back to True when the CPG carries no CFG data (no regression).
         """
-        # TODO: Implement CFG reachability verification
-        # This requires CFG nodes to be integrated into the CPG
+        function_cfgs = getattr(cpg, "function_cfgs", None)
+        if not path or not function_cfgs:
+            return True
+
+        for node_id in path:
+            node = cpg.get_node(node_id)
+            if not node:
+                continue
+            located = self._locate_block(cpg, node)
+            if located is None:
+                continue
+            cfg, block = located
+            # No entry node → cannot verify; treat as reachable.
+            if not cfg.entry_node:
+                continue
+            if block.id == cfg.entry_node:
+                continue
+            if not cfg.is_reachable(cfg.entry_node, block.id):
+                return False
         return True
 
+    def _locate_block(
+        self,
+        cpg: Any,
+        node: Any,
+    ) -> tuple[Any, Any] | None:
+        """
+        Map a CPG node to the ``(ControlFlowGraph, CFGNode)`` whose basic-block
+        line range contains the node's line, within the same file.
+
+        Returns ``None`` when the node has no usable location or no matching
+        block is found.
+        """
+        if not node.line or not node.file:
+            return None
+        for cfg in cpg.get_cfgs_for_file(node.file):
+            for block in cfg.nodes.values():
+                if block.start_line <= node.line <= block.end_line:
+                    return (cfg, block)
+        return None
+
     def _extract_condition_paths(self, cpg: Any, path: list[str]) -> dict[str, bool]:
-        """Extract condition requirements from the path."""
-        # TODO: Implement condition path extraction
-        return {}
+        """
+        Extract branch conditions required along the path.
+
+        For each consecutive pair of path nodes that map to CFG blocks within
+        the same function, the CFG edge between them is inspected: a conditional
+        edge carrying a condition expression is recorded as
+        ``{condition: <taken-as-true?>}`` (``True`` for a true-branch,
+        ``False`` for a false-branch). Unconditional / loop / exception edges
+        carry no branch truth value and are skipped.
+
+        Returns an empty dict when the CPG carries no CFG data (no regression).
+        """
+        from src.layers.l3_analysis.engines.ast_engine.cfg.models import CFGEdgeType
+
+        function_cfgs = getattr(cpg, "function_cfgs", None)
+        if not path or not function_cfgs:
+            return {}
+
+        # Locate (cfg, block) for each path node; None where unmappable.
+        located: list[tuple[Any, Any] | None] = []
+        for node_id in path:
+            node = cpg.get_node(node_id)
+            located.append(self._locate_block(cpg, node) if node else None)
+
+        conditions: dict[str, bool] = {}
+        for prev, cur in zip(located, located[1:]):
+            if prev is None or cur is None:
+                continue
+            prev_cfg, prev_block = prev
+            cur_cfg, cur_block = cur
+            # CFG is intra-function; skip cross-function transitions.
+            if prev_cfg is not cur_cfg:
+                continue
+            if prev_block.id == cur_block.id:
+                continue
+            edge = self._find_cfg_edge(prev_cfg, prev_block.id, cur_block.id)
+            if edge is None or not edge.condition:
+                continue
+            if edge.edge_type == CFGEdgeType.CONDITIONAL_TRUE:
+                conditions[edge.condition] = True
+            elif edge.edge_type == CFGEdgeType.CONDITIONAL_FALSE:
+                conditions[edge.condition] = False
+            # Other edge types carry no branch truth value.
+        return conditions
+
+    def _find_cfg_edge(self, cfg: Any, source_id: str, target_id: str) -> Any:
+        """Return the CFGEdge directly connecting two block ids, if any."""
+        for edge in cfg.edges:
+            if edge.source == source_id and edge.target == target_id:
+                return edge
+        return None

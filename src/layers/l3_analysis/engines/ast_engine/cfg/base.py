@@ -186,29 +186,34 @@ class LanguageCFGBuilder(ABC):
 
     def _extract_function_body(self, function_ast_node: Any, ast_graph: Any) -> list[Any]:
         """
-        Extract the function body AST nodes.
+        Extract the body statements of a function.
 
-        Default implementation - override if needed.
+        In tree-sitter grammars the function body is nested under a
+        body-wrapper child node (``block`` for Python/Java/Go,
+        ``statement_block`` for JavaScript) rather than being a direct child
+        of the function node. This descends into that wrapper and returns its
+        statement children, falling back to direct ``*_statement`` children
+        for grammars that lack such a wrapper.
         """
-        # Try to get children from the function node
-        if hasattr(function_ast_node, "children"):
-            # Filter to get body statements (not decorators, parameters, etc.)
-            body = []
-            in_body = False
+        body_wrappers = {"block", "statement_block"}
 
-            for child_id in function_ast_node.children:
-                child = ast_graph.get_node(child_id)
-                if child:
-                    # Simple heuristic: after a block node, we're in the body
-                    if child.type.endswith("_statement"):
-                        in_body = True
+        for child_id in function_ast_node.children:
+            child = ast_graph.get_node(child_id)
+            if child and child.type in body_wrappers:
+                body: list[Any] = []
+                for stmt_id in child.children:
+                    stmt = ast_graph.get_node(stmt_id)
+                    if stmt:
+                        body.append(stmt)
+                return body
 
-                    if in_body:
-                        body.append(child)
-
-            return body
-
-        return []
+        # Fallback: direct children that look like statements.
+        body = []
+        for child_id in function_ast_node.children:
+            child = ast_graph.get_node(child_id)
+            if child and child.type.endswith("_statement"):
+                body.append(child)
+        return body
 
     def _calculate_loop_depth(self, cfg: ControlFlowGraph) -> None:
         """Calculate loop nesting depth for each node."""
