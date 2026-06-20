@@ -33,7 +33,7 @@ class TestCPGPathProvider:
         assert provider.supports_language("javascript")
         assert provider.supports_language("typescript")
         assert not provider.supports_language("unknown")
-        assert not provider.supports_language("java")
+        assert provider.supports_language("java")  # Phase 18/P1: Java provider registered + e2e works
 
     def test_register_provider(self):
         """Test registering a custom provider."""

@@ -200,7 +200,15 @@ class CodePropertyGraph:
                 call_name=call_node.name,
                 file=call_node.file_path,
                 line=call_node.line,
-                metadata={"call_node": call_node},
+                metadata={
+                    "call_node": call_node,
+                    # Phase 18/P2-pre: propagate entry-point detection from the
+                    # call graph so AttackPathFinder._get_entry_points (which
+                    # reads metadata["is_entry_point"]) finds real HTTP/RPC/main
+                    # entries instead of relying on fragile call_name matching.
+                    "is_entry_point": call_node.is_entry_point,
+                    "entry_point_type": call_node.entry_point_type,
+                },
             )
             self.add_node(cpg_node)
 

@@ -122,6 +122,15 @@ class CallGraphBuilder(ABC):
             for func in functions:
                 calls = self._extract_calls(func, root, content, rel_path)
                 for call_edge in calls:
+                    # Phase 18/P2-pre: resolve callee_id to an actual node id.
+                    # _create_callee_id emits "Unknown:<name>" which never matches
+                    # real node ids (file:class.func / file:func), so call edges
+                    # were dropped as dangling in build_graph (which only keeps
+                    # edges whose callee_id is in graph.nodes) — the call graph
+                    # ended up with 0 edges, severing entry->sink paths in the CPG.
+                    callee_name = call_edge.callee_id.split(":")[-1]
+                    if callee_name in func_map:
+                        call_edge.callee_id = func_map[callee_name].id
                     # Check if call is internal or external
                     if call_edge.callee_id.split(":")[-1] in func_map:
                         file_graph.internal_calls.append(call_edge)

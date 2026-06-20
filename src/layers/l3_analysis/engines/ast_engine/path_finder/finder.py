@@ -5,6 +5,7 @@ Implements BFS-based path search from entry points to vulnerable sinks,
 with CFG reachability verification and sanitizer detection.
 """
 
+import re
 from collections import deque
 from typing import Any
 
@@ -117,7 +118,13 @@ class AttackPathFinder(PathFinder):
         Sinks are dangerous function calls or operations.
         """
         sinks = []
-        pattern_lower = pattern.lower()
+        # Phase 18/P2-pre: pattern is a regex (e.g. "exec|getRuntime"), so use
+        # re.search — the old `pattern_lower in name.lower()` substring check
+        # never matched alternation patterns, leaving sinks empty (0 paths).
+        try:
+            sink_re = re.compile(pattern, re.IGNORECASE)
+        except re.error:
+            sink_re = re.compile(re.escape(pattern), re.IGNORECASE)
 
         for node_id, node in cpg.nodes.items():
             # Check AST node for dangerous function calls
@@ -131,12 +138,12 @@ class AttackPathFinder(PathFinder):
                         ast_node = node.metadata.get("ast_node")
                         if ast_node is not None:
                             name = getattr(ast_node, "name", "") or ""
-                    if pattern_lower in name.lower():
+                    if sink_re.search(name):
                         sinks.append(node_id)
 
             # Check call node for dangerous functions
             elif node.node_type == "call_function":
-                if pattern_lower in node.call_name.lower():
+                if sink_re.search(node.call_name or ""):
                     sinks.append(node_id)
 
         return sinks

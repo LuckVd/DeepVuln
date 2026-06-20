@@ -670,6 +670,44 @@ class TestPythonEndToEnd:
         assert all(not p.reaches_sink for p in paths)
 
 
+class TestJavaEndToEnd:
+    """Phase 18/P2-pre: Java CPG attack-path end-to-end (was always 0 paths).
+
+    Requires the P2-pre fixes to all hold together:
+    - Java call-graph builder registered (P1)
+    - entry-point detection propagated onto CPG call_function nodes
+      (cpg/models.py merge_call_graph writes metadata["is_entry_point"])
+    - callee_id resolved to real node ids so calls edges exist
+      (call_graph/builders/base.py build_file_graph)
+    - sink matching via regex, not substring (path_finder/finder.py _find_sinks)
+    """
+
+    def test_provider_finds_reachable_sink(self, tmp_path):
+        from pathlib import Path
+
+        from src.layers.l3_analysis.engines.ast_engine.cpg.providers.java_provider import (
+            JavaCPGProvider,
+        )
+
+        src = tmp_path / "Vuln.java"
+        src.write_text(
+            'import org.springframework.web.bind.annotation.*;\n'
+            '@RestController\n'
+            'class Vuln {\n'
+            '    @GetMapping("/e")\n'
+            '    public String exec(String cmd) { return doExec(cmd); }\n'
+            '    public String doExec(String s) {\n'
+            '        Runtime.getRuntime().exec(s); return s;\n'
+            '    }\n'
+            '}\n'
+        )
+
+        paths = JavaCPGProvider().get_paths(Path(src), "exec|getRuntime")
+
+        assert len(paths) >= 1
+        assert any(p.reaches_sink for p in paths)
+
+
 def _locate_func_and_call(cpg) -> tuple[str | None, str | None]:
     """Return (function_definition CPG id, eval call CPG id) from a built CPG."""
     func_id = None
