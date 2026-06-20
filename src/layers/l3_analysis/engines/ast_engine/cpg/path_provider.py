@@ -6,12 +6,14 @@ Code Property Graph, routing to language-specific providers.
 """
 
 from pathlib import Path
-from typing import Any
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.ast_engine.cpg.base import LanguageCPGProvider
 from src.layers.l3_analysis.engines.ast_engine.cpg.providers.js_provider import (
     JSCPGProvider,
+)
+from src.layers.l3_analysis.engines.ast_engine.cpg.providers.go_provider import (
+    GoCPGProvider,
 )
 from src.layers.l3_analysis.engines.ast_engine.cpg.providers.java_provider import (
     JavaCPGProvider,
@@ -47,7 +49,7 @@ class CPGPathProvider:
             "javascript": JSCPGProvider(),
             "typescript": JSCPGProvider(),  # JSCPGProvider handles both
             "java": JavaCPGProvider(),
-            # "go": GoCPGProvider(),  # TODO: implement when Go call graph builder is ready
+            "go": GoCPGProvider(),  # Phase 18/P2-Go
         }
 
     def get_attack_paths(

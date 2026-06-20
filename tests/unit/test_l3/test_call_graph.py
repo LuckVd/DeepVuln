@@ -599,3 +599,47 @@ class FooController {
         # Spring @GetMapping detected as HTTP entry point.
         entry_names = {n.name for n in graph.nodes.values() if n.is_entry_point}
         assert "run" in entry_names
+
+
+class TestGoCallGraphBuilder:
+    """Phase 18/P2-Go: GoCallGraphBuilder registered + builds Go call graph.
+
+    Previously Go had no call-graph builder (analyzer only registered Python/Java),
+    so Go files were silently skipped and Go attack-path reachability was empty.
+    """
+
+    GO_SAMPLE = '''package main
+import "net/http"
+func handler(w http.ResponseWriter, r *http.Request) {
+    runCmd(r.URL.Query().Get("c"))
+}
+func runCmd(cmd string) { _ = cmd }
+func main() {}
+'''
+
+    def test_go_builder_registered(self):
+        analyzer = CallGraphAnalyzer()
+        assert ".go" in analyzer._builders
+
+    def test_go_call_graph_built_with_entry_points(self, tmp_path):
+        """Go funcs registered; HTTP handler + main detected as entries."""
+        (tmp_path / "main.go").write_text(self.GO_SAMPLE)
+
+        analyzer = CallGraphAnalyzer()
+        graph = analyzer.build_graph(tmp_path)
+
+        method_names = {
+            n.name for n in graph.nodes.values() if n.node_type != NodeType.CLASS
+        }
+        assert "handler" in method_names
+        assert "runCmd" in method_names
+        assert "main" in method_names
+
+        entries = {
+            n.name: n.entry_point_type
+            for n in graph.nodes.values() if n.is_entry_point
+        }
+        # net/http handler signature (ResponseWriter + Request) -> HTTP
+        assert entries.get("handler") == "HTTP"
+        # func main() -> MAIN
+        assert entries.get("main") == "MAIN"

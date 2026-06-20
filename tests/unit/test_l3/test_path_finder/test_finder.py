@@ -708,6 +708,43 @@ class TestJavaEndToEnd:
         assert any(p.reaches_sink for p in paths)
 
 
+class TestGoEndToEnd:
+    """Phase 18/P2-Go: Go CPG attack-path end-to-end (was always 0 paths).
+
+    Requires: Go call-graph builder registered + GoCPGProvider registered in
+    path_provider, plus the P2-pre fixes (entry propagation, callee resolve,
+    regex sink matching).
+    """
+
+    def test_provider_finds_reachable_sink(self, tmp_path):
+        from pathlib import Path
+
+        from src.layers.l3_analysis.engines.ast_engine.cpg.providers.go_provider import (
+            GoCPGProvider,
+        )
+
+        src = tmp_path / "main.go"
+        src.write_text(
+            'package main\n'
+            'import (\n'
+            '    "net/http"\n'
+            '    "os/exec"\n'
+            ')\n'
+            'func handler(w http.ResponseWriter, r *http.Request) {\n'
+            '    runCmd(r.URL.Query().Get("c"))\n'
+            '}\n'
+            'func runCmd(cmd string) {\n'
+            '    exec.Command(cmd)\n'
+            '}\n'
+            'func main() {}\n'
+        )
+
+        paths = GoCPGProvider().get_paths(Path(src), "exec|Command")
+
+        assert len(paths) >= 1
+        assert any(p.reaches_sink for p in paths)
+
+
 def _locate_func_and_call(cpg) -> tuple[str | None, str | None]:
     """Return (function_definition CPG id, eval call CPG id) from a built CPG."""
     func_id = None
