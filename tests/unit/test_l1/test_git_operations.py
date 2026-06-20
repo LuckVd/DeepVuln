@@ -170,6 +170,32 @@ class TestGitOperations:
         commit_count = sum(1 for _ in repo.iter_commits())
         assert commit_count == 3
 
+    def test_clone_bounds_duration_with_kill_after_timeout(
+        self, temp_dir: Path
+    ) -> None:
+        """Phase 18/P7-C3: clone must bound duration via kill_after_timeout.
+
+        GitPython kills the git process after this many seconds, so a hanging
+        remote cannot stall the worker. GitPython uses ``kill_after_timeout``
+        — the ``timeout`` kwarg is silently ignored by clone_from.
+        """
+        from unittest.mock import MagicMock, patch
+
+        git_ops = GitOperations(clone_timeout=120)
+        captured = {}
+
+        def fake_clone_from(**kwargs):
+            captured.update(kwargs)
+            return MagicMock()
+
+        with patch(
+            "src.layers.l1_intelligence.git_operations.Repo.clone_from",
+            fake_clone_from,
+        ):
+            git_ops.clone("https://example.com/repo.git", temp_dir / "out")
+
+        assert captured.get("kill_after_timeout") == 120
+
 
 class TestGitRef:
     """Tests for GitRef model."""

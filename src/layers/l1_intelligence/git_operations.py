@@ -124,6 +124,13 @@ class GitOperations:
             "to_path": str(target_path),
         }
 
+        # Bound the clone duration so a hanging remote cannot stall the worker
+        # indefinitely (Phase 18/P7-C3). GitPython kills the git process after
+        # kill_after_timeout seconds — NOT ``timeout``, which clone_from
+        # silently ignores.
+        if self.clone_timeout:
+            clone_kwargs["kill_after_timeout"] = self.clone_timeout
+
         # Set clone depth
         if depth > 0:
             clone_kwargs["depth"] = depth

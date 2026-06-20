@@ -151,16 +151,18 @@ class ProgressBroadcaster:
         self.phase_repo = ScanPhaseRepository()
         self.event_repo = ScanEventRepository()
 
-        # Base phase weights (all 9 phases)
-        # adversarial_verification 是 engine_execution 的两倍
+        # Base phase weights (all 10 phases). _calculate_progress normalizes by
+        # total weight, so these are relative proportions, not a fixed 100.
+        # adversarial_verification ≈ 2× engine_execution.
         self.base_phase_weights = {
             "l1_preparation": 3,
             "source_preparation": 3,
             "engine_selection": 2,
             "engine_execution": 25,
             "exploitability_verification": 5,
+            "logic_vuln_discovery": 3,
             "deduplication_adjudication": 7,
-            "adversarial_verification": 50,  # engine_execution 的两倍
+            "adversarial_verification": 50,
             "result_merging": 3,
             "token_statistics": 2,
         }

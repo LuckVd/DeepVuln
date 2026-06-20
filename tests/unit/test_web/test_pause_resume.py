@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, Mock
 from datetime import datetime, timezone
 import pytest
 
-from src.web.services.scan_executor import ScanExecutor, get_scan_executor
+from src.web.services.scan_executor import ScanExecutor
 from src.web.models.scan import Scan, ScanStatus, ScanType, PhaseName
 from src.web.services.checkpoint_service import CheckpointData, PhaseCheckpoint
 
@@ -20,7 +20,14 @@ sys.modules["src.web.tasks.scan_tasks"] = Mock()
 
 @pytest.fixture(autouse=True)
 def mock_async_session_local():
-    """Mock AsyncSessionLocal for all tests."""
+    """Mock the async session factory used by ScanExecutor.
+
+    ScanExecutor resolves the sessionmaker via get_session_local() at call
+    time (it intentionally does not import AsyncSessionLocal directly), so we
+    patch that factory rather than a nonexistent module attribute. Patching a
+    missing attribute made every test in this file depend on some earlier test
+    polluting the module namespace — i.e. they could not run standalone.
+    """
     mock_session = MagicMock()
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
@@ -28,9 +35,11 @@ def mock_async_session_local():
     mock_session.flush = AsyncMock()
     mock_session.refresh = AsyncMock()
 
-    with patch("src.web.models.database.AsyncSessionLocal", return_value=mock_session):
-        with patch("src.web.services.scan_executor.AsyncSessionLocal", return_value=mock_session):
-            yield mock_session
+    # get_session_local() returns an async_sessionmaker; calling it yields the
+    # context manager that scan_executor opens via `async with session_maker()`.
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+    with patch("src.web.services.scan_executor.get_session_local", return_value=mock_sessionmaker):
+        yield mock_session
 
 
 @pytest.fixture
@@ -159,6 +168,53 @@ class TestPauseScan:
         ):
             with pytest.raises(ValueError, match="is not running"):
                 await executor.pause_scan(scan_id=1)
+
+    @pytest.mark.asyncio
+    async def test_pause_scan_revokes_celery_task(self, mock_scan_running):
+        """Phase 18/P5-A6: pause must really revoke the Celery task, not just flip status."""
+        mock_scan_running.task_id = "celery-task-pause-1"
+        executor = ScanExecutor()
+        mock_celery_app = MagicMock()
+
+        with patch("src.web.services.scan_executor.get_celery_app", return_value=mock_celery_app):
+            with patch.object(
+                executor.scan_repo, "get", new=AsyncMock(return_value=mock_scan_running)
+            ):
+                with patch.object(
+                    executor.checkpoint_service, "save_checkpoint", new=AsyncMock(return_value=True)
+                ):
+                    with patch.object(
+                        executor.scan_repo, "update_status", new=AsyncMock()
+                    ):
+                        result = await executor.pause_scan(scan_id=1)
+
+        # The Celery task must actually be revoked with terminate=True
+        mock_celery_app.control.revoke.assert_called_once_with(
+            "celery-task-pause-1", terminate=True, signal="SIGTERM"
+        )
+        assert result["task_revoked"] is True
+
+    @pytest.mark.asyncio
+    async def test_pause_scan_without_task_id_does_not_revoke(self, mock_scan_running):
+        """When there is no task_id, pause must not attempt to revoke."""
+        mock_scan_running.task_id = None
+        executor = ScanExecutor()
+        mock_celery_app = MagicMock()
+
+        with patch("src.web.services.scan_executor.get_celery_app", return_value=mock_celery_app):
+            with patch.object(
+                executor.scan_repo, "get", new=AsyncMock(return_value=mock_scan_running)
+            ):
+                with patch.object(
+                    executor.checkpoint_service, "save_checkpoint", new=AsyncMock(return_value=True)
+                ):
+                    with patch.object(
+                        executor.scan_repo, "update_status", new=AsyncMock()
+                    ):
+                        result = await executor.pause_scan(scan_id=1)
+
+        mock_celery_app.control.revoke.assert_not_called()
+        assert result["task_revoked"] is False
 
 
 # ============================================================================
@@ -300,80 +356,6 @@ class TestCancelScanEnhanced:
             result = await executor.cancel_scan(scan_id=1)
 
         assert result is False
-
-
-# ============================================================================
-# Test CLIAdapter Resume Support
-# ============================================================================
-
-class TestCLIAdapterResume:
-    """Test CLIAdapter resume parameter support."""
-
-    def test_cli_adapter_init_with_resume(self):
-        """Test CLIAdapter initialization with resume parameter."""
-        from src.web.services.cli_adapter import CLIAdapter
-
-        resume_data = {
-            "resume_phase": PhaseName.L3_AGENT,
-            "checkpoint": {},
-        }
-
-        adapter = CLIAdapter(
-            scan_id=1,
-            project_id=100,
-            scan_config={},
-            resume_from=resume_data,
-        )
-
-        assert adapter.resume_from == resume_data
-
-    def test_cli_adapter_init_without_resume(self):
-        """Test CLIAdapter initialization without resume parameter."""
-        from src.web.services.cli_adapter import CLIAdapter
-
-        adapter = CLIAdapter(
-            scan_id=1,
-            project_id=100,
-            scan_config={},
-        )
-
-        assert adapter.resume_from is None
-
-    def test_build_command_with_resume(self):
-        """Test command building with resume phase."""
-        from src.web.services.cli_adapter import CLIAdapter
-        from pathlib import Path
-
-        resume_data = {
-            "resume_phase": PhaseName.L2_CODEQL,
-            "checkpoint": {},
-        }
-
-        adapter = CLIAdapter(
-            scan_id=1,
-            project_id=100,
-            scan_config={},
-            resume_from=resume_data,
-        )
-
-        cmd = adapter._build_command(Path("/tmp/project"))
-        assert "--resume-phase" in cmd
-        idx = cmd.index("--resume-phase")
-        assert cmd[idx + 1] == PhaseName.L2_CODEQL
-
-    def test_build_command_without_resume(self):
-        """Test command building without resume phase."""
-        from src.web.services.cli_adapter import CLIAdapter
-        from pathlib import Path
-
-        adapter = CLIAdapter(
-            scan_id=1,
-            project_id=100,
-            scan_config={},
-        )
-
-        cmd = adapter._build_command(Path("/tmp/project"))
-        assert "--resume-phase" not in cmd
 
 
 # ============================================================================

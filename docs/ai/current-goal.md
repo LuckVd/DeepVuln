@@ -1,6 +1,6 @@
 # Current Goal
 
-> **状态**: 进行中 🚧 — 第一批 + 第二批 + P6-eval 已完成并 push（HEAD `4409eb4`）；**第三批待做（P5/P7/P3/P6-对抗）**
+> **状态**: 进行中 🚧 — 第一批 + 第二批 + P6-eval 已完成并 push（代码 `4409eb4` + docs `a8eba71`，本地=origin=a8eba71）；**第三批待做（P5/P7/P3/P6-对抗）**
 > **目标**: Phase 18 — 精度链路接通与多语言可达性补齐（基于全量实现审查）
 > **Goal ID**: phase18-precision-link-reachability
 > **创建日期**: 2026-06-20（最近更新：2026-06-20 push 后）
@@ -9,7 +9,7 @@
 > - ✅ **第一批**（`4ee490b`）：P0-A1 四轮回填 candidate / P0-A2 裁决映射属性名 / P0-A3 D5 同步 confidence / P1 Java call_graph 注册 / P4-C1 AST 语言收敛 / P4-C2 CodeQL 类型
 > - ✅ **第二批**（`6b0f290`+`4b15224`）：P2-前置 CPG entry/callee/sink 连通（Java 端到端通）/ P2-Go go_builder+provider（Go 端到端通）——**三语言 py/go/java CPG 可达性全部接通**
 > - ✅ **P6-eval**（`4409eb4`）：round_four severity 保底，critical/high 不再被判 not_exploitable（防漏报）
-> - ✅ **已 push** `origin/feat/static-evidence-grounding`（fca0c22..4409eb4），工作区干净
+> - ✅ **已 push** `origin/feat/static-evidence-grounding`（fca0c22..a8eba71，本地=origin，工作区干净）
 > - ⏳ **第三批待做**：P5 续扫完整 / P7 可靠性 / P3 可达性质量（需条件求值）/ P6 对抗接线 —— 详见文末"接力指南 §3"
 > - ⚠️ **治本（P6-rootcause）已评估回退**：taint→None 正确但与 round_four_llm/codeql 测试架构冲突（8 回归），保底已解决核心，归后续重构测试架构时做
 > - 全 test_l3 始终 **23 既有失败、零回归**（既有失败：verification_gatekeeper/deduplicator-async/semgrep 等，与本 goal 无关）
@@ -230,7 +230,7 @@ export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"
 # glm-4.5-air（快）；本机 1.9GB（无 CodeQL）；测试用 sqlite
 
 # 全量回归
-python3 -m pytest tests/unit/test_l3 -q 2>&1 | tail -30   # 期望 2177 passed，关注失败数不增
+python3 -m pytest tests/unit/test_l3 -q 2>&1 | tail -30   # 期望 2195 passed / 23 既有失败，关注失败数不增
 # 防回归
 python3 -c "import ast,pathlib;[ast.parse(f.read_text()) for f in pathlib.Path('src').rglob('*.py')];print('OK')"
 ruff check src/ --select F
@@ -259,8 +259,8 @@ ruff check src/ --select F
 
 | 项 | 文件:锚点 | 动作 | 工作量 |
 |---|---|---|---|
-| **P5 续扫** | `pipeline/phases.py`(ScanPhase) vs `models/scan.py:31`(PhaseName) / `scan_orchestrator.py:1731` / `scan_executor.py:486` | 统一阶段命名；resume 恢复 tech_stack 等实例状态；`_finalize_results` 按 (scan_id,rule_id,file,line) upsert 去重；`pause_scan` 接 `revoke(terminate=True)` | M-L |
-| **P7 可靠性** | `git_operations.py:122` / `baseline_manager.py:428` / `dependency_graph.py:246` / `finding_budget.py` | git clone 传 clone_timeout；baseline 加"是否覆盖"判定；增量 import 拼接；budget 截断前排序 | M |
+| **P5 续扫** | `src/layers/pipeline/phases.py`(ScanPhase) vs `src/web/models/scan.py:31`(PhaseName) / `src/web/services/scan_orchestrator.py:1690`(`_finalize_results`) / `src/web/services/scan_executor.py:433`(`pause_scan`) | 统一阶段命名；resume 恢复 tech_stack 等实例状态；`_finalize_results` 按 (scan_id,rule_id,file,line) upsert 去重；`pause_scan` 接 `revoke(terminate=True)`（**坐实@2026-06-20：`pause_scan` 现仅存 checkpoint+改状态、确未 revoke；revoke 模式已在 `cancel_scan:599` 实现，复制即可**） | M-L |
+| **P7 可靠性** | `src/layers/l1_intelligence/git_operations.py:138`(`clone_from`) / `src/layers/l3_analysis/incremental/baseline_manager.py:428` / `src/layers/l3_analysis/incremental/dependency_graph.py:246` / `finding_budget.py` | git clone 传 clone_timeout（**坐实@2026-06-20：`self.clone_timeout` 字段已存在@26/41，但 `clone_kwargs` 字典@123 未塞 timeout 键、确仍待做，加一行即可**）；baseline 加"是否覆盖"判定；增量 import 拼接；budget 截断前排序 | M |
 | **P3 可达性质量** | `cfg/builders/*_cfg.py identify_basic_blocks` + `finder.py _verify_cfg_reachability` | ⚠️ 需**条件求值**（if False 死分支），非 basic_blocks 递归能解决；兜底改保守有回归风险（破坏刚接通的 reaches_sink=True）。深做前先设计 | M |
 | **P6 对抗接线** | `verification_gatekeeper.py` / `scoring/models.py:154` / `round_three.py:309` | gatekeeper 替换 adversarial_service 手写版；min_evidence_dimensions 提升；LIKELY→MEDIUM；定 enhanced 层去留 | M |
 

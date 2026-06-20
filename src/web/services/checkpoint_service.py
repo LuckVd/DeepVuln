@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from src.web.models.database import get_session_local
-from src.web.models.scan import PhaseName
+from src.layers.pipeline.phases import SCAN_PHASE_ORDER, _LEGACY_PHASE_ALIASES
 from src.web.repositories.scan import ScanRepository
 from src.web.repositories.event import ScanPhaseRepository
 
@@ -352,36 +352,41 @@ class CheckpointService:
             retry_phases = []
             resume_phase = None
 
+            # Phase 18/P5-A5: normalize legacy PhaseName (CamelCase) keys to
+            # canonical ScanPhase values before reasoning, so checkpoints
+            # written before the convergence still resume correctly (no DB
+            # migration needed).
+            current_phase = (
+                _LEGACY_PHASE_ALIASES.get(checkpoint.current_phase, checkpoint.current_phase)
+                if checkpoint.current_phase
+                else None
+            )
+            phases = {
+                _LEGACY_PHASE_ALIASES.get(name, name): pc
+                for name, pc in checkpoint.phases.items()
+            }
+
             # Analyze each phase
-            for phase_name, phase_checkpoint in checkpoint.phases.items():
+            for phase_name, phase_checkpoint in phases.items():
                 if phase_checkpoint.status == "completed":
                     skip_phases.append(phase_name)
                 elif phase_checkpoint.status in {"failed", "running"}:
                     retry_phases.append(phase_name)
 
             # Determine resume phase
-            if checkpoint.current_phase:
-                current_status = checkpoint.phases.get(
-                    checkpoint.current_phase
-                )
+            if current_phase:
+                current_status = phases.get(current_phase)
                 if current_status and current_status.status in {"running", "failed"}:
-                    resume_phase = checkpoint.current_phase
+                    resume_phase = current_phase
                 else:
-                    # Find next pending phase
-                    phase_order = [
-                        PhaseName.L1_PREPARATION,
-                        PhaseName.L1_ATTACK_SURFACE,
-                        PhaseName.L2_SEMGREP,
-                        PhaseName.L2_CODEQL,
-                        PhaseName.L3_AGENT,
-                        PhaseName.L3_ADJUDICATION,
-                        PhaseName.REPORT_GENERATION,
-                    ]
+                    # Find next pending phase in canonical ScanPhase order
+                    phase_order = [p.value for p in SCAN_PHASE_ORDER]
                     for phase in phase_order:
-                        if phase not in checkpoint.phases:
+                        phase_checkpoint = phases.get(phase)
+                        if phase_checkpoint is None:
                             resume_phase = phase
                             break
-                        elif checkpoint.phases[phase].status in {"pending", "failed"}:
+                        elif phase_checkpoint.status in {"pending", "failed"}:
                             resume_phase = phase
                             break
 

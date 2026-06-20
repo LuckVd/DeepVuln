@@ -15,6 +15,7 @@ from src.web.services.checkpoint_service import (
     ResumeStrategy,
 )
 from src.web.models.scan import Scan, ScanStatus, ScanType, PhaseName
+from src.layers.pipeline.phases import ScanPhase, SCAN_PHASE_ORDER
 
 
 # ============================================================================
@@ -31,9 +32,12 @@ def mock_async_session_local():
     mock_session.flush = AsyncMock()
     mock_session.refresh = AsyncMock()
 
-    with patch("src.web.models.database.AsyncSessionLocal", return_value=mock_session):
-        with patch("src.web.services.checkpoint_service.AsyncSessionLocal", return_value=mock_session):
-            yield mock_session
+    # checkpoint_service resolves the sessionmaker via get_session_local() at
+    # call time (it does not import AsyncSessionLocal directly), so patch the
+    # factory function rather than a nonexistent module attribute.
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+    with patch("src.web.services.checkpoint_service.get_session_local", return_value=mock_sessionmaker):
+        yield mock_session
 
 
 @pytest.fixture
@@ -101,18 +105,23 @@ def mock_scan_with_checkpoint():
 
 @pytest.fixture
 def sample_checkpoint_data():
-    """Create sample checkpoint data."""
+    """Create sample checkpoint data using canonical ScanPhase values.
+
+    The pipeline persists ScanPhase values (snake_case) into checkpoints —
+    fixtures must mirror that, not the legacy PhaseName enum, or they hide the
+    resume naming mismatch (Phase 18/P5-A5).
+    """
     return CheckpointData(
         scan_id=1,
-        current_phase=PhaseName.L3_AGENT,
+        current_phase=ScanPhase.ENGINE_EXECUTION.value,
         phases={
-            PhaseName.L1_PREPARATION: PhaseCheckpoint(
+            ScanPhase.L1_PREPARATION.value: PhaseCheckpoint(
                 status="completed",
                 started_at=datetime.now(timezone.utc),
                 completed_at=datetime.now(timezone.utc),
                 files_processed=10,
             ),
-            PhaseName.L3_AGENT: PhaseCheckpoint(
+            ScanPhase.ENGINE_EXECUTION.value: PhaseCheckpoint(
                 status="running",
                 started_at=datetime.now(timezone.utc),
                 files_processed=5,
@@ -347,57 +356,60 @@ class TestCleanCheckpoint:
 # ============================================================================
 
 class TestResumeStrategy:
-    """Test resume strategy determination."""
+    """Resume strategy over canonical ScanPhase values (Phase 18/P5-A5)."""
 
     @pytest.mark.asyncio
-    async def test_get_resume_strategy_with_completed_phases(self, sample_checkpoint_data):
-        """Test resume strategy when some phases are completed."""
+    async def test_resume_from_running_phase(self, sample_checkpoint_data):
+        """A running current phase is resumed directly; completed ones skipped."""
         service = CheckpointService()
         strategy = await service.get_resume_strategy(sample_checkpoint_data)
 
         assert strategy.can_resume is True
-        assert PhaseName.L1_PREPARATION in strategy.skip_phases
-        assert strategy.resume_phase == PhaseName.L3_AGENT
+        assert ScanPhase.L1_PREPARATION.value in strategy.skip_phases
+        assert strategy.resume_phase == ScanPhase.ENGINE_EXECUTION.value
 
     @pytest.mark.asyncio
-    async def test_get_resume_strategy_all_completed(self):
-        """Test resume strategy when all phases are completed."""
+    async def test_resume_advances_past_completed(self):
+        """Core resume bug: when current_phase is completed, resume from the
+        NEXT pending ScanPhase — not from the first PhaseName value, which the
+        old PhaseName-based phase_order wrongly returned."""
         service = CheckpointService()
         checkpoint = CheckpointData(
             scan_id=1,
-            current_phase=PhaseName.REPORT_GENERATION,
+            current_phase=ScanPhase.ENGINE_EXECUTION.value,
             phases={
-                PhaseName.L1_PREPARATION: PhaseCheckpoint(status="completed"),
-                PhaseName.L3_AGENT: PhaseCheckpoint(status="completed"),
-                PhaseName.REPORT_GENERATION: PhaseCheckpoint(status="completed"),
+                ScanPhase.L1_PREPARATION.value: PhaseCheckpoint(status="completed"),
+                ScanPhase.SOURCE_PREPARATION.value: PhaseCheckpoint(status="completed"),
+                ScanPhase.ENGINE_SELECTION.value: PhaseCheckpoint(status="completed"),
+                ScanPhase.ENGINE_EXECUTION.value: PhaseCheckpoint(status="completed"),
             },
         )
         strategy = await service.get_resume_strategy(checkpoint)
 
         assert strategy.can_resume is True
-        assert len(strategy.skip_phases) == 3
+        assert strategy.resume_phase == ScanPhase.EXPLOITABILITY_VERIFICATION.value
 
     @pytest.mark.asyncio
-    async def test_get_resume_strategy_with_failed_phase(self):
-        """Test resume strategy when a phase failed."""
+    async def test_resume_retries_failed_phase(self):
+        """A failed current phase is retried and becomes the resume phase."""
         service = CheckpointService()
         checkpoint = CheckpointData(
             scan_id=1,
-            current_phase=PhaseName.L3_AGENT,
+            current_phase=ScanPhase.ENGINE_EXECUTION.value,
             phases={
-                PhaseName.L1_PREPARATION: PhaseCheckpoint(status="completed"),
-                PhaseName.L3_AGENT: PhaseCheckpoint(status="failed"),
+                ScanPhase.L1_PREPARATION.value: PhaseCheckpoint(status="completed"),
+                ScanPhase.ENGINE_EXECUTION.value: PhaseCheckpoint(status="failed"),
             },
         )
         strategy = await service.get_resume_strategy(checkpoint)
 
         assert strategy.can_resume is True
-        assert PhaseName.L3_AGENT in strategy.retry_phases
-        assert strategy.resume_phase == PhaseName.L3_AGENT
+        assert ScanPhase.ENGINE_EXECUTION.value in strategy.retry_phases
+        assert strategy.resume_phase == ScanPhase.ENGINE_EXECUTION.value
 
     @pytest.mark.asyncio
-    async def test_get_resume_strategy_no_current_phase(self):
-        """Test resume strategy when no current phase is set."""
+    async def test_no_current_phase(self):
+        """With no current phase and no tracked phases, resume is undecided."""
         service = CheckpointService()
         checkpoint = CheckpointData(
             scan_id=1,
@@ -406,11 +418,29 @@ class TestResumeStrategy:
         )
         strategy = await service.get_resume_strategy(checkpoint)
 
-        # When no phases exist, strategy should determine first phase
         assert strategy.can_resume is True
-        # Should resume from first phase (L1_PREPARATION)
-        # or it could be None if no phases are tracked
-        assert strategy.resume_phase is None or strategy.resume_phase == PhaseName.L1_PREPARATION
+        assert strategy.resume_phase is None or strategy.resume_phase == ScanPhase.L1_PREPARATION.value
+
+    @pytest.mark.asyncio
+    async def test_normalizes_legacy_phasename_values(self):
+        """Checkpoints written with legacy PhaseName (CamelCase) values must
+        still resume correctly via the alias compat map — no DB migration."""
+        service = CheckpointService()
+        checkpoint = CheckpointData(
+            scan_id=1,
+            current_phase="L3_agent",  # legacy PhaseName value
+            phases={
+                "L1_preparation": PhaseCheckpoint(status="completed"),
+                "L3_agent": PhaseCheckpoint(status="running"),
+            },
+        )
+        strategy = await service.get_resume_strategy(checkpoint)
+
+        assert strategy.can_resume is True
+        # Legacy L3_agent aliases to engine_execution; running → resume there.
+        assert strategy.resume_phase == ScanPhase.ENGINE_EXECUTION.value
+        # skip_phases are normalized to canonical ScanPhase values too.
+        assert ScanPhase.L1_PREPARATION.value in strategy.skip_phases
 
 
 # ============================================================================

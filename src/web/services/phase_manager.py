@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from src.web.models.database import get_session_local
-from src.web.models.scan import Scan, ScanPhase, ScanStatus, ScanType, PhaseName
+from src.web.models.scan import Scan, ScanPhase, ScanStatus, ScanType
+from src.layers.pipeline.phases import SCAN_PHASE_ORDER
 from src.web.repositories.scan import ScanRepository
 from src.web.repositories.event import ScanPhaseRepository
 
@@ -83,33 +84,19 @@ class PhaseInfo(BaseModel):
 # Phase Order Configuration
 # ============================================================================
 
+# Canonical ScanPhase order (snake_case, 10 phases) — same for every scan type.
+# The pipeline runs ScanPhase values; using them here keeps PhaseManager's
+# phase progression aligned with what the pipeline actually executes, so
+# scan_phases rows are no longer split between PhaseName and ScanPhase values
+# (Phase 18/P5-A5). Optional phases (codeql/adjudication/etc.) simply stay
+# pending and are skipped via the pipeline's skip_when.
+_PHASE_ORDER_VALUES = [p.value for p in SCAN_PHASE_ORDER]
+
 # Define the standard phase order for different scan types
 PHASE_ORDER = {
-    ScanType.FULL: [
-        PhaseName.L1_PREPARATION,
-        PhaseName.L1_ATTACK_SURFACE,
-        PhaseName.L2_SEMGREP,
-        PhaseName.L2_CODEQL,
-        PhaseName.L3_AGENT,
-        PhaseName.L3_ADJUDICATION,
-        PhaseName.REPORT_GENERATION,
-    ],
-    ScanType.BASE: [
-        PhaseName.L1_PREPARATION,
-        PhaseName.L1_ATTACK_SURFACE,
-        PhaseName.L2_SEMGREP,
-        PhaseName.L2_CODEQL,
-        PhaseName.L3_AGENT,
-        PhaseName.L3_ADJUDICATION,
-        PhaseName.REPORT_GENERATION,
-    ],
-    ScanType.INCREMENTAL: [
-        PhaseName.L1_PREPARATION,
-        PhaseName.L1_ATTACK_SURFACE,
-        PhaseName.L2_SEMGREP,
-        PhaseName.L3_AGENT,
-        PhaseName.REPORT_GENERATION,
-    ],
+    ScanType.FULL: list(_PHASE_ORDER_VALUES),
+    ScanType.BASE: list(_PHASE_ORDER_VALUES),
+    ScanType.INCREMENTAL: list(_PHASE_ORDER_VALUES),
 }
 
 # Valid state transitions

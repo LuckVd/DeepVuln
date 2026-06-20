@@ -29,7 +29,14 @@ class ScanType:
 
 
 class PhaseName:
-    """Scan phase names."""
+    """Scan phase names.
+
+    DEPRECATED (Phase 18/P5-A5): superseded by the canonical ``ScanPhase``
+    enum in ``src/layers/pipeline/phases.py`` (10 snake_case phases). The
+    pipeline, progress broadcaster, and resume logic all use ScanPhase now;
+    PhaseName values are only accepted as legacy checkpoint aliases (see
+    ``_LEGACY_PHASE_ALIASES``). Do not use in new code.
+    """
     L1_PREPARATION = "L1_preparation"
     L1_ATTACK_SURFACE = "L1_attack_surface"
     L2_SEMGREP = "L2_semgrep"

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from src.web.models.database import get_session_local
-from src.web.models.scan import Scan, ScanStatus, ScanType, ScanPhase, ScanEvent
+from src.web.models.scan import Scan, ScanStatus, ScanPhase, ScanEvent
 from src.web.models.schemas import (
     ScanCreate,
     ScanProgressResponse,
@@ -111,36 +111,19 @@ class ScanExecutor:
             scan_id: ID of the scan
             scan_type: Type of scan (full/base/incremental)
         """
-        from src.web.models.scan import PhaseName
+        # Phase 18/P5-A5: pre-insert all canonical ScanPhase values as pending.
+        # Using ScanPhase values (not legacy PhaseName) keeps these rows aligned
+        # with the ones the broadcaster writes at runtime, so scan_phases no
+        # longer holds split PhaseName + ScanPhase rows for the same scan.
+        from src.layers.pipeline.phases import SCAN_PHASE_ORDER
 
-        # Define phases based on scan type
-        if scan_type == ScanType.INCREMENTAL:
-            phases = [
-                PhaseName.L1_PREPARATION,
-                PhaseName.L1_ATTACK_SURFACE,
-                PhaseName.L2_SEMGREP,
-                PhaseName.L3_AGENT,
-                PhaseName.REPORT_GENERATION,
-            ]
-        else:
-            phases = [
-                PhaseName.L1_PREPARATION,
-                PhaseName.L1_ATTACK_SURFACE,
-                PhaseName.L2_SEMGREP,
-                PhaseName.L2_CODEQL,
-                PhaseName.L3_AGENT,
-                PhaseName.L3_ADJUDICATION,
-                PhaseName.REPORT_GENERATION,
-            ]
-
-        for phase_name in phases:
-            phase = ScanPhase(
+        for phase in SCAN_PHASE_ORDER:
+            db.add(ScanPhase(
                 scan_id=scan_id,
-                phase_name=phase_name,
+                phase_name=phase.value,
                 status="pending",
                 progress_percent=0,
-            )
-            db.add(phase)
+            ))
 
         await db.flush()
 
@@ -482,6 +465,23 @@ class ScanExecutor:
             else:
                 logger.warning(f"Scan {scan_id} has no current phase, cannot save checkpoint")
 
+            # Revoke the Celery task if a task_id exists. Phase 18/P5-A6: pause
+            # must actually stop the worker, not just flip the DB status —
+            # otherwise the paused scan and the still-running task race and
+            # produce duplicate findings. Mirrors cancel_scan's revocation.
+            task_revoked = False
+            if scan.task_id:
+                try:
+                    celery_app = get_celery_app()
+                    celery_app.control.revoke(
+                        scan.task_id, terminate=True, signal='SIGTERM'
+                    )
+                    task_revoked = True
+                    logger.info(f"Revoked Celery task {scan.task_id} for paused scan {scan_id}")
+                except Exception as e:
+                    logger.error(f"Failed to revoke Celery task {scan.task_id}: {e}")
+                    # Continue to update status even if revocation fails
+
             # Update scan status to paused
             await self.scan_repo.update_status(
                 db,
@@ -489,9 +489,6 @@ class ScanExecutor:
                 status=ScanStatus.PAUSED,
             )
             await db.commit()
-
-            # Revoke Celery task if running (will be implemented with task_id storage)
-            # For now, the status change is enough to prevent further progress
 
             logger.info(f"Paused scan {scan_id}")
             return {
@@ -501,6 +498,7 @@ class ScanExecutor:
                 "paused_at": datetime.now(timezone.utc).isoformat(),
                 "current_phase": current_phase_name,
                 "can_resume": True,
+                "task_revoked": task_revoked,
             }
 
     async def resume_scan(self, scan_id: int) -> Dict[str, Any]:

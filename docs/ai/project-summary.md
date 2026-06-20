@@ -1,6 +1,6 @@
 # Project Summary
 
-Status: Phase 17 - web-only（CLI 已移除，仅 Web 接口）
+Status: Phase 18（精度链路接通 + 三语言可达性）- web-only（CLI 已移除，仅 Web 接口）
 
 ## Purpose
 
@@ -35,7 +35,8 @@ DeepVuln 是多层（L1 情报 + L3 分析）架构的智能漏洞挖掘系统�
 
 ## Recent Maintenance Notes
 
-- Phase 17（进行中，web-only）：已完成 D4 / Web-semgrep / D1(ScanPipeline) / D5(打分统一) / E5(AI 补漏逻辑漏洞) / D3(断点续扫 findings 持久化)，并修了 `checkpoint_service`/`phase_manager` 两个阻塞 bug；已 push origin（HEAD `8cb6277`）
-- 待办：D6（CPG CFG 可达性，P3 低优先大工程）— `path_finder/finder.py` 的 `reaches_sink` 仍固定 `True`
-- 环境：本机 1.9GB 内存，无 CodeQL；测试用 sqlite；LLM 走 GLM 兼容端点
-- 上一个目标：Phase 16 全面质量修复（已完成，commit `87c7083`）
+- Phase 18（进行中，web-only）：基于 2026-06-20 全量实现审查，修复"声称完成但生产路径未生效"的精度核心。已完成第一/二批 + P6-eval 并 push（代码 `4409eb4` + docs `a8eba71`，本地=origin）：P0 精度链路（四轮回填 candidate / 裁决映射属性名 / D5 confidence 同步）、P1 Java call_graph 注册、P4 语言收敛 + CodeQL 类型、P2-前置 CPG entry/callee/sink 连通、P2-Go go_builder+provider（**三语言 py/go/java CPG 可达性端到端通**）、P6-eval（critical/high 防漏报）。全 test_l3 **2195 passed / 23 既有失败（零回归）**。
+- 第三批待做：P5 续扫完整（阶段命名统一 / resume 恢复实例状态 / `_finalize_results` upsert 去重 / `pause_scan` 接 revoke）；P7 可靠性（git clone 超时 / baseline 覆盖判定 / 增量 import 拼接 / budget 排序）；P3 可达性质量（需条件求值）；P6 对抗接线（gatekeeper / min_evidence_dimensions / LIKELY→MEDIUM / 1926 行 enhanced 层去留）。
+- 关键约束：web-only（CLI 已移除）、放弃 C/C++ 聚焦 py/go/java、安全组降级（单用户内网）、本机无 CodeQL（保引擎降级路径）。
+- 环境：本机 1.9GB 内存，无 CodeQL；测试用 sqlite；LLM 走 GLM 兼容端点。
+- 上一个目标：Phase 17 — AI 与静态最优结合的深化（status: completed，commit `fca0c22`；其"全部 done"结论已被 Phase 18 审查修正——多项功能实际未生效，正是 Phase 18 要接通的）。

@@ -14,6 +14,7 @@ from src.web.services.phase_manager import (
     VALID_TRANSITIONS,
 )
 from src.web.models.scan import Scan, ScanPhase, ScanStatus, ScanType, PhaseName
+from src.layers.pipeline.phases import SCAN_PHASE_ORDER
 
 
 # ============================================================================
@@ -30,9 +31,12 @@ def mock_async_session_local():
     mock_session.flush = AsyncMock()
     mock_session.refresh = AsyncMock()
 
-    with patch("src.web.models.database.AsyncSessionLocal", return_value=mock_session):
-        with patch("src.web.services.phase_manager.AsyncSessionLocal", return_value=mock_session):
-            yield mock_session
+    # phase_manager resolves the sessionmaker via get_session_local() at call
+    # time (it does not import AsyncSessionLocal directly), so patch the
+    # factory function rather than a nonexistent module attribute.
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+    with patch("src.web.services.phase_manager.get_session_local", return_value=mock_sessionmaker):
+        yield mock_session
 
 
 @pytest.fixture
@@ -409,13 +413,13 @@ class TestGetNextPhase:
         """Test getting next pending phase."""
         manager = PhaseManager()
 
-        # Mock phases - L1_preparation completed, L1_attack_surface pending
+        # Mock phases - l1_preparation completed, source_preparation pending
         phase1 = MagicMock(spec=ScanPhase)
-        phase1.phase_name = PhaseName.L1_PREPARATION
+        phase1.phase_name = SCAN_PHASE_ORDER[0].value  # l1_preparation
         phase1.status = PhaseStatus.COMPLETED.value
 
         phase2 = MagicMock(spec=ScanPhase)
-        phase2.phase_name = PhaseName.L1_ATTACK_SURFACE
+        phase2.phase_name = SCAN_PHASE_ORDER[1].value  # source_preparation
         phase2.status = PhaseStatus.PENDING.value
 
         with patch.object(
@@ -426,7 +430,7 @@ class TestGetNextPhase:
             ):
                 next_phase = await manager.get_next_phase(scan_id=1)
 
-        assert next_phase == PhaseName.L1_ATTACK_SURFACE
+        assert next_phase == SCAN_PHASE_ORDER[1].value
 
     @pytest.mark.asyncio
     async def test_get_next_phase_all_complete(self, mock_scan):
@@ -457,11 +461,11 @@ class TestGetNextPhase:
         manager = PhaseManager()
 
         phase1 = MagicMock(spec=ScanPhase)
-        phase1.phase_name = PhaseName.L1_PREPARATION
+        phase1.phase_name = SCAN_PHASE_ORDER[0].value  # l1_preparation
         phase1.status = PhaseStatus.COMPLETED.value
 
         phase2 = MagicMock(spec=ScanPhase)
-        phase2.phase_name = PhaseName.L1_ATTACK_SURFACE
+        phase2.phase_name = SCAN_PHASE_ORDER[1].value  # source_preparation
         phase2.status = PhaseStatus.FAILED.value
 
         with patch.object(
@@ -472,7 +476,7 @@ class TestGetNextPhase:
             ):
                 next_phase = await manager.get_next_phase(scan_id=1)
 
-        assert next_phase == PhaseName.L1_ATTACK_SURFACE  # Return failed phase for retry
+        assert next_phase == SCAN_PHASE_ORDER[1].value  # Return failed phase for retry
 
 
 # ============================================================================
@@ -590,7 +594,13 @@ class TestConstants:
         assert PhaseStatus.COMPLETED in VALID_TRANSITIONS[PhaseStatus.RUNNING]
 
     def test_phase_order(self):
-        """Test PHASE_ORDER is correctly defined."""
+        """Test PHASE_ORDER is correctly defined (canonical ScanPhase order)."""
         assert ScanType.FULL in PHASE_ORDER
+        assert ScanType.BASE in PHASE_ORDER
         assert ScanType.INCREMENTAL in PHASE_ORDER
-        assert len(PHASE_ORDER[ScanType.INCREMENTAL]) < len(PHASE_ORDER[ScanType.FULL])
+        # All scan types now use the same canonical 10-phase ScanPhase order
+        # (Phase 18/P5-A5); optional phases stay pending and are skipped via
+        # the pipeline's skip_when.
+        expected = [p.value for p in SCAN_PHASE_ORDER]
+        for scan_type in (ScanType.FULL, ScanType.BASE, ScanType.INCREMENTAL):
+            assert PHASE_ORDER[scan_type] == expected

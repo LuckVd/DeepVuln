@@ -55,3 +55,36 @@ class PhaseSpec:
     checkpoint_key: str | None = None
     # Builds the progress "complete" payload from context.
     summary: Callable[["ScanContext"], dict[str, Any]] | None = None
+
+
+# Canonical execution order of all scan phases. Single source of truth for
+# resume-skip computation (checkpoint_service.get_resume_strategy),
+# PhaseManager.PHASE_ORDER, and ScanExecutor._create_initial_phases — all of
+# which previously used the legacy PhaseName enum and never matched the
+# pipeline's actual phase values (Phase 18/P5-A5).
+SCAN_PHASE_ORDER: list[ScanPhase] = [
+    ScanPhase.L1_PREPARATION,
+    ScanPhase.SOURCE_PREPARATION,
+    ScanPhase.ENGINE_SELECTION,
+    ScanPhase.ENGINE_EXECUTION,
+    ScanPhase.EXPLOITABILITY_VERIFICATION,
+    ScanPhase.LOGIC_VULN_DISCOVERY,
+    ScanPhase.ADJUDICATION,
+    ScanPhase.ADVERSARIAL,
+    ScanPhase.RESULT_MERGE,
+    ScanPhase.TOKEN_STATS,
+]
+
+
+# Read-only compatibility map: legacy CLI-era PhaseName values (CamelCase,
+# 7 phases) → canonical ScanPhase values. Lets resume reason about checkpoints
+# written before the PhaseName→ScanPhase convergence without a DB migration.
+_LEGACY_PHASE_ALIASES: dict[str, str] = {
+    "L1_preparation": ScanPhase.L1_PREPARATION.value,
+    "L1_attack_surface": ScanPhase.SOURCE_PREPARATION.value,
+    "L2_semgrep": ScanPhase.ENGINE_EXECUTION.value,
+    "L2_codeql": ScanPhase.ENGINE_EXECUTION.value,
+    "L3_agent": ScanPhase.ENGINE_EXECUTION.value,
+    "L3_adjudication": ScanPhase.ADJUDICATION.value,
+    "report_generation": ScanPhase.RESULT_MERGE.value,
+}

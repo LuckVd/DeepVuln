@@ -314,85 +314,11 @@ class ConfidenceScorer:
         return descriptions.get(key, key)
 
 
-def calculate_finding_confidence(
-    finding: Any,
-    verification_results: dict[str, bool] | None = None,
-) -> ConfidenceReport:
-    """
-    Calculate confidence score for a Finding object.
-
-    Args:
-        finding: Finding object with evidence_strength, related_engines, etc.
-        verification_results: Optional dynamic verification results
-
-    Returns:
-        ConfidenceReport with score and recommendations
-    """
-    scorer = ConfidenceScorer()
-
-    # Extract static analysis factors from finding
-    static_factors: dict[str, bool] = {}
-
-    # Check for dangerous pattern (has finding with severity)
-    if hasattr(finding, "severity"):
-        severity = finding.severity.value if hasattr(finding.severity, "value") else finding.severity
-        if severity in ["critical", "high"]:
-            static_factors["dangerous_pattern"] = True
-
-    # Check for traceable dataflow
-    if hasattr(finding, "taint_analysis") and finding.taint_analysis:
-        static_factors["traceable_dataflow"] = True
-
-    # Check for no sanitization
-    if hasattr(finding, "metadata") and finding.metadata:
-        if not finding.metadata.get("sanitizer_found"):
-            static_factors["no_sanitization"] = True
-
-    # Check for cross-engine validation
-    if hasattr(finding, "related_engines") and len(finding.related_engines) >= 2:
-        static_factors["cross_engine_validation"] = True
-
-    # Check for AST-level match
-    if hasattr(finding, "ast_hash") and finding.ast_hash:
-        static_factors["ast_level_match"] = True
-
-    scorer.add_static_analysis(static_factors)
-
-    # Add verification results if provided
-    if verification_results:
-        scorer.add_dynamic_verification(verification_results)
-
-    # Apply uncertainty factors
-    uncertainty_factors: dict[str, bool] = {}
-
-    # Check if single engine only
-    if hasattr(finding, "related_engines") and len(finding.related_engines) <= 1:
-        uncertainty_factors["single_engine_only"] = True
-
-    # Check if requires authentication
-    if hasattr(finding, "metadata") and finding.metadata:
-        if finding.metadata.get("auth_required"):
-            uncertainty_factors["requires_auth"] = True
-
-    # Check for speculative evidence
-    if hasattr(finding, "evidence_strength"):
-        strength = finding.evidence_strength
-        if hasattr(strength, "value"):
-            strength = strength.value
-        if strength == "speculative":
-            uncertainty_factors["speculative_evidence"] = True
-
-    scorer.apply_uncertainty(uncertainty_factors)
-
-    return scorer.generate_report()
-
-
 __all__ = [
     "ConfidenceLevel",
     "ConfidenceFactor",
     "ConfidenceReport",
     "ConfidenceScorer",
-    "calculate_finding_confidence",
     "BASE_SCORES",
     "VERIFICATION_BONUSES",
     "UNCERTAINTY_PENALTIES",

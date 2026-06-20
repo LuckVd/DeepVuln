@@ -13,8 +13,9 @@ import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.layers.l3_analysis.engines.base import BaseEngine
@@ -1712,18 +1713,35 @@ class ScanOrchestrator:
                 finding.metadata["source_engine"] = engine_name
                 all_findings.append(finding)
 
-        # Deduplication is handled by _run_adjudication(), skip here
-        unique_findings = all_findings
-        duplicates_removed = 0
-
-        if duplicates_removed > 0:
-            logger.info(
-                f"Scan {self.scan_id}: Removed {duplicates_removed} duplicate findings"
-            )
-
-        # Save to database
+        # Semantic cross-finding deduplication happened earlier in
+        # _run_adjudication(); this block only guards persistence. A resumed
+        # scan re-runs _finalize_results, so we must not re-insert findings
+        # already stored for this scan, and we dedup within this batch too.
+        # Key: (vuln_type, file_path, line_start) — matches how FindingModel is
+        # populated below (vuln_type = rule_id or type).
         async with self.db_session_factory() as db:
-            for finding_data in unique_findings:
+            existing_keys: set[tuple] = set()
+            existing_stmt = select(
+                FindingModel.vuln_type,
+                FindingModel.file_path,
+                FindingModel.line_start,
+            ).where(FindingModel.scan_id == self.scan_id)
+            for row in (await db.execute(existing_stmt)).all():
+                existing_keys.add((row[0], row[1], row[2]))
+
+            saved_count = 0
+            skipped_duplicates = 0
+            for finding_data in all_findings:
+                key = (
+                    finding_data.rule_id or finding_data.type.value,
+                    finding_data.location.file,
+                    finding_data.location.line,
+                )
+                if key in existing_keys:
+                    skipped_duplicates += 1
+                    continue
+                existing_keys.add(key)
+
                 # Derive finding status from adversarial verification and adjudication
                 finding_status = self._derive_finding_status(finding_data)
 
@@ -1745,12 +1763,21 @@ class ScanOrchestrator:
                     extra_metadata=finding_data.metadata,
                 )
                 db.add(finding)
+                saved_count += 1
 
             await db.commit()
 
-        self.total_findings = len(unique_findings)
+            if skipped_duplicates:
+                logger.info(
+                    f"Scan {self.scan_id}: Skipped {skipped_duplicates} duplicate "
+                    f"findings on save (resume-safe)"
+                )
+
+        # Unique findings for this scan (already-persisted + newly saved).
+        self.total_findings = len(existing_keys)
         logger.info(
-            f"Scan {self.scan_id}: Saved {self.total_findings} findings to database"
+            f"Scan {self.scan_id}: Saved {saved_count} findings to database "
+            f"({self.total_findings} total unique)"
         )
 
     def _derive_finding_status(self, finding_data: Finding) -> str:
@@ -1804,32 +1831,6 @@ class ScanOrchestrator:
 
         # 3. Default pending
         return "pending"
-
-    def _deduplicate_findings(
-        self, findings: List[Finding]
-    ) -> List[Finding]:
-        """
-        Remove duplicate findings based on location and rule.
-
-        Deduplication key: (rule_id, file_path, line_number)
-
-        Reference: ScanResult.deduplicate_findings() in models.py
-        """
-        seen = set()
-        unique_findings = []
-
-        for finding in findings:
-            key = (
-                finding.rule_id,
-                finding.location.file,
-                finding.location.line,
-            )
-
-            if key not in seen:
-                seen.add(key)
-                unique_findings.append(finding)
-
-        return unique_findings
 
     # ========================================================================
     # Resource Cleanup

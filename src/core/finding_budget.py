@@ -248,6 +248,23 @@ class FindingBudget:
             return str(severity).lower()
         return "info"
 
+    # Severity ranking for budget truncation (higher = kept first).
+    _SEVERITY_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
+
+    def _sort_key(self, finding: Any) -> tuple[float, int]:
+        """Rank findings so budget truncation drops the lowest-value ones,
+        not arbitrary first-N (Phase 18/P7-C7). Prefer final_score (post-
+        adjudication, if set); else confidence; severity breaks ties.
+        """
+        final_score = getattr(finding, "final_score", None)
+        score = (
+            float(final_score)
+            if final_score is not None
+            else float(getattr(finding, "confidence", 0.0) or 0.0)
+        )
+        severity_rank = self._SEVERITY_RANK.get(self._get_severity(finding), 0)
+        return (score, severity_rank)
+
     def _is_generic_rule(self, finding: Any) -> bool:
         """Check if finding is from a generic rule."""
         rule_id = self._get_rule_id(finding).lower()
@@ -327,8 +344,9 @@ class FindingBudget:
 
         for rule_id, findings_list in rule_counts.items():
             if len(findings_list) > self.max_per_rule:
-                # Keep first max_per_rule findings
-                kept_by_rule[rule_id] = findings_list[: self.max_per_rule]
+                # Keep the highest-ranked max_per_rule findings (Phase 18/P7-C7)
+                ranked = sorted(findings_list, key=self._sort_key, reverse=True)
+                kept_by_rule[rule_id] = ranked[: self.max_per_rule]
                 dropped = len(findings_list) - self.max_per_rule
                 result.triggered_rules.append(rule_id)
                 result.per_rule_dropped[rule_id] = dropped
@@ -363,8 +381,9 @@ class FindingBudget:
         filtered = []
         for file_path, findings_list in file_counts.items():
             if len(findings_list) > self.max_per_file:
-                # Keep first max_per_file findings
-                filtered.extend(findings_list[: self.max_per_file])
+                # Keep the highest-ranked max_per_file findings (Phase 18/P7-C7)
+                ranked = sorted(findings_list, key=self._sort_key, reverse=True)
+                filtered.extend(ranked[: self.max_per_file])
                 dropped = len(findings_list) - self.max_per_file
                 result.triggered_files.append(file_path)
                 result.per_file_dropped[file_path] = dropped
@@ -384,9 +403,9 @@ class FindingBudget:
     ) -> list[Any]:
         """Apply total project limit."""
         if len(findings) > self.max_total:
-            # Keep first max_total findings
+            # Keep the highest-ranked max_total findings (Phase 18/P7-C7)
             original_len = len(findings)
-            findings = findings[: self.max_total]
+            findings = sorted(findings, key=self._sort_key, reverse=True)[: self.max_total]
             dropped = original_len - self.max_total
             self.logger.warning(
                 f"Total limit exceeded: {original_len} findings, "

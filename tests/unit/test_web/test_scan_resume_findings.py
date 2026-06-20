@@ -7,7 +7,7 @@ serialize/restore helpers, the WebCheckpointSink payload injection, and the
 checkpoint-driven state restore.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -203,3 +203,68 @@ class TestRestoreStateFromCheckpoint:
         ckpt = CheckpointData(scan_id=1, current_phase=None, resume_data={})
         orch._restore_state_from_checkpoint(ckpt)
         assert orch.scan_results == {}
+
+
+class TestFinalizeResultsResumeSafeDedup:
+    """Phase 18/P5-A5: _finalize_results must not re-insert findings already
+    stored for the scan (a resume re-runs finalize), and must dedup within a
+    batch. Storage-level guard; semantic dedup still happens in adjudication.
+    """
+
+    @staticmethod
+    def _fake_session(existing_rows):
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+        mock_session.add = MagicMock()
+        mock_session.commit = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.all.return_value = [tuple(r) for r in existing_rows]
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        return mock_session
+
+    @pytest.mark.asyncio
+    async def test_skips_findings_already_in_db(self) -> None:
+        orch = _orch()
+        orch.scan_results = {
+            "semgrep": ScanResult(
+                source_path="/tmp",
+                engine="semgrep",
+                findings=[
+                    _finding(id="A", rule_id="rule-x", location=CodeLocation(file="app.py", line=12, function="f")),
+                    _finding(id="B", rule_id="rule-y", location=CodeLocation(file="app.py", line=12, function="f")),
+                    _finding(id="C", rule_id="rule-z", location=CodeLocation(file="other.py", line=5, function="g")),
+                ],
+                total_findings=3,
+            )
+        }
+        # DB already has rule-x @ app.py:12 (the "A" finding) from a prior run.
+        mock_session = self._fake_session([("rule-x", "app.py", 12)])
+        orch.db_session_factory = lambda: mock_session
+
+        await orch._finalize_results()
+
+        added = [c.args[0].vuln_type for c in mock_session.add.call_args_list]
+        assert sorted(added) == ["rule-y", "rule-z"]
+        assert "rule-x" not in added
+
+    @pytest.mark.asyncio
+    async def test_dedups_within_batch(self) -> None:
+        orch = _orch()
+        orch.scan_results = {
+            "semgrep": ScanResult(
+                source_path="/tmp",
+                engine="semgrep",
+                findings=[
+                    _finding(id="A", rule_id="rule-x", location=CodeLocation(file="app.py", line=12, function="f")),
+                    _finding(id="A2", rule_id="rule-x", location=CodeLocation(file="app.py", line=12, function="f")),
+                ],
+                total_findings=2,
+            )
+        }
+        mock_session = self._fake_session([])  # DB empty
+        orch.db_session_factory = lambda: mock_session
+
+        await orch._finalize_results()
+
+        assert mock_session.add.call_count == 1

@@ -30,12 +30,14 @@ test_scope:
   - "P2: Go真源码 attack-path 端到端"
   - "P3: 嵌套sink(if/for体内)恒可达修复的负样本 + if False:eval 判False"
   - "横切: D3 Celery/E5 GLM/checkpoint/CodeQL mock 测试升级为真实或如实标注"
-test_result: "第一批(P0-A1/A2/A3+P1+P4-C1/C2)完成: 全 test_l3 2189 passed/24 既有失败(零回归), 12 新测试绿; P1 暴露 CPG Java entry 缺口归 P2"
+test_result: "第一/二批+P6-eval 已 push(4ee490b/6b0f290/4b15224/4409eb4,docs a8eba71)。第三批 P5 续扫完整性已完成(未commit): H2a pause_scan 接 revoke(防双任务并发)+ H2b clone kill_after_timeout(防挂死;查证 GitPython 用 kill_after_timeout 非 timeout)+ task6 _finalize_results DB 去重(resume 防翻倍)+ task7 阶段命名统一收敛 ScanPhase(get_resume_strategy 改 ScanPhase 序 + _LEGACY_PHASE_ALIASES 兼容层修复 resume 全量重跑根因;PhaseManager.PHASE_ORDER/_create_initial_phases 改10阶段消除 scan_phases 双套行;broadcaster 补 logic_vuln_discovery 权重;PhaseName deprecation)。验证: 全 test_l3 2195 passed/23 既有失败(零回归); test_web test_checkpoint_service 27/test_phase_manager 26/test_pause_resume 13/test_scan_resume_findings 12/test_git_operations 17 全绿。P8 修复: 3 个 web 测试文件从 setup ERROR(fixture patch 不存在的 AsyncSessionLocal)→ 全绿;删 4 个 CLIAdapter 死测试。剩: P7 可靠性 / P3 可达性质量 / P6 对抗接线 待做。"
 new_files:
-  - "(待实施) src/layers/l3_analysis/call_graph/builders/go_builder.py (P2)"
-  - "(待实施) src/layers/l3_analysis/engines/ast_engine/cpg/providers/go_provider.py (P2)"
+  - "src/layers/l3_analysis/call_graph/builders/go_builder.py (P2-Go, 已实施 4b15224)"
+  - "src/layers/l3_analysis/engines/ast_engine/cpg/providers/go_provider.py (P2-Go, 已实施 4b15224)"
 modified_files:
-  - "(待实施) 第一批: rounds/round_two.py,round_three.py / scan_orchestrator.py / round_four.py,final_score.py / call_graph/analyzer.py / ast_engine.py / codeql/executor.py"
+  - "第一批(4ee490b): rounds/round_two.py,round_three.py / src/web/services/scan_orchestrator.py / rounds/round_four.py / scoring / call_graph/analyzer.py / engines/ast_engine/ast_engine.py / engines/codeql/executor.py"
+  - "第二批(6b0f290+4b15224): engines/ast_engine/cpg/models.py / call_graph/builders/base.py / path_finder/finder.py + go_builder.py(新)/cpg/providers/go_provider.py(新)/cpg/path_provider.py / call_graph/analyzer.py"
+  - "P6-eval(4409eb4): rounds/round_four.py"
 security_blockers:
   - "安全组降级(单用户内网,用户2026-06-20确认): IDOR无owner / WS无认证 / 源路径无白名单 / auth/seed未授权+弱口令 / 限速默认关 / APIkey明文 / CSV注入 / git注入 / JWT无失效 — 暂缓,待公网/多用户时整体补多租户"
 dead_code_actions:
