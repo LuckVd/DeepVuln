@@ -802,6 +802,45 @@ class TestCandidateExploitabilityMapping:
         assert meta["confidence_level"] == "low"
 
 
+class TestSeverityFloorP6:
+    """Phase 18/P6: a critical/high finding is never auto-dismissed as
+    NOT_EXPLOITABLE (a strong negative = a miss). When the finding's
+    location.function doesn't match the call graph, taint/reachability trace
+    fails and multi-dim scoring collapses to NOT_EXPLOITABLE even for a real
+    RCE — floor it to UNLIKELY so it stays for human review."""
+
+    @pytest.mark.asyncio
+    async def test_critical_not_exploitable_floored_to_unlikely(self, tmp_path):
+        app = tmp_path / "app.py"
+        app.write_text(
+            "from flask import Flask, request\n"
+            "app = Flask(__name__)\n"
+            "@app.route('/r')\n"
+            "def run_code():\n"
+            "    return eval(request.args.get('c', ''))\n"
+        )
+        executor = RoundFourExecutor(source_path=tmp_path)
+        # A function name absent from the call graph → trace fails → multi-dim
+        # collapses to NOT_EXPLOITABLE without the severity floor.
+        finding = Finding(
+            id="f-floor",
+            severity=SeverityLevel.CRITICAL,
+            title="eval RCE",
+            description="d",
+            type=FindingType.VULNERABILITY,
+            location=CodeLocation(file="app.py", line=4, function="nonexistent"),
+            source="agent",
+        )
+        candidate = VulnerabilityCandidate(
+            id="c-floor", finding=finding, discovered_in_round=1,
+        )
+
+        result = await executor._verify_exploitability(candidate)
+
+        assert result.status != ExploitabilityStatus.NOT_EXPLOITABLE
+        assert result.status == ExploitabilityStatus.UNLIKELY
+
+
 class TestSourceType:
     """Tests for SourceType enum."""
 

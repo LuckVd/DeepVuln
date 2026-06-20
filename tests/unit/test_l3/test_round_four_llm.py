@@ -179,7 +179,7 @@ class TestRoundFourExecutorLLM:
             id="test-001",
             rule_id="sql-injection",
             type="vulnerability",
-            severity=SeverityLevel.HIGH,
+            severity=SeverityLevel.MEDIUM,  # Phase 18/P6: MEDIUM so the NOT_EXPLOITABLE assertions below aren't overridden by the critical/high severity floor
             confidence=0.7,
             title="SQL Injection in query",
             description="Potential SQL injection",

@@ -30,6 +30,24 @@ TDD 推进，全 test_l3 **2189 passed / 24 既有失败（零回归）**，12 �
 
 ---
 
+## 第二批实施记录（2026-06-20，P2-前置 + P2-Go 完成 ✅，三语言可达性接通）
+
+TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归）**。三语言（py/go/java）CPG attack-path 全部端到端通（`reaches_sink=True`）——此前 JS/Java/Go 一律 0 paths。
+
+| commit | 内容 |
+|---|---|
+| `6b0f290` P2-前置 | CPG entry/callee/sink 连通，Java 端到端通（0→2 paths）。三处通用修复：① `cpg/models.py merge_call_graph` 把 `CallNode.is_entry_point/entry_point_type` 写入 CPG call_function metadata（finder 靠真实 HTTP/RPC/main 入口而非脆弱的函数名 pattern）② `base.build_file_graph` 加边前 resolve callee_id 到实际 node（`_create_callee_id` 的 `Unknown:` 前缀致 calls 边全丢→0 edges）③ `finder._find_sinks` 用 `re.search`（pattern 是正则 alternation 如 `exec|getRuntime`，子串匹配永远 False→sinks 空）。顺手修了 `test_supports_language` 既有矛盾。 |
+| `4b15224` P2-Go | 新建 `go_builder.py`（func/method declaration + call expression[identifier/selector/chain] + entry 检测[main/init/http handler 签名]）+ `go_provider.py` + path_provider/analyzer 注册。Go 端到端通（0→1 path）。 |
+
+**⚠️ P3（嵌套 sink 可达性质量）评估后建议归第三批**：
+- "嵌套 sink 判不可达"本质需要**条件求值**（识别 `if False` 死分支），非 `identify_basic_blocks` 递归能解决——CFG 是结构可达（边可达），不做条件求值。
+- "`_verify_cfg_reachability` 兜底默认 True 改保守"有**回归风险**：刚接通的 py/go/java `reaches_sink=True` 部分依赖兜底 True，改保守会让它们变 False（漏报）。
+- P3 是精度改进（防误报方向），非功能阻断；建议与 P5/P7 在第三批一起深做（含条件求值设计）。
+
+**改动文件**：`cpg/models.py` / `call_graph/builders/base.py` / `path_finder/finder.py`（P2-前置）+ `go_builder.py`(新) / `go_provider.py`(新) / `path_provider.py` / `analyzer.py`（P2-Go）+ 测试。**第一批(`4ee490b`)与本批(`6b0f290`/`4b15224`)均已 commit**。
+
+---
+
 ## 需求背景
 
 2026-06-20 对全量代码做了 8 路并行实现审查。结论：**骨架完整、纯算法层扎实**（CFG 建图、evidence_calculator、semgrep 真集成、taint_tracker、威胁情报均为真实可用实现），但**精度核心多数未真正生效**。根因集中在三类：**(a) 重构/接通改了一半**（搬了字段、接了入口，调用点和下游没跟着改全）；**(b) 跨子系统协议没对齐**（新旧阶段命名、语言 builder 注册）；**(c) 端到端测试是 mock**（D3 Celery / E5 GLM / checkpoint 持久化 / CodeQL 全是 Mock/stub，所以这些断裂没被测出来）。

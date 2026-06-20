@@ -996,6 +996,26 @@ class RoundFourExecutor:
                     f"LLM assessment result: {status.value} (confidence: {confidence})"
                 )
 
+        # Phase 18/P6: severity floor — a critical/high finding must never be
+        # auto-dismissed as NOT_EXPLOITABLE. NOT_EXPLOITABLE is a strong negative
+        # (a miss). When static evidence is thin (no CodeQL, or the finding's
+        # location.function doesn't match the call graph so taint/reachability
+        # trace fails), multi-dim scoring can collapse to NOT_EXPLOITABLE even
+        # for a confirmed RCE. Downgrade to UNLIKELY so it stays for human review.
+        # Applied before downstream severity/confidence calcs so they see the fix.
+        if status == ExploitabilityStatus.NOT_EXPLOITABLE:
+            sev = (
+                finding.severity.value
+                if hasattr(finding.severity, "value")
+                else str(finding.severity)
+            )
+            if sev in ("critical", "high"):
+                status = ExploitabilityStatus.UNLIKELY
+                reasoning = (reasoning + " | " if reasoning else "") + (
+                    "Severity floor (P6): critical/high finding not auto-dismissed "
+                    "as not-exploitable despite thin static evidence — kept for review."
+                )
+
         # Determine severity adjustment
         severity_adjustment = self._calculate_severity_adjustment(
             original_severity=finding.severity,
