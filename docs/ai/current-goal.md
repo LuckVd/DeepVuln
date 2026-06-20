@@ -1,9 +1,18 @@
 # Current Goal
 
-> **状态**: 规划就绪 🚧（创建于 2026-06-20）
+> **状态**: 进行中 🚧 — 第一批 + 第二批 + P6-eval 已完成并 push（HEAD `4409eb4`）；**第三批待做（P5/P7/P3/P6-对抗）**
 > **目标**: Phase 18 — 精度链路接通与多语言可达性补齐（基于全量实现审查）
 > **Goal ID**: phase18-precision-link-reachability
-> **创建日期**: 2026-06-20
+> **创建日期**: 2026-06-20（最近更新：2026-06-20 push 后）
+>
+> **📊 进度快照（新会话先看这个）**：
+> - ✅ **第一批**（`4ee490b`）：P0-A1 四轮回填 candidate / P0-A2 裁决映射属性名 / P0-A3 D5 同步 confidence / P1 Java call_graph 注册 / P4-C1 AST 语言收敛 / P4-C2 CodeQL 类型
+> - ✅ **第二批**（`6b0f290`+`4b15224`）：P2-前置 CPG entry/callee/sink 连通（Java 端到端通）/ P2-Go go_builder+provider（Go 端到端通）——**三语言 py/go/java CPG 可达性全部接通**
+> - ✅ **P6-eval**（`4409eb4`）：round_four severity 保底，critical/high 不再被判 not_exploitable（防漏报）
+> - ✅ **已 push** `origin/feat/static-evidence-grounding`（fca0c22..4409eb4），工作区干净
+> - ⏳ **第三批待做**：P5 续扫完整 / P7 可靠性 / P3 可达性质量（需条件求值）/ P6 对抗接线 —— 详见文末"接力指南 §3"
+> - ⚠️ **治本（P6-rootcause）已评估回退**：taint→None 正确但与 round_four_llm/codeql 测试架构冲突（8 回归），保底已解决核心，归后续重构测试架构时做
+> - 全 test_l3 始终 **23 既有失败、零回归**（既有失败：verification_gatekeeper/deduplicator-async/semgrep 等，与本 goal 无关）
 >
 > **🧭 冷启动 TL;DR（2026-06-20）**：Phase 17 此前记录为"全部 done"，但 **2026-06-20 全量实现审查**（8 路并行审计，12 万行）发现**多个"声称完成但生产路径上未生效"的核心功能**：① 四轮审计实际**只跑 Round1**（Round2/3 漏调 `add_candidate`，连锁 skip Round3/4）；② 裁决结果映射**属性名错**，`scan_orchestrator.py:1377,1381` 读 `candidate.exploitability/confidence_score`（对象无此属性），导致 exploitability 全丢、**Web 端 confidence 恒为 0**；③ **D5 打分只统一一半**（`finding.confidence_score` 设了，但驱动排序的 `finding.confidence` 没被接管）；④ **CPG 可达性 JS/Java/Go 产 0 路径**（`call_graph/analyzer.py:55` 只注册了 Python builder）且嵌套 sink 恒判可达；⑤ **D3 续扫 resume 失效**（新旧双阶段命名对不上 + 实例状态未恢复 + 落库无去重）；⑥ **pause 假停**（不 revoke Celery）；⑦ **~2000 行对抗增强层是死代码**（enhanced/convergence/strategy_library/gatekeeper 未接线）。
 >
@@ -245,14 +254,16 @@ ruff check src/ --select F
 - **安全组降级**（单用户内网），别在 Phase 18 里花精力修 IDOR/WS 除非用户改主意。
 - LLM 用 GLM Coding Plan 端点；本机无 CodeQL，引擎降级路径要保。
 
-### 3. 第一批动手清单（P0+P1+P4）
-| 项 | 文件:锚点 | 动作 |
-|---|---|---|
-| P0-A1 | `rounds/round_two.py` / `round_three.py` | 每个 phase 开头 `round_result.add_candidate(c)` 回填传入 candidates |
-| P0-A2 | `scan_orchestrator.py:1377,1381` | 改读 `candidate.finding.exploitability` / `candidate.finding.confidence_score` |
-| P0-A3 | `round_four.py` + `final_score.py:310` | 同步 `finding.confidence`（或 final_score 用 `confidence_score/100`） |
-| P1 | `call_graph/analyzer.py:55` | builders 加 `JavaCallGraphBuilder()`（已实现的类） |
-| P4-C1 | `ast_engine.py:39` | `supported_languages` 收敛 py/go/java；不支持语言返回 skipped 非 success+0 |
-| P4-C2 | `codeql/executor.py:332` | `_create_taint_source/_sink` 参数类型改 `PathLocation \| None` |
+### 3. 当前进度 + 第三批起点
+**第一/二批 + P6 已完成（见顶部进度快照 + 各 commit）**。新会话从**第三批**开始，建议顺序与锚点：
+
+| 项 | 文件:锚点 | 动作 | 工作量 |
+|---|---|---|---|
+| **P5 续扫** | `pipeline/phases.py`(ScanPhase) vs `models/scan.py:31`(PhaseName) / `scan_orchestrator.py:1731` / `scan_executor.py:486` | 统一阶段命名；resume 恢复 tech_stack 等实例状态；`_finalize_results` 按 (scan_id,rule_id,file,line) upsert 去重；`pause_scan` 接 `revoke(terminate=True)` | M-L |
+| **P7 可靠性** | `git_operations.py:122` / `baseline_manager.py:428` / `dependency_graph.py:246` / `finding_budget.py` | git clone 传 clone_timeout；baseline 加"是否覆盖"判定；增量 import 拼接；budget 截断前排序 | M |
+| **P3 可达性质量** | `cfg/builders/*_cfg.py identify_basic_blocks` + `finder.py _verify_cfg_reachability` | ⚠️ 需**条件求值**（if False 死分支），非 basic_blocks 递归能解决；兜底改保守有回归风险（破坏刚接通的 reaches_sink=True）。深做前先设计 | M |
+| **P6 对抗接线** | `verification_gatekeeper.py` / `scoring/models.py:154` / `round_three.py:309` | gatekeeper 替换 adversarial_service 手写版；min_evidence_dimensions 提升；LIKELY→MEDIUM；定 enhanced 层去留 | M |
+
+**开工第一步**：先跑回归确认基线 `python3 -m pytest tests/unit/test_l3 -q`（期望 **2195 passed / 23 既有失败**），再按 TDD 推进第三批。
 
 > **上一目标**：Phase 17 — AI 与静态最优结合的深化（status: completed，commit `fca0c22`）。其"全部 done"的结论已被本次审查修正——多项功能实际未生效，正是本 Phase 18 要接通的。
