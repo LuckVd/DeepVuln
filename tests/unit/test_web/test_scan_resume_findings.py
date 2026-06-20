@@ -66,6 +66,20 @@ def _scan_results() -> dict[str, ScanResult]:
     return {"semgrep": semgrep, "agent": agent}
 
 
+def _empty_result(engine: str) -> ScanResult:
+    """Canned ScanResult for mocking engine runs in _execute_engines tests."""
+    return ScanResult(source_path="/tmp", engine=engine, findings=[], total_findings=0)
+
+
+def _async_progress() -> MagicMock:
+    """progress_callback with awaitable engine hooks (MagicMock methods aren't awaitable)."""
+    cb = MagicMock()
+    cb.on_engine_start = AsyncMock()
+    cb.on_engine_complete = AsyncMock()
+    cb.on_engine_failed = AsyncMock()
+    return cb
+
+
 class TestSerializeRestoreRoundTrip:
     def test_roundtrip_preserves_engines_and_counts(self) -> None:
         orch = _orch()
@@ -177,7 +191,11 @@ class TestWebCheckpointSinkSave:
         await sink.save("engine_execution", {"findings": 5})
         # Original summary key intact; resume_data added alongside.
         assert captured["data"]["findings"] == 5
-        assert captured["data"]["resume_data"] == {"scan_results": []}
+        # P7-C6: resume_data now carries scan_results + completed_engines.
+        assert captured["data"]["resume_data"] == {
+            "scan_results": [],
+            "completed_engines": [],
+        }
 
 
 class TestRestoreStateFromCheckpoint:
@@ -268,3 +286,94 @@ class TestFinalizeResultsResumeSafeDedup:
         await orch._finalize_results()
 
         assert mock_session.add.call_count == 1
+
+
+class TestEngineLevelCheckpoint:
+    """Phase 18/P7-C6: per-engine incremental checkpoint within engine_execution.
+
+    A crash mid-engine-execution must let resume skip engines that already
+    finished (especially expensive CodeQL) instead of re-running the whole
+    phase. ``completed_engines`` is persisted into resume_data as each engine
+    finishes and restored on resume (intersected with restored results, so an
+    engine is never marked completed without its output).
+    """
+
+    def test_restore_completed_engines_from_resume_data(self) -> None:
+        orch = _orch()
+        orch.scan_results = _scan_results()  # semgrep + agent
+        serialized = orch._serialize_scan_results()
+        ckpt = CheckpointData(
+            scan_id=1,
+            current_phase=PhaseName.L3_AGENT,
+            resume_data={
+                "scan_results": serialized,
+                "completed_engines": ["semgrep"],
+            },
+        )
+
+        orch2 = _orch()
+        orch2._restore_state_from_checkpoint(ckpt)
+        # semgrep restored (has result) -> marked completed; agent has a result
+        # but wasn't listed as completed -> not in the set.
+        assert orch2._completed_engines == {"semgrep"}
+        assert set(orch2.scan_results.keys()) == {"semgrep", "agent"}
+
+    def test_completed_engines_intersect_restored_results(self) -> None:
+        """An engine listed completed but with no restored result must NOT be
+        marked completed (avoids 'completed but no output' on resume)."""
+        orch = _orch()
+        ckpt = CheckpointData(
+            scan_id=1,
+            current_phase=None,
+            resume_data={"scan_results": [], "completed_engines": ["codeql", "semgrep"]},
+        )
+        orch._restore_state_from_checkpoint(ckpt)
+        assert orch._completed_engines == set()
+
+    @pytest.mark.asyncio
+    async def test_completed_engine_not_rerun_on_resume(self) -> None:
+        """CodeQL already in _completed_engines -> must not be re-run; other
+        engines still run."""
+        orch = _orch()
+        orch.progress_callback = _async_progress()
+        orch._completed_engines = {"codeql"}
+        orch._save_checkpoint_phase = AsyncMock()
+        orch._run_engine_with_timeout = AsyncMock(return_value=_empty_result("codeql"))
+        orch._run_engine_concurrent = AsyncMock(return_value=_empty_result("semgrep"))
+
+        engines = {"codeql": MagicMock(), "semgrep": MagicMock(), "agent": MagicMock()}
+        await orch._execute_engines(engines)
+
+        # CodeQL was already completed -> NOT re-run.
+        orch._run_engine_with_timeout.assert_not_called()
+        # The concurrent engines still ran.
+        assert orch._run_engine_concurrent.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_engine_checkpoint_written_after_each_engine(self) -> None:
+        """As engines finish, a mid-phase checkpoint is written whose
+        resume_data carries the growing completed_engines set."""
+        orch = _orch()
+        orch.progress_callback = _async_progress()
+        saved: list[tuple[str, dict]] = []
+
+        async def fake_save(phase, data):
+            saved.append((phase, data.get("resume_data", {})))
+
+        orch._save_checkpoint_phase = fake_save  # type: ignore[assignment]
+        orch._run_engine_with_timeout = AsyncMock(return_value=_empty_result("codeql"))
+        orch._run_engine_concurrent = AsyncMock(return_value=_empty_result("semgrep"))
+
+        await orch._execute_engines(
+            {"codeql": MagicMock(), "semgrep": MagicMock(), "agent": MagicMock()}
+        )
+
+        # Every mid-phase save is for the engine_execution phase...
+        assert all(phase == "engine_execution" for phase, _ in saved)
+        # ...and at least one carries completed_engines containing codeql
+        # (the expensive engine — the core value of C6).
+        completed_sets = [rd["completed_engines"] for _, rd in saved if "completed_engines" in rd]
+        assert completed_sets, "no mid-phase checkpoint carried completed_engines"
+        assert any("codeql" in s for s in completed_sets)
+        # By the end, all three engines are recorded as completed.
+        assert set(completed_sets[-1]) == {"codeql", "semgrep", "agent"}

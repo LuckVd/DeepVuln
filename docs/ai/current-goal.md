@@ -1,6 +1,6 @@
 # Current Goal
 
-> **状态**: 进行中 🚧 — 第一/二批 + P6-eval + **第三批 P5 续扫完整性 + P7 可靠性** 已完成并 push（`a9ef21a` + `bc1db1f`，本地=origin=bc1db1f）；**第四批 P6 低风险子项（子项3 LIKELY→MEDIUM + 子项4 删死机械 + 子项5 策略知识注入基础版 prompt）已完成、未提交**；**P6 对抗接线硬骨头（子项1 gatekeeper / 子项2 min_evidence_dimensions）仍留独立会话（用户 2026-06-20 决定）**；剩 C6 引擎级checkpoint / P3 可达性质量 / P6 硬骨头
+> **状态**: 进行中 🚧 — 第一/二批 + P6-eval + 第三批 P5/P7 已 push（`a9ef21a`+`bc1db1f`）；**第四批 P6 低风险子项（子项3/4/5）已提交 `4c293b1`（未 push）**；**第五批 P7-C6 引擎级 checkpoint（Tier1）已完成、未提交**；P6 对抗接线硬骨头（子项1 gatekeeper / 子项2 min_evidence_dimensions）仍留独立会话；剩 P3 可达性质量 / P6 硬骨头
 > **目标**: Phase 18 — 精度链路接通与多语言可达性补齐（基于全量实现审查）
 > **Goal ID**: phase18-precision-link-reachability
 > **创建日期**: 2026-06-20（最近更新：2026-06-20 第三批 P5/P7 push 后）
@@ -75,6 +75,28 @@ TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归�
 **改动文件**：`round_three.py` / `verification/__init__.py` / `verification_gatekeeper.py` / `prompts/adversarial.py`（子项3/4/5）+ 删 `enhanced_adversarial.py`/`convergence.py` + 测试（`test_rounds.py` 追加 / 新建 `test_strategy_library.py`(替 `test_enhanced_adversarial.py`) / 新建 `test_adversarial_strategy_injection.py`）。**未 commit**（遵循不自动提交）。
 
 **测试数学校验**：2200(基线) − 45(删 test_enhanced) + 26(新建 strategy) + 1(子项3) + 4(子项5) = **2186 passed**，既有失败 23 不变，零回归。
+
+---
+
+## 第五批实施记录（2026-06-21，P7-C6 引擎级 checkpoint Tier1 完成 ✅，未提交）
+
+**核心价值**：长扫描在 `engine_execution` 阶段中途崩溃（尤其 CodeQL 跑完、并发引擎跑一半时），resume **跳过已完成的引擎**，不白跑昂贵的 CodeQL。
+
+**比预想低风险**：P5 已建好 `scan_results` 序列化/恢复机制（`_serialize_scan_results`/`_restore_scan_results`/`WebCheckpointSink.save` 已把 scan_results 塞进 resume_data）。C6 只补"mid-phase 按引擎存 + completed_engines 跟踪/恢复/跳过"。
+
+| 改动 | 说明 |
+|---|---|
+| `__init__` 加 `_completed_engines: set` | 跟踪 engine_execution 内已完成的引擎；fresh scan 重置，resume 恢复 |
+| `_serialize_resume_data()` 单一真相源 | 返回 `{scan_results, completed_engines}`。`WebCheckpointSink.save`(phase 末) 和 mid-phase 存档都走它——因 `save_checkpoint` **整体替换** resume_data 非合并，必须一次带全 |
+| `_save_engine_checkpoint(name)` mid-phase 存档 | 引擎完成即写 `engine_execution` 阶段 checkpoint（best-effort，失败只 log） |
+| `_restore_state_from_checkpoint` 恢复 completed_engines | 与已恢复 scan_results 取**交集**（防"标完成但无结果"） |
+| `_execute_engines` 跳过 + 逐引擎存档 | 跳过 `_completed_engines`；CodeQL 顺序逐引擎存档；并发批次 gather 后逐引擎存档（Tier1 保留 gather） |
+
+**Tier1 取舍**：CodeQL（顺序）逐引擎存档 → 抓住核心价值（CodeQL 跑完后崩溃不重跑）；并发引擎 gather 后统一处理时逐引擎存档——进程在批次内存活则全部存档，进程中途被杀则整批重跑（可接受，并发引擎比 CodeQL 便宜）。Tier2（as_completed 逐个存档）留后续。
+
+**验证**：新增 `TestEngineLevelCheckpoint` 4 测试（restore completed_engines / 交集防错 / 已完成引擎不重跑 / 逐引擎存档含 completed_engines）。全 test_l3 **2186 passed / 23 既有失败不变**（C6 改动在 web 不影响 test_l3）；test_web **+4 passed、12 failed/21 errors 全既有**（stash 对比确认零回归）；ruff F 改动文件 0 新增（scan_orchestrator.py 既有的 exclude_files@756/CodeQLEngine@954 与本批无关）。
+
+**改动文件**：`scan_orchestrator.py`（`__init__`/`_serialize_resume_data`/`_save_engine_checkpoint`/`_restore_state_from_checkpoint`/`_execute_engines`）+ `scan_pipeline_adapters.py`（`WebCheckpointSink.save` 改用单一序列化）+ 测试（`test_scan_resume_findings.py` 加 `TestEngineLevelCheckpoint` 4 测试 + 更新 1 个既有断言 resume_data 现含 completed_engines）。**未 commit**。
 
 ---
 

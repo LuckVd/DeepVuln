@@ -79,8 +79,11 @@ class WebCheckpointSink:
         # can skip completed phases without losing their output. This lives
         # under resume_data (not the progress summary) so findings never leak
         # into the frontend progress event built from ``data``.
+        # P7-C6: resume_data now also carries completed_engines (single source
+        # of truth via _serialize_resume_data, shared with mid-phase engine
+        # saves).
         payload = dict(data or {})
-        payload["resume_data"] = {"scan_results": self._orch._serialize_scan_results()}
+        payload["resume_data"] = self._orch._serialize_resume_data()
         await self._orch._save_checkpoint_phase(phase, payload)
 
     async def clean(self) -> None:

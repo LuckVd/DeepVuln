@@ -114,6 +114,10 @@ class ScanOrchestrator:
         self.attack_surface_report_obj: Optional[AttackSurfaceReport] = None  # Original AttackSurfaceReport object
         self.attack_surface_report: Optional[Dict[str, Any]] = None  # Finding context dict
         self.scan_results: Dict[str, ScanResult] = {}
+        # P7-C6: engines that finished within engine_execution, for per-engine
+        # incremental checkpoint / resume-skip. Reset on fresh scan; restored
+        # (intersected with restored results) on resume.
+        self._completed_engines: set[str] = set()
         self.adjudication_summary: Optional[Dict[str, Any]] = None
 
         # Statistics
@@ -568,11 +572,53 @@ class ScanOrchestrator:
             except Exception as exc:
                 logger.warning(f"checkpoint: failed to restore {engine} findings: {exc}")
 
+    def _serialize_resume_data(self) -> dict[str, Any]:
+        """Build the resume_data payload (single source of truth).
+
+        Combines serialized scan_results with the per-engine completion set so
+        a resumed scan can both skip completed phases AND skip individual
+        completed engines within engine_execution (P7-C6). Every checkpoint
+        save — phase-boundary (WebCheckpointSink) and mid-phase per-engine —
+        routes through here, because ``save_checkpoint`` replaces resume_data
+        wholesale rather than merging.
+        """
+        return {
+            "scan_results": self._serialize_scan_results(),
+            "completed_engines": sorted(self._completed_engines),
+        }
+
+    async def _save_engine_checkpoint(self, engine_name: str) -> None:
+        """Persist a mid-engine-execution checkpoint after an engine finishes.
+
+        Best-effort: a failed save is logged, never raised (must not abort the
+        scan). Records the engine as completed and snapshots resume_data so a
+        crash before the phase completes still lets resume skip finished
+        engines (especially expensive CodeQL).
+        """
+        self._completed_engines.add(engine_name)
+        try:
+            await self._save_checkpoint_phase(
+                "engine_execution",
+                {"resume_data": self._serialize_resume_data()},
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort checkpoint
+            logger.warning(f"checkpoint: engine-level save failed for {engine_name}: {exc}")
+
     def _restore_state_from_checkpoint(self, ckpt: Any) -> None:
-        """Restore resumable orchestrator state (currently: findings) from a checkpoint."""
+        """Restore resumable orchestrator state from a checkpoint.
+
+        Restores scan_results (findings) AND the per-engine completion set. The
+        completion set is intersected with the restored result engines so an
+        engine is never marked completed without its output (defends against a
+        checkpoint where completed_engines and scan_results drifted apart).
+        """
         try:
             resume_data = getattr(ckpt, "resume_data", None) or {}
             self._restore_scan_results(resume_data.get("scan_results"))
+            completed = resume_data.get("completed_engines") or []
+            if isinstance(completed, list):
+                restored_engines = set(self.scan_results.keys())
+                self._completed_engines = set(completed) & restored_engines
         except Exception as exc:
             logger.warning(f"checkpoint: state restore failed: {exc}")
 
@@ -932,18 +978,31 @@ class ScanOrchestrator:
         - Semgrep, Agent, AST run concurrently
 
         Reference: Plan Section 4.1 - Engine Grouping Strategy
+
+        P7-C6: engines already in ``_completed_engines`` (resumed mid-phase)
+        are skipped, and a mid-phase checkpoint is written as each engine
+        finishes so a crash before the phase completes lets resume skip
+        finished engines (especially expensive CodeQL).
         """
-        # Split engines by execution strategy
+        # P7-C6: skip engines already completed on a prior (interrupted) run.
+        # Their results were restored into scan_results from the checkpoint.
+        pending = {
+            name: engine
+            for name, engine in engines.items()
+            if name not in self._completed_engines
+        }
+
+        # Split pending engines by execution strategy
         cpu_intensive = {}
         concurrent_engines = {}
 
-        for name, engine in engines.items():
+        for name, engine in pending.items():
             if name == "codeql":
                 cpu_intensive[name] = engine
             else:
                 concurrent_engines[name] = engine
 
-        # Execute CPU-intensive engines first (CodeQL)
+        # Execute CPU-intensive engines first (CodeQL) — checkpoint after each.
         if cpu_intensive:
             for name, engine in cpu_intensive.items():
                 try:
@@ -955,6 +1014,7 @@ class ScanOrchestrator:
                         len(result.findings),
                         result.duration_seconds or 0,
                     )
+                    await self._save_engine_checkpoint(name)
                 except Exception as e:
                     await self.progress_callback.on_engine_failed(name, str(e))
 
@@ -973,7 +1033,7 @@ class ScanOrchestrator:
             # Wait for all concurrent tasks
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Process results
+            # Process results — checkpoint each engine as it is recorded.
             for name, result in zip(task_names, results):
                 if isinstance(result, Exception):
                     await self.progress_callback.on_engine_failed(
@@ -986,6 +1046,7 @@ class ScanOrchestrator:
                         len(result.findings),
                         result.duration_seconds or 0,
                     )
+                    await self._save_engine_checkpoint(name)
 
     async def _run_engine_with_timeout(
         self, name: str, engine: BaseEngine
