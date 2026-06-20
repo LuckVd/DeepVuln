@@ -134,6 +134,14 @@ class RoundTwoExecutor:
             candidates = previous_round.get_candidates_for_next_round()
             self.logger.info(f"Processing {len(candidates)} candidates for deep analysis")
 
+            # Phase 18/A1: register candidates on this round's result so later
+            # phases (_identify_next_round_candidates) and Round 3/4 can see them.
+            # Previously candidates were mutated in place but never add_candidate()'d,
+            # so round_result.candidates stayed empty, next_round_candidates was never
+            # populated, and the multi-round audit collapsed to Round 1 only.
+            for candidate in candidates:
+                round_result.add_candidate(candidate)
+
             # Phase 1: CodeQL Data Flow Analysis
             codeql_stats = await self._run_codeql_analysis(
                 candidates, round_result, coverage

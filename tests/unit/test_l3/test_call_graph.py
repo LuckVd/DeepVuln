@@ -551,3 +551,51 @@ class TestCallGraphAnalyzer:
         # execute_raw_sql should be reachable from get_users via query_db
         if result:
             assert result.is_reachable
+
+
+class TestJavaCallGraphBuilder:
+    """Phase 18/P1: JavaCallGraphBuilder is registered in CallGraphAnalyzer.
+
+    Previously only PythonCallGraphBuilder was registered (analyzer.py:55), so
+    Java files were silently skipped during call-graph construction
+    (``if ext not in self._builders: continue``) and the entire Java attack-path
+    reachability chain produced zero paths.
+    """
+
+    JAVA_SAMPLE = '''
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+class FooController {
+    @GetMapping("/run")
+    public String run(String input) {
+        return process(input);
+    }
+
+    public String process(String s) {
+        return s;
+    }
+}
+'''
+
+    def test_java_builder_registered(self):
+        """The Java builder is registered for the .java extension."""
+        analyzer = CallGraphAnalyzer()
+        assert ".java" in analyzer._builders
+
+    def test_java_call_graph_built_with_entry_point(self, tmp_path):
+        """Java methods registered as nodes; Spring endpoint detected as entry."""
+        (tmp_path / "FooController.java").write_text(self.JAVA_SAMPLE)
+
+        analyzer = CallGraphAnalyzer()
+        graph = analyzer.build_graph(tmp_path)
+
+        method_names = {
+            n.name for n in graph.nodes.values() if n.node_type != NodeType.CLASS
+        }
+        assert "run" in method_names
+        assert "process" in method_names
+
+        # Spring @GetMapping detected as HTTP entry point.
+        entry_names = {n.name for n in graph.nodes.values() if n.is_entry_point}
+        assert "run" in entry_names

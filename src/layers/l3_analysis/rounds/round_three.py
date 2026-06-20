@@ -107,6 +107,12 @@ class RoundThreeExecutor:
             candidates = previous_round.get_candidates_for_next_round()
             self.logger.info(f"Processing {len(candidates)} candidates for correlation")
 
+            # Phase 18/A1: register candidates on this round's result so
+            # _categorize_results (and Round 4) can see them. Without this,
+            # round_result.candidates stayed empty and the audit stalled.
+            for candidate in candidates:
+                round_result.add_candidate(candidate)
+
             # Phase 1: Build evidence chains
             correlation_stats = await self._build_evidence_chains(
                 candidates, round_result, coverage

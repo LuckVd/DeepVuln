@@ -136,6 +136,24 @@ class VulnerabilityCandidate(BaseModel):
             f"(Round {self.discovered_in_round})"
         )
 
+    def to_exploitability_verification_metadata(self) -> dict[str, Any]:
+        """Phase 18/A2: build the ``exploitability_verification`` metadata dict
+        persisted on the finding.
+
+        Sources the verdict from the finding's own Round-4 fields
+        (``confidence_score`` / ``exploitability``) rather than attributes that
+        do not exist on VulnerabilityCandidate. Previously the orchestrator read
+        ``candidate.exploitability`` / ``candidate.confidence_score`` (both
+        absent), so confidence was always 0.0 and status always None.
+        """
+        confidence_score = getattr(self.finding, "confidence_score", None)
+        return {
+            "status": getattr(self.finding, "exploitability", None),
+            "confidence": float(confidence_score) if confidence_score is not None else 0.0,
+            "confidence_level": self.confidence.value if self.confidence else None,
+            "source": "multi_round_audit",
+        }
+
 
 class CoverageStats(BaseModel):
     """

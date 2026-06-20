@@ -20,6 +20,7 @@ from src.layers.l3_analysis.codeql.query_generator import (
 )
 from src.layers.l3_analysis.codeql.sarif_parser import (
     ParsedDataflowPath,
+    PathLocation,
     SARIFParser,
 )
 from src.layers.l3_analysis.rounds.dataflow import (
@@ -373,11 +374,13 @@ class CodeQLDataflowExecutor:
 
     def _create_taint_source(
         self,
-        path_loc: ParsedDataflowPath | None,
+        path_loc: PathLocation | None,
         config: TaintTrackingConfig,
     ) -> TaintSource:
-        """Create TaintSource from parsed path location."""
-        if path_loc and hasattr(path_loc, 'to_code_location'):
+        """Create TaintSource from a parsed path location (PathLocation)."""
+        # Phase 18/P4-C2: parsed.source is a PathLocation (not ParsedDataflowPath);
+        # it always exposes to_code_location(), so the hasattr guard is dropped.
+        if path_loc:
             loc = path_loc.to_code_location()
         else:
             from src.layers.l3_analysis.models import CodeLocation
@@ -396,11 +399,13 @@ class CodeQLDataflowExecutor:
 
     def _create_taint_sink(
         self,
-        path_loc: ParsedDataflowPath | None,
+        path_loc: PathLocation | None,
         config: TaintTrackingConfig,
     ) -> TaintSink:
-        """Create TaintSink from parsed path location."""
-        if path_loc and hasattr(path_loc, 'to_code_location'):
+        """Create TaintSink from a parsed path location (PathLocation)."""
+        # Phase 18/P4-C2: parsed.sink is a PathLocation (not ParsedDataflowPath);
+        # it always exposes to_code_location(), so the hasattr guard is dropped.
+        if path_loc:
             loc = path_loc.to_code_location()
         else:
             from src.layers.l3_analysis.models import CodeLocation

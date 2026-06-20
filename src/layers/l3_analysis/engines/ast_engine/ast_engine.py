@@ -42,11 +42,10 @@ class ASTEngine(BaseEngine):
         "typescript",
         "java",
         "go",
-        "cpp",
-        "c",
-        "ruby",
-        "php",
-        "rust",
+        # Phase 18/P4-C1: cpp/c/ruby/php/rust removed — no AST rules exist for
+        # them, so scanning silently returned 0 findings with success=True
+        # (indistinguishable from "no vulnerabilities"). Unsupported code files
+        # are now counted as skipped (see _get_source_files).
     ]
 
     def __init__(
@@ -107,7 +106,7 @@ class ASTEngine(BaseEngine):
 
         try:
             # Get list of files to scan
-            source_files = self._get_source_files(source_path)
+            source_files, skipped_unsupported = self._get_source_files(source_path)
 
             self.logger.info(
                 f"AST Engine scanning {len(source_files)} files in {source_path}"
@@ -129,6 +128,8 @@ class ASTEngine(BaseEngine):
                 raw_output={
                     "files_scanned": len(source_files),
                     "findings_count": len(result.findings),
+                    "skipped_unsupported_files": skipped_unsupported,
+                    "supported_languages": list(self.supported_languages),
                 },
             )
 
@@ -140,45 +141,40 @@ class ASTEngine(BaseEngine):
                 error_message=str(e),
             )
 
-    def _get_source_files(self, source_path: Path) -> list[Path]:
+    def _get_source_files(self, source_path: Path) -> tuple[list[Path], int]:
         """Get list of source files to scan.
+
+        Phase 18/P4-C1: only collects files for supported languages (those with
+        actual AST rules). Files in recognized-but-unsupported languages
+        (c/cpp/ruby/php/rust) are counted as skipped so callers can distinguish
+        "no vulnerabilities found" from "language not implemented".
 
         Args:
             source_path: Root source directory.
 
         Returns:
-            List of source file paths.
+            (supported source files, count of skipped unsupported code files).
         """
-        source_files = []
-
-        # File extensions by language
-        extensions = {
-            ".py": "python",
-            ".js": "javascript",
-            ".jsx": "javascript",
-            ".ts": "typescript",
-            ".tsx": "typescript",
-            ".java": "java",
-            ".go": "go",
-            ".cpp": "cpp",
-            ".cc": "cpp",
-            ".cxx": "cpp",
-            ".c": "c",
-            ".h": "c",
-            ".hpp": "cpp",
-            ".rb": "ruby",
-            ".php": "php",
-            ".rs": "rust",
+        supported_exts = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go"}
+        unsupported_code_exts = {
+            ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".rb", ".php", ".rs",
         }
+        source_files: list[Path] = []
+        skipped_unsupported = 0
 
-        for ext, language in extensions.items():
-            for file_path in source_path.rglob(f"*{ext}"):
-                # Skip test directories if needed
-                if "test" in file_path.parts or "tests" in file_path.parts:
-                    continue
+        for file_path in source_path.rglob("*"):
+            if not file_path.is_file():
+                continue
+            # Skip test directories if needed
+            if "test" in file_path.parts or "tests" in file_path.parts:
+                continue
+            ext = file_path.suffix
+            if ext in supported_exts:
                 source_files.append(file_path)
+            elif ext in unsupported_code_exts:
+                skipped_unsupported += 1
 
-        return source_files
+        return source_files, skipped_unsupported
 
     async def _scan_file(self, file_path: Path) -> list[Any]:
         """Scan a single file for vulnerabilities.

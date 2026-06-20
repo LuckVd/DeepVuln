@@ -239,3 +239,28 @@ class TestYAMLRuleLoading:
             assert rule["severity"] == "high"
         finally:
             Path(rule_path).unlink()
+
+
+class TestLanguageScopingP4C1:
+    """Phase 18/P4-C1: AST engine scopes to languages with actual rules and
+    counts unsupported code files as skipped (was: silently 0 findings +
+    success=True for cpp/c/ruby/php/rust, indistinguishable from "no vulns")."""
+
+    def test_unsupported_languages_removed(self):
+        engine = ASTEngine()
+        unsupported = {"cpp", "c", "ruby", "php", "rust"}
+        assert unsupported.isdisjoint(engine.supported_languages)
+
+    def test_unsupported_files_counted_as_skipped(self, tmp_path):
+        (tmp_path / "a.py").write_text("x = 1")
+        (tmp_path / "b.c").write_text("int main(){}")
+        (tmp_path / "c.cpp").write_text("int main(){}")
+
+        engine = ASTEngine()
+        files, skipped = engine._get_source_files(tmp_path)
+
+        assert any(p.name == "a.py" for p in files)
+        # Unsupported extensions are no longer "scanned".
+        assert not any(p.suffix in {".c", ".cpp"} for p in files)
+        # They are counted as skipped so downstream can tell "not implemented".
+        assert skipped == 2

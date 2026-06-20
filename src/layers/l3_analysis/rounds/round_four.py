@@ -1427,6 +1427,14 @@ class RoundFourExecutor:
         # the "multi_dim_scoring" evidence by _verify_exploitability.
         candidate.finding.confidence_score = round(result.confidence * 100)
         candidate.finding.confidence_factors = []
+        # Phase 18/A3: sync finding.confidence (0-1) and finding.exploitability to
+        # the multi-dim verdict. final_score.calculate_finding_score reads
+        # finding.confidence (not confidence_score), so without this the persisted
+        # score and the score actually driving sort order diverged (D5 half-done).
+        # Persisting exploitability on the finding also lets scan_orchestrator map
+        # Round 4 verdicts back without reaching into candidate evidence.
+        candidate.finding.confidence = result.confidence
+        candidate.finding.exploitability = result.status.value
         if result.confidence_report:
             candidate.add_evidence("confidence_scorer_audit", {
                 "score": result.confidence_report.score,

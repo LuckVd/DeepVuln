@@ -639,6 +639,168 @@ class TestRoundFourConfidenceUnification:
         assert candidate.finding.confidence_score == 30  # 0.3 * 100
         assert candidate.confidence == ConfidenceLevel.LOW
 
+    def test_finding_confidence_and_exploitability_synced(self, executor, candidate):
+        """Phase 18/A3: _apply_verification_result must sync finding.confidence
+        (0-1) and finding.exploitability to the multi-dim verdict.
+
+        final_score.calculate_finding_score reads ``finding.confidence`` (not
+        confidence_score), so without this the persisted score and the score
+        driving sort order diverged (D5 was only half-done). Persisting
+        exploitability on the finding also lets scan_orchestrator map Round 4
+        verdicts back onto findings.
+        """
+        result = ExploitabilityResult(
+            finding_id="f1",
+            status=ExploitabilityStatus.EXPLOITABLE,
+            confidence=0.85,
+            confidence_report=None,
+        )
+
+        executor._apply_verification_result(candidate, result)
+
+        # A3: finding.confidence (0-1) mirrors multi-dim result.confidence.
+        assert candidate.finding.confidence == 0.85
+        # A3: exploitability verdict persisted on the finding.
+        assert candidate.finding.exploitability == ExploitabilityStatus.EXPLOITABLE.value
+
+
+class TestRoundTwoThreeCandidatePropagation:
+    """Phase 18 / A1: Round 2 and Round 3 must propagate the candidates they
+    analyze into their own ``RoundResult`` (via ``add_candidate``). Previously
+    the executors mutated the incoming candidate objects in place but never
+    registered them on ``round_result``, so:
+
+    * ``_identify_next_round_candidates`` / ``_categorize_results`` iterated an
+      empty ``round_result.candidates`` -> ``next_round_candidates`` stayed empty.
+    * ``TerminationDecider`` saw no next-round candidates -> early stop.
+    * Round 3 / Round 4 were starved; the whole multi-round audit collapsed to
+      Round 1 only.
+
+    Round 4 (``round_four.py``) already calls ``add_candidate`` correctly; these
+    tests pin the same contract for Round 2 / Round 3.
+    """
+
+    @pytest.fixture
+    def sample_strategy(self, tmp_path):
+        target = AuditTarget(
+            id="target-001",
+            name="test.py",
+            target_type="entry_point",
+            file_path="test.py",
+            priority=AuditPriority(level=AuditPriorityLevel.HIGH),
+        )
+        return AuditStrategy(
+            project_name="test-project",
+            source_path=str(tmp_path),
+            targets=[target],
+            total_targets=1,
+        )
+
+    @pytest.fixture
+    def previous_round(self):
+        """A Round-1 result carrying one MEDIUM candidate flagged for next round."""
+        finding = Finding(
+            id="f-r2",
+            severity=SeverityLevel.HIGH,
+            title="SQL Injection",
+            description="d",
+            location=CodeLocation(file="a.py", line=1),
+            source="semgrep",
+        )
+        candidate = VulnerabilityCandidate(
+            id="c-r2",
+            finding=finding,
+            confidence=ConfidenceLevel.MEDIUM,
+            discovered_in_round=1,
+        )
+        result = RoundResult(round_number=1, status=RoundStatus.COMPLETED)
+        result.add_candidate(candidate)
+        result.next_round_candidates = ["c-r2"]
+        return result
+
+    @pytest.mark.asyncio
+    async def test_round_two_propagates_candidates(
+        self, sample_strategy, previous_round, tmp_path,
+    ):
+        """Round 2 result must contain the candidates it analyzed."""
+        executor = RoundTwoExecutor(source_path=tmp_path)  # no codeql/agent -> fallback path
+        result = await executor.execute(sample_strategy, previous_round)
+
+        assert result.status == RoundStatus.COMPLETED
+        # A1 fix: candidates propagated into this round's result (was empty before).
+        candidate_ids = {c.id for c in result.candidates}
+        assert "c-r2" in candidate_ids
+        # MEDIUM candidate should be flagged for round 3.
+        assert "c-r2" in result.next_round_candidates
+
+    @pytest.mark.asyncio
+    async def test_round_three_propagates_candidates(
+        self, sample_strategy, previous_round, tmp_path,
+    ):
+        """Round 3 result must contain the candidates it analyzed."""
+        executor = RoundThreeExecutor(source_path=tmp_path)
+        result = await executor.execute(sample_strategy, previous_round)
+
+        assert result.status == RoundStatus.COMPLETED
+        candidate_ids = {c.id for c in result.candidates}
+        assert "c-r2" in candidate_ids
+
+
+class TestCandidateExploitabilityMapping:
+    """Phase 18/A2: VulnerabilityCandidate.to_exploitability_verification_metadata
+    sources the finding's Round-4 verdict (confidence_score / exploitability)
+    instead of non-existent candidate attributes — previously the orchestrator
+    read candidate.exploitability / candidate.confidence_score (both absent),
+    so confidence was always 0.0 and status always None."""
+
+    def _make_candidate(self, cid="c1", fid="f1"):
+        finding = Finding(
+            id=fid,
+            severity=SeverityLevel.HIGH,
+            title="t",
+            description="d",
+            location=CodeLocation(file="a.py", line=1),
+            source="semgrep",
+        )
+        return VulnerabilityCandidate(
+            id=cid,
+            finding=finding,
+            confidence=ConfidenceLevel.MEDIUM,
+            discovered_in_round=1,
+        )
+
+    def test_metadata_reflects_round4_verdict(self, tmp_path):
+        """After Round 4 applies its verdict, the mapped metadata carries the
+        real confidence (0-100) and exploitability status."""
+        candidate = self._make_candidate()
+        executor = RoundFourExecutor(source_path=tmp_path)
+        executor._apply_verification_result(
+            candidate,
+            ExploitabilityResult(
+                finding_id="f1",
+                status=ExploitabilityStatus.EXPLOITABLE,
+                confidence=0.9,
+                confidence_report=None,
+            ),
+        )
+
+        meta = candidate.to_exploitability_verification_metadata()
+        # A2: confidence is the real Round-4 score (0-100), NOT always 0.
+        assert meta["confidence"] == 90.0
+        # A2: status is the persisted exploitability verdict, NOT None.
+        assert meta["status"] == ExploitabilityStatus.EXPLOITABLE.value
+        assert meta["source"] == "multi_round_audit"
+
+    def test_metadata_defaults_when_no_verdict(self):
+        """A candidate that never reached Round 4 degrades gracefully."""
+        candidate = self._make_candidate(cid="c2", fid="f2")
+        candidate.confidence = ConfidenceLevel.LOW
+
+        meta = candidate.to_exploitability_verification_metadata()
+        assert meta["confidence"] == 0.0
+        assert meta["status"] is None
+        assert meta["confidence_level"] == "low"
+
 
 class TestSourceType:
     """Tests for SourceType enum."""

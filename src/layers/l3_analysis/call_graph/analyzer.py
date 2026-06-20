@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.call_graph.builders.base import CallGraphBuilder
+from src.layers.l3_analysis.call_graph.builders.java_builder import JavaCallGraphBuilder
 from src.layers.l3_analysis.call_graph.builders.python_builder import PythonCallGraphBuilder
 from src.layers.l3_analysis.call_graph.models import (
     CallGraph,
@@ -54,7 +55,8 @@ class CallGraphAnalyzer:
         """Register all language-specific builders."""
         builders = [
             PythonCallGraphBuilder(),
-            # Java and Go builders will be added later
+            JavaCallGraphBuilder(),  # Phase 18/P1: enables Java attack-path reachability
+            # Go builder pending (Phase 18/P2)
         ]
 
         for builder in builders:

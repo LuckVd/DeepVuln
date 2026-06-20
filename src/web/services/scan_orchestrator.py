@@ -1372,15 +1372,9 @@ class ScanOrchestrator:
             if finding is None:
                 continue
             finding.metadata = finding.metadata or {}
-            finding.metadata["exploitability_verification"] = {
-                "status": (
-                    getattr(candidate, "exploitability", None)
-                    or str(getattr(candidate, "status", "") or "")
-                    or None
-                ),
-                "confidence": float(getattr(candidate, "confidence_score", 0.0) or 0.0),
-                "source": "multi_round_audit",
-            }
+            finding.metadata["exploitability_verification"] = (
+                candidate.to_exploitability_verification_metadata()
+            )
             verified += 1
 
         logger.info(
