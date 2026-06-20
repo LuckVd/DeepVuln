@@ -342,6 +342,7 @@ class BaselineManager:
         self,
         current_findings: list[dict[str, Any]],
         current_commit: str | None = None,
+        scanned_files: set[str] | None = None,
     ) -> BaselineDiff:
         """
         Compare current findings with baseline.
@@ -349,6 +350,10 @@ class BaselineManager:
         Args:
             current_findings: List of current vulnerability findings.
             current_commit: Current commit hash.
+            scanned_files: Set of file paths actually scanned this run
+                (incremental scans). When provided, a baseline vuln whose file
+                was NOT scanned is not counted as fixed — its absence means
+                "not scanned", not "fixed" (Phase 18/P7-C4).
 
         Returns:
             BaselineDiff with comparison results.
@@ -428,6 +433,12 @@ class BaselineManager:
         # Find fixed vulnerabilities (in baseline but not in current)
         for vuln_id, baseline in self.baselines.items():
             if vuln_id not in seen_baseline_ids:
+                # Phase 18/P7-C4: only count as fixed if the file was actually
+                # scanned this run. In incremental scans, files outside the
+                # change set are not rescanned, so a missing finding there
+                # means "not scanned", not "fixed".
+                if scanned_files is not None and baseline.file_path not in scanned_files:
+                    continue
                 # Was not seen in current scan
                 if not baseline.fix_commit:
                     # Not previously marked as fixed

@@ -216,6 +216,7 @@ class DependencyGraph:
         import_name: str,
         source_file: str,
         language: str,
+        level: int = 0,
     ) -> str | None:
         """
         Resolve an import to a file path.
@@ -232,9 +233,30 @@ class DependencyGraph:
         parts = import_name.split(".")
 
         if language == "python":
-            # Try direct file
+            # Relative import (from . / from .x / from ..x): resolve against
+            # the source file's package, ascending (level - 1) dirs first.
+            # Previously `level` was dropped at the call site and the path was
+            # built with raw string concatenation, producing wrong paths and
+            # missing dependents in incremental scans (Phase 18/P7-C5).
+            if level > 0:
+                base = Path(source_file).parent
+                for _ in range(level - 1):
+                    base = base.parent
+                candidates = []
+                if import_name:
+                    joined = "/".join(parts)
+                    candidates += [joined + ".py", joined + "/__init__.py"]
+                else:
+                    # `from . import x` resolves to the package itself.
+                    candidates.append("__init__.py")
+                for candidate in candidates:
+                    rel = str(base / candidate).replace("\\", "/")
+                    if (self.project_path / rel).exists():
+                        return rel.lstrip("/")
+                return None
+
+            # Absolute import
             py_path = "/".join(parts) + ".py"
-            # Try package __init__.py
             init_path = "/".join(parts) + "/__init__.py"
 
             for candidate in [py_path, init_path]:
@@ -242,13 +264,13 @@ class DependencyGraph:
                 if full_path.exists():
                     return candidate
 
-            # Try relative import
-            source_dir = str(Path(source_file).parent)
+            # Fallback: try relative to the source file's directory (normalized).
+            source_dir = Path(source_file).parent
             for candidate in [py_path, init_path]:
-                rel_path = source_dir + "/" + candidate
-                full_path = self.project_path / rel_path
+                rel = str(source_dir / candidate.lstrip("/")).replace("\\", "/")
+                full_path = self.project_path / rel
                 if full_path.exists():
-                    return rel_path.lstrip("/")
+                    return rel.lstrip("/")
 
         elif language in ("javascript", "typescript"):
             # Try various extensions
@@ -311,17 +333,23 @@ class DependencyGraph:
                             ))
 
                 elif isinstance(node, ast.ImportFrom):
-                    if node.module:
-                        imports.append(node.module)
-                        resolved = self._resolve_import_path(node.module, file_path, "python")
+                    # Phase 18/P7-C5: preserve relative-import level so
+                    # `from .helpers` / `from ..pkg` resolve correctly (and
+                    # `from . import x` is no longer skipped — node.module is
+                    # None there but level > 0).
+                    module = node.module or ""
+                    level = node.level or 0
+                    if module or level > 0:
+                        imports.append(module)
+                        resolved = self._resolve_import_path(module, file_path, "python", level=level)
                         if resolved:
                             edges.append(DependencyEdge(
                                 source=file_path,
                                 target=resolved,
                                 dependency_type=DependencyType.FROM_IMPORT,
                                 line_number=node.lineno,
-                                symbol_name=node.module,
-                                details={"names": [n.name for n in node.names]},
+                                symbol_name=module,
+                                details={"names": [n.name for n in node.names], "level": level},
                             ))
 
                 # Function and class definitions (exports)

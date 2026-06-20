@@ -396,6 +396,7 @@ class IncrementalScanner:
                 baseline_diff = self.baseline_manager.compare(
                     findings,
                     current_commit=self.config.head_ref,
+                    scanned_files=set(files_to_scan),
                 )
 
                 result.new_findings = baseline_diff.new_count

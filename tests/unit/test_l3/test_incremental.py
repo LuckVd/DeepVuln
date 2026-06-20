@@ -358,6 +358,37 @@ class TestDependencyGraph:
         # Should include utils.py and models.py
         assert "utils.py" in deps or "models.py" in deps or len(deps) >= 0
 
+    def test_resolve_relative_import_level1(self, temp_project):
+        """Phase 18/P7-C5: `from .helpers` resolves against the source file's
+        package, not the project root."""
+        pkg = temp_project / "pkg"
+        pkg.mkdir(exist_ok=True)
+        (pkg / "helpers.py").write_text("x = 1\n")
+        graph = DependencyGraph(temp_project)
+
+        resolved = graph._resolve_import_path("helpers", "pkg/mod.py", "python", level=1)
+        assert resolved == "pkg/helpers.py"
+
+    def test_resolve_relative_import_level2(self, temp_project):
+        """`from ..utils` ascends one directory above the source package."""
+        (temp_project / "pkg").mkdir(exist_ok=True)
+        (temp_project / "pkg" / "sub").mkdir(exist_ok=True)
+        (temp_project / "pkg" / "utils.py").write_text("x = 1\n")
+        graph = DependencyGraph(temp_project)
+
+        resolved = graph._resolve_import_path("utils", "pkg/sub/mod.py", "python", level=2)
+        assert resolved == "pkg/utils.py"
+
+    def test_resolve_relative_import_dot_only(self, temp_project):
+        """`from . import x` (level 1, no module) resolves to the package."""
+        pkg = temp_project / "mypkg"
+        pkg.mkdir(exist_ok=True)
+        (pkg / "__init__.py").write_text("x = 1\n")
+        graph = DependencyGraph(temp_project)
+
+        resolved = graph._resolve_import_path("", "mypkg/mod.py", "python", level=1)
+        assert resolved == "mypkg/__init__.py"
+
     @pytest.mark.asyncio
     async def test_get_impact_set(self, temp_project):
         """Test getting impact set for changed files."""
@@ -570,6 +601,42 @@ class TestBaselineManager:
         assert diff.new_count == 1
         assert diff.persistent_count == 0
         assert diff.fixed_count == 0
+
+    def test_compare_unscanned_file_not_marked_fixed(self, baseline_path):
+        """Phase 18/P7-C4: a baseline vuln whose file wasn't scanned this run
+        must NOT be marked fixed (it's not-scanned, not fixed)."""
+        manager = BaselineManager(baseline_path, "test_project")
+        existing = VulnerabilityBaseline(
+            vuln_id="v1",
+            rule_id="rule-001",
+            file_path="unscanned.py",
+            line_start=10,
+            content_hash=manager._compute_finding_hash("unscanned.py", 10, "rule-001", None),
+        )
+        manager.baselines["v1"] = existing
+        manager._index_baseline(existing)
+
+        # Current scan covered only other.py; unscanned.py not scanned, no findings.
+        diff = manager.compare([], scanned_files={"other.py"})
+
+        assert diff.fixed_count == 0  # unscanned.py not in scanned_files → not fixed
+
+    def test_compare_scanned_file_missing_is_fixed(self, baseline_path):
+        """When the file WAS scanned and the vuln is gone → fixed."""
+        manager = BaselineManager(baseline_path, "test_project")
+        existing = VulnerabilityBaseline(
+            vuln_id="v1",
+            rule_id="rule-001",
+            file_path="scanned.py",
+            line_start=10,
+            content_hash=manager._compute_finding_hash("scanned.py", 10, "rule-001", None),
+        )
+        manager.baselines["v1"] = existing
+        manager._index_baseline(existing)
+
+        diff = manager.compare([], scanned_files={"scanned.py"})
+
+        assert diff.fixed_count == 1  # scanned.py scanned, vuln gone → fixed
 
     def test_compare_with_existing_baseline(self, baseline_path):
         """Test comparing with existing vulnerabilities in baseline."""
