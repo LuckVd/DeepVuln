@@ -1,6 +1,6 @@
 # Current Goal
 
-> **状态**: 进行中 🚧 — 第一/二批 + P6-eval + **第三批 P5 续扫完整性 + P7 可靠性** 已完成并 push（`a9ef21a` + `bc1db1f`，本地=origin=bc1db1f）；**P6 对抗接线整体留独立会话（用户 2026-06-20 决定）**；剩 C6 引擎级checkpoint / P3 可达性质量 / P6
+> **状态**: 进行中 🚧 — 第一/二批 + P6-eval + **第三批 P5 续扫完整性 + P7 可靠性** 已完成并 push（`a9ef21a` + `bc1db1f`，本地=origin=bc1db1f）；**第四批 P6 低风险子项（子项3 LIKELY→MEDIUM + 子项4 删死机械 + 子项5 策略知识注入基础版 prompt）已完成、未提交**；**P6 对抗接线硬骨头（子项1 gatekeeper / 子项2 min_evidence_dimensions）仍留独立会话（用户 2026-06-20 决定）**；剩 C6 引擎级checkpoint / P3 可达性质量 / P6 硬骨头
 > **目标**: Phase 18 — 精度链路接通与多语言可达性补齐（基于全量实现审查）
 > **Goal ID**: phase18-precision-link-reachability
 > **创建日期**: 2026-06-20（最近更新：2026-06-20 第三批 P5/P7 push 后）
@@ -57,6 +57,24 @@ TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归�
 - P3 是精度改进（防误报方向），非功能阻断；建议与 P5/P7 在第三批一起深做（含条件求值设计）。
 
 **改动文件**：`cpg/models.py` / `call_graph/builders/base.py` / `path_finder/finder.py`（P2-前置）+ `go_builder.py`(新) / `go_provider.py`(新) / `path_provider.py` / `analyzer.py`（P2-Go）+ 测试。**第一批(`4ee490b`)与本批(`6b0f290`/`4b15224`)均已 commit**。
+
+---
+
+## 第四批实施记录（2026-06-20，P6 低风险子项 完成 ✅，未提交）
+
+用户决定 P6 硬骨头（子项1 gatekeeper 接线 / 子项2 min_evidence_dimensions）留独立会话，本批先把低风险高确定性的子项3/4 清掉，并按"删花哨的、留有用的、把它接对"新增**子项5（真能力提升）**。全 test_l3 **2186 passed / 23 既有失败（零回归）**。
+
+| 子项 | 改动 | 验证 |
+|---|---|---|
+| **子项3** ✅ | `round_three.py:316` `LIKELY→ConfidenceLevel.HIGH` 改 `MEDIUM`（防"可能"与 CONFIRMED 同级误升 EXPLOITABLE；下游 `RoundResult.add_candidate` 把 LIKELY 候选从 high→medium 计数） | `test_likely_status_maps_to_medium_not_high`（修复前红/后绿）|
+| **子项4** ✅ | 删死机械 `enhanced_adversarial.py`(744)+`convergence.py`(411)=1155 行；**保留** `strategy_library.py`（真知识，干净叶子，仅依赖 stdlib+pydantic）。清理 `verification/__init__.py` 的 enhanced/convergence re-export（保留 strategy_library）。修 `verification_gatekeeper.py` 两处 docstring 去掉对已删文件指代。拆 `test_enhanced_adversarial.py`(45)→`test_strategy_library.py`(26，保留 strategy 测试，删 convergence/enhanced/evolution/learning 测试) | ruff F 零新增；干净导入 `AdversarialVerifier/StrategyLibrary/create_attacker_library`；无残留引用 |
+| **子项5** ✅（核心能力）| 把 `strategy_library` 真知识**按 finding vuln 类型**接进 `prompts/adversarial.py` 的 `get_attacker_user_prompt`/`get_defender_user_prompt`：attacker 注入相关绕过技巧+攻击链，defender 注入防御机制+trigger conditions+suggested defense。**生成时参考**（非增强版"生成后贴字符串"）。接地气表述（"assess whether applicable"/"verify presence"，不预设结论）。未知 vuln 类型不注入（不膨胀）| `test_adversarial_strategy_injection` 4 测试：SQLi attacker 含 comment/攻击链 + 接地气；XSS 类型感知；defender 含 parameterized + verify；未知类型无注入 |
+
+**关键判断（驱动子项4/5 设计）**：审查 enhanced 层（`_run_enhanced_debate`）发现它**核心推理复用基础版**（直接调 `base_verifier._run_round_1/arbiter.evaluate`），策略知识是"生成后追加字符串"（`_enhance_attacker_argument`），属**花哨不更强**。故删机械、留知识、把知识接进基础版生成 prompt 才是真增强。
+
+**改动文件**：`round_three.py` / `verification/__init__.py` / `verification_gatekeeper.py` / `prompts/adversarial.py`（子项3/4/5）+ 删 `enhanced_adversarial.py`/`convergence.py` + 测试（`test_rounds.py` 追加 / 新建 `test_strategy_library.py`(替 `test_enhanced_adversarial.py`) / 新建 `test_adversarial_strategy_injection.py`）。**未 commit**（遵循不自动提交）。
+
+**测试数学校验**：2200(基线) − 45(删 test_enhanced) + 26(新建 strategy) + 1(子项3) + 4(子项5) = **2186 passed**，既有失败 23 不变，零回归。
 
 ---
 

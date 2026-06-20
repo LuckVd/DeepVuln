@@ -12,7 +12,7 @@ Not all findings need expensive LLM-based adversarial verification:
 This saves ~40% of adversarial verification LLM calls.
 
 Integration Point:
-    Called in enhanced_adversarial.py before running verification.
+    Called before running adversarial verification.
 """
 
 import logging
@@ -351,7 +351,7 @@ def should_verify_finding(
     - should_verify_finding: Convenience function
 
     Integration:
-        Called in enhanced_adversarial.py before running verification.
+        Called before running adversarial verification.
 
     Expected Effect:
         - ~40% reduction in adversarial verification calls

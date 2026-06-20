@@ -1761,6 +1761,47 @@ class TestRoundThreeExecutor:
         assert builder._map_source_string("agent") == EvidenceSource.AGENT
         assert builder._map_source_string("unknown") is None
 
+    def test_likely_status_maps_to_medium_not_high(self, executor):
+        """Phase 18 / P6-子项3: LIKELY 必须映射到 MEDIUM，而非 HIGH。
+
+        LIKELY（置信度 0.6-0.85）此前被映射到 HIGH（与 CONFIRMED 同级），
+        会把"可能可利用"的候选误升向 EXPLOITABLE。LIKELY 应低于 CONFIRMED 一档
+        → MEDIUM。
+        """
+        finding = Finding(
+            id="f-likely",
+            severity=SeverityLevel.HIGH,
+            title="t",
+            description="d",
+            location=CodeLocation(file="a.py", line=1),
+            source="semgrep",
+        )
+        candidate = VulnerabilityCandidate(
+            id="c-likely",
+            finding=finding,
+            confidence=ConfidenceLevel.MEDIUM,
+            discovered_in_round=1,
+        )
+        # 构造直接判定为 LIKELY 的 correlation（verification_status 非 UNCERTAIN
+        # 即被 _determine_status 直接返回，绕过阈值分支，精确控制状态）
+        chain = EvidenceChain(id="ec-likely", candidate_id="c-likely")
+        result = CorrelationResult(
+            id="r-likely",
+            candidate_id="c-likely",
+            evidence_chain=chain,
+            verification_status=VerificationStatus.LIKELY,
+        )
+        candidate.metadata["correlation"] = {
+            "result": result.model_dump(),
+            "evidence_chain": chain.model_dump(),
+        }
+        round_result = RoundResult(round_number=3, status=RoundStatus.COMPLETED)
+
+        executor._make_final_determinations([candidate], round_result)
+
+        # 修复前为 HIGH，修复后应为 MEDIUM
+        assert candidate.confidence == ConfidenceLevel.MEDIUM
+
 
 # =============================================================================
 # P2-09: Termination Decider Tests

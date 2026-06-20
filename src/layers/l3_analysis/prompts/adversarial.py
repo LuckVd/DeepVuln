@@ -18,6 +18,158 @@ from typing import Any
 from .security_audit import VULNERABILITY_PATTERNS
 
 # =============================================================================
+# STRATEGY KNOWLEDGE INJECTION (Phase 18 / P6-子项5)
+# =============================================================================
+# Real attack/defense knowledge from the verification strategy library, injected
+# into the attacker/defender *generation* prompts so the LLM reasons WITH it
+# (not the dead enhanced layer's "append-after-generation" approach).
+# Grounded framing — "assess whether applicable" / "verify presence" — never
+# asserts the vulnerability already uses a technique (avoids biasing the verdict).
+
+# vuln_type → scenarios to query in the attacker library (specific + generic
+# fallbacks so every recognized type yields at least some relevant technique)
+_VULN_ATTACK_SCENARIOS: dict[str, list[str]] = {
+    "sql_injection": ["sql_injection", "input_validation", "waf_bypass"],
+    "xss": ["xss", "input_validation", "waf_bypass"],
+    "path_traversal": ["path_traversal", "file_upload", "input_validation"],
+    "command_injection": ["command_injection", "input_validation", "waf_bypass"],
+    "code_injection": ["code_injection", "input_validation", "waf_bypass"],
+    "deserialization": ["deserialization", "input_validation"],
+    "ssrf": ["ssrf", "input_validation"],
+}
+
+# vuln_type → defense mechanism names to highlight (grounded in the seeded
+# defender library's defense_mechanisms)
+_VULN_DEFENSE_MECHANISMS: dict[str, list[str]] = {
+    "sql_injection": ["parameterized_queries", "input_validation"],
+    "xss": ["output_encoding", "content_security_policy", "input_validation"],
+    "path_traversal": ["input_validation"],
+    "command_injection": ["input_validation"],
+    "code_injection": ["input_validation"],
+}
+
+_ATTACKER_LIB: Any = None
+_DEFENDER_LIB: Any = None
+
+
+def _get_attacker_library() -> Any:
+    """Lazily build (and cache) the default attacker strategy library."""
+    global _ATTACKER_LIB
+    if _ATTACKER_LIB is None:
+        from ..verification.strategy_library import create_attacker_library
+
+        _ATTACKER_LIB = create_attacker_library()
+    return _ATTACKER_LIB
+
+
+def _get_defender_library() -> Any:
+    """Lazily build (and cache) the default defender strategy library."""
+    global _DEFENDER_LIB
+    if _DEFENDER_LIB is None:
+        from ..verification.strategy_library import create_defender_library
+
+        _DEFENDER_LIB = create_defender_library()
+    return _DEFENDER_LIB
+
+
+def _format_attacker_strategy_knowledge(vuln_type: str) -> str:
+    """Relevant bypass techniques + attack chain for the attacker prompt.
+
+    Returns "" when the vuln type is unrecognized or yields no knowledge, so the
+    prompt is not bloated for unknown vulnerability types.
+    """
+    scenarios = _VULN_ATTACK_SCENARIOS.get((vuln_type or "").lower())
+    if not scenarios:
+        return ""
+
+    library = _get_attacker_library()
+    seen: set[str] = set()
+    bypasses = []
+    for scenario in scenarios:
+        for bt in library.get_applicable_bypasses(scenario=scenario, top_n=3):
+            if bt.name in seen:
+                continue
+            seen.add(bt.name)
+            bypasses.append(bt)
+            if len(bypasses) >= 3:
+                break
+        if len(bypasses) >= 3:
+            break
+
+    chain = next(
+        (c for c in library.attack_chains if vuln_type in c.vulnerability_types),
+        None,
+    )
+
+    if not bypasses and not chain:
+        return ""
+
+    lines = ["## Relevant Attack Techniques (assess applicability)", ""]
+    lines.append(
+        "Consider whether each of the following could apply here — do **not** "
+        "assume the vulnerability already uses them:"
+    )
+    lines.append("")
+    for bt in bypasses:
+        examples = ""
+        if getattr(bt, "examples", None):
+            examples = f" (e.g. {', '.join(bt.examples[:2])})"
+        lines.append(f"- **{bt.name}**: {bt.description}{examples}")
+    if chain:
+        lines.append(f"- **Attack chain** ({chain.name}): {' → '.join(chain.steps)}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _format_defender_strategy_knowledge(vuln_type: str) -> str:
+    """Relevant defense checklist for the defender prompt.
+
+    Returns "" when the vuln type is unrecognized or yields no knowledge.
+    """
+    vt = (vuln_type or "").lower()
+    mechanisms = _VULN_DEFENSE_MECHANISMS.get(vt)
+    library = _get_defender_library() if mechanisms else None
+
+    prediction = None
+    if library is not None:
+        prediction = next(
+            (p for p in library.predicted_attacks if p.attack_type == vt),
+            None,
+        )
+
+    if not mechanisms and not prediction:
+        return ""
+
+    lines = ["## Defense Checklist (verify presence)", ""]
+    lines.append(
+        "Verify whether the following defenses exist and are effective — do "
+        "**not** assume they are absent:"
+    )
+    lines.append("")
+
+    if library and mechanisms:
+        mech_by_name = {m.name: m for m in library.defense_mechanisms}
+        for name in mechanisms:
+            m = mech_by_name.get(name)
+            if m is None:
+                lines.append(f"- **{name}**: confirm whether present")
+            else:
+                lines.append(
+                    f"- **{m.name}** ({m.location}): effectiveness ~{m.effectiveness:.0%}"
+                )
+
+    if prediction:
+        if prediction.trigger_conditions:
+            lines.append(
+                "- **Trigger conditions to rule out**: "
+                + ", ".join(prediction.trigger_conditions)
+            )
+        lines.append(f"- **Suggested defense**: {prediction.suggested_defense}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+# =============================================================================
 # CONFIDENCE CALIBRATION (Shared across all roles)
 # =============================================================================
 
@@ -355,6 +507,8 @@ def get_attacker_user_prompt(
 **Known Bypasses:**
 {chr(10).join(f'- {s}' for s in vuln_patterns.get('sanitizers', [])[:5])}
 """
+
+    prompt += _format_attacker_strategy_knowledge(vuln_type)
 
     prompt += """
 ## Your Task
@@ -699,6 +853,8 @@ The attacker claims this is exploitable:
 
 You must address these claims and explain why they may not work, OR acknowledge if the attacker is correct.
 """
+
+    prompt += _format_defender_strategy_knowledge(vuln_type)
 
     prompt += """
 ## Your Task

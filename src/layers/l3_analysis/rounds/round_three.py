@@ -313,7 +313,9 @@ class RoundThreeExecutor:
             if final_status == VerificationStatus.CONFIRMED:
                 candidate.confidence = ConfidenceLevel.HIGH
             elif final_status == VerificationStatus.LIKELY:
-                candidate.confidence = ConfidenceLevel.HIGH
+                # P6-子项3: LIKELY (0.6-0.85) 应低于 CONFIRMED 一档 → MEDIUM，
+                # 否则与 CONFIRMED 同级会误升 EXPLOITABLE。
+                candidate.confidence = ConfidenceLevel.MEDIUM
             elif final_status == VerificationStatus.FALSE_POSITIVE:
                 candidate.confidence = ConfidenceLevel.LOW
             elif final_status == VerificationStatus.NOT_EXPLOITABLE:

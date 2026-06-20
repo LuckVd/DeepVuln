@@ -6,34 +6,18 @@ This module implements a three-role adversarial verification system:
 - Defender: Checks for sanitizers and defense mechanisms
 - Arbiter: Makes final judgment based on both arguments
 
-Enhanced with multi-round evolution:
-- Strategy libraries for attackers and defenders
-- Strategy evolution across rounds
-- Learning from failures and successes
-- Convergence detection
-- Rule extraction for future use
-
 Pre-filter components (P8-08):
 - VerificationGatekeeper: Smart gating for adversarial verification
+
+Strategy library (Phase 18 / P6-子项5):
+- StrategyLibrary: real attack/defense knowledge (bypass techniques, attack
+  chains, defense mechanisms) wired into the base attacker/defender prompts.
 """
 
 from .adversarial import AdversarialVerifier, AdversarialVerifierConfig
 from .arbiter import ArbiterVerifier
 from .attacker import AttackerVerifier
-from .convergence import (
-    ConvergenceChecker,
-    ConvergenceConfig,
-    ConvergenceReason,
-    ConvergenceResult,
-    ConvergenceState,
-    RoundSummary,
-)
 from .defender import DefenderVerifier
-from .enhanced_adversarial import (
-    EnhancedAdversarialVerification,
-    EnhancedVerificationConfig,
-    create_enhanced_verifier,
-)
 from .models import (
     AdversarialVerdict,
     ArgumentStrength,
@@ -51,7 +35,7 @@ from .verification_gatekeeper import (
     should_verify_finding,
 )
 
-# Enhanced verification components
+# Strategy library — real attack/defense knowledge used by the base prompts
 from .strategy_library import (
     AttackChainTemplate,
     AttackStrategy,
@@ -98,17 +82,6 @@ __all__ = [
     "SuccessRecord",
     "create_attacker_library",
     "create_defender_library",
-    # Convergence
-    "ConvergenceChecker",
-    "ConvergenceConfig",
-    "ConvergenceReason",
-    "ConvergenceResult",
-    "ConvergenceState",
-    "RoundSummary",
-    # Enhanced verification
-    "EnhancedAdversarialVerification",
-    "EnhancedVerificationConfig",
-    "create_enhanced_verifier",
     # Pre-filter (P8-08)
     "VerificationGatekeeper",
     "BatchGatekeeper",
