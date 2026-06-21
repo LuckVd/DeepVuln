@@ -1,6 +1,6 @@
 # Current Goal
 
-> **状态**: 进行中 🚧 — 第一~五批已 push（`7f6c242`，本地=origin）+ **第六批 P6 硬骨头**（子项1 gatekeeper 接线 + 子项2 证据门重设计，已完成、未提交）；**剩 P3 可达性质量 / C6 Tier2**。**权威测试基线：test_l3 2200 passed / 18 既有失败（2026-06-21 实跑，零回归）**
+> **状态**: 进行中 🚧 — 第一~五批已 push（`7f6c242`，本地=origin）+ **第六批 P6 硬骨头**（子项1 gatekeeper 接线 + 子项2 证据门重设计，已 push `1e1ac51`）；**剩 P3 可达性质量 / C6 Tier2**。**权威测试基线：test_l3 2200 passed / 18 既有失败（2026-06-21 实跑，零回归）**
 > **目标**: Phase 18 — 精度链路接通与多语言可达性补齐（基于全量实现审查）
 > **Goal ID**: phase18-precision-link-reachability
 > **创建日期**: 2026-06-20（最近更新：2026-06-21 第六批 P6 硬骨头完成：证据门读证据结论 + gatekeeper 接线）
@@ -100,7 +100,7 @@ TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归�
 
 ---
 
-## 第六批实施记录（2026-06-21，P6 硬骨头 完成 ✅，未提交）
+## 第六批实施记录（2026-06-21，P6 硬骨头 完成 ✅，已提交并 push `1e1ac51`）
 
 **核心修复**：证据门（evidence gate）此前看"引擎跑没跑"（`available`）而非"证据结论是否支持可利用"——又一道名义精度门没真正 guard（与 Phase 17 同类病灶）。本批重设计为读证据结论，并接通 gatekeeper。
 
@@ -119,7 +119,7 @@ TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归�
 
 **验证**：新建 `test_multi_dim_gate.py` 8 测试；修 `test_verification_gatekeeper` 5 个既有失败（3 字符串PoC→结构化metadata、2 加 dataflow_backed）+ 新增 LLM 防绕过测试；`test_final_score` 加 conditional/needs_review 断言。全 test_l3 **2200 passed / 18 既有失败（零回归）**；ruff F 改动文件 0 新增；ast OK；scan_orchestrator 模块可加载。⚠️ `test_web` 因环境缺 `slowapi` 无法 collection（既有环境问题），web 接线端到端未跑、待有 slowapi 环境补验。
 
-**改动文件**：`scoring/models.py` + `scoring/multi_dim_scorer.py` + `rounds/round_four.py` + `verification/verification_gatekeeper.py` + `web/services/scan_orchestrator.py` + `core/final_score.py` + 3 测试文件。**未 commit**。
+**改动文件**：`scoring/models.py` + `scoring/multi_dim_scorer.py` + `rounds/round_four.py` + `verification/verification_gatekeeper.py` + `web/services/scan_orchestrator.py` + `core/final_score.py` + 3 测试文件。已提交并 push `1e1ac51`。
 
 ---
 
