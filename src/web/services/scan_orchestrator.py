@@ -971,7 +971,7 @@ class ScanOrchestrator:
 
     async def _execute_engines(self, engines: Dict[str, BaseEngine]) -> None:
         """
-        Execute multiple engines concurrently using asyncio.gather.
+        Execute engines concurrently, checkpointing each as it finishes.
 
         Implements the concurrent execution strategy:
         - CodeQL (CPU intensive) runs separately
@@ -983,6 +983,11 @@ class ScanOrchestrator:
         are skipped, and a mid-phase checkpoint is written as each engine
         finishes so a crash before the phase completes lets resume skip
         finished engines (especially expensive CodeQL).
+
+        P7-C6 Tier2: the concurrent batch uses ``asyncio.wait`` with
+        ``FIRST_COMPLETED`` so each engine is checkpointed the moment it
+        finishes — a crash mid-batch then only re-runs the still-pending
+        engines, not the whole batch (Tier1 gathered first).
         """
         # P7-C6: skip engines already completed on a prior (interrupted) run.
         # Their results were restored into scan_results from the checkpoint.
@@ -1018,35 +1023,40 @@ class ScanOrchestrator:
                 except Exception as e:
                     await self.progress_callback.on_engine_failed(name, str(e))
 
-        # Execute other engines concurrently
+        # Execute other engines concurrently — Tier2: checkpoint each engine
+        # the moment it finishes (asyncio.wait FIRST_COMPLETED), instead of
+        # gathering the whole batch first. A crash mid-batch then only
+        # re-runs still-pending engines on resume, not the entire batch.
         if concurrent_engines:
-            tasks = []
-            task_names = []
-
-            for name, engine in concurrent_engines.items():
-                task = asyncio.create_task(
+            pending_tasks = {
+                asyncio.create_task(
                     self._run_engine_concurrent(name, engine)
+                ): name
+                for name, engine in concurrent_engines.items()
+            }
+
+            while pending_tasks:
+                done, _ = await asyncio.wait(
+                    set(pending_tasks),
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-                tasks.append(task)
-                task_names.append(name)
-
-            # Wait for all concurrent tasks
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Process results — checkpoint each engine as it is recorded.
-            for name, result in zip(task_names, results):
-                if isinstance(result, Exception):
-                    await self.progress_callback.on_engine_failed(
-                        name, str(result)
-                    )
-                elif result:
-                    self.scan_results[name] = result
-                    await self.progress_callback.on_engine_complete(
-                        name,
-                        len(result.findings),
-                        result.duration_seconds or 0,
-                    )
-                    await self._save_engine_checkpoint(name)
+                for finished in done:
+                    name = pending_tasks.pop(finished)
+                    try:
+                        result = finished.result()
+                    except Exception as e:
+                        await self.progress_callback.on_engine_failed(
+                            name, str(e)
+                        )
+                        continue
+                    if result:
+                        self.scan_results[name] = result
+                        await self.progress_callback.on_engine_complete(
+                            name,
+                            len(result.findings),
+                            result.duration_seconds or 0,
+                        )
+                        await self._save_engine_checkpoint(name)
 
     async def _run_engine_with_timeout(
         self, name: str, engine: BaseEngine

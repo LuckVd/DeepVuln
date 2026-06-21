@@ -278,6 +278,15 @@ class AttackPathFinder(PathFinder):
                 continue
             located = self._locate_block(cpg, node)
             if located is None:
+                # P3 observability: sink has no CFG basic block (nested in a
+                # construct the builder doesn't model). Treated as reachable
+                # to avoid false negatives; basic-block recursion reduces how
+                # often we land here.
+                self.logger.debug(
+                    "CFG reachability: node %s has no basic block, "
+                    "treating as reachable",
+                    node_id,
+                )
                 continue
             cfg, block = located
             # No entry node → cannot verify; treat as reachable.

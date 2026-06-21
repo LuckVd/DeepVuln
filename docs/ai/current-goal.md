@@ -1,9 +1,9 @@
 # Current Goal
 
-> **状态**: 进行中 🚧 — 第一~五批已 push（`7f6c242`，本地=origin）+ **第六批 P6 硬骨头**（子项1 gatekeeper 接线 + 子项2 证据门重设计，已 push `1e1ac51`）；**剩 P3 可达性质量 / C6 Tier2**。**权威测试基线：test_l3 2200 passed / 18 既有失败（2026-06-21 实跑，零回归）**
+> **状态**: 进行中 🚧 — 第一~六批已 push（`1e1ac51`，本地=origin）+ **第七批 C6 Tier2 + P3 可达性增量**（已完成、未提交）；**Phase 18 核心 + 增量全部达成**，仅剩 P3 条件求值（`if False` 死分支，XL，独立立项）。**权威测试基线：test_l3 2203 passed / 18 既有失败（零回归）**
 > **目标**: Phase 18 — 精度链路接通与多语言可达性补齐（基于全量实现审查）
 > **Goal ID**: phase18-precision-link-reachability
-> **创建日期**: 2026-06-20（最近更新：2026-06-21 第六批 P6 硬骨头完成：证据门读证据结论 + gatekeeper 接线）
+> **创建日期**: 2026-06-20（最近更新：2026-06-21 第七批 C6 Tier2 + P3 可达性增量完成）
 >
 > **📊 进度快照（新会话先看这个）**：
 > - ✅ **第一批**（`4ee490b`）：P0 精度链路 / P1 Java call_graph 注册 / P4 语言收敛+CodeQL 类型
@@ -120,6 +120,21 @@ TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归�
 **验证**：新建 `test_multi_dim_gate.py` 8 测试；修 `test_verification_gatekeeper` 5 个既有失败（3 字符串PoC→结构化metadata、2 加 dataflow_backed）+ 新增 LLM 防绕过测试；`test_final_score` 加 conditional/needs_review 断言。全 test_l3 **2200 passed / 18 既有失败（零回归）**；ruff F 改动文件 0 新增；ast OK；scan_orchestrator 模块可加载。⚠️ `test_web` 因环境缺 `slowapi` 无法 collection（既有环境问题），web 接线端到端未跑、待有 slowapi 环境补验。
 
 **改动文件**：`scoring/models.py` + `scoring/multi_dim_scorer.py` + `rounds/round_four.py` + `verification/verification_gatekeeper.py` + `web/services/scan_orchestrator.py` + `core/final_score.py` + 3 测试文件。已提交并 push `1e1ac51`。
+
+---
+
+## 第七批实施记录（2026-06-21，C6 Tier2 + P3 可达性增量 完成 ✅，未提交）
+
+**C6 Tier2（并发引擎逐引擎 checkpoint）**：`_execute_engines` 并发批次从 `asyncio.gather`（等全部）改为 `asyncio.wait(FIRST_COMPLETED)` 循环——每引擎完成即 `_save_engine_checkpoint`，并发批次中途被杀也能 resume 跳过已完成引擎（Tier1 是整批重跑）。`test_scan_resume_findings` 16 passed 确认存档/恢复/跳过语义不破坏。
+
+**P3 可达性质量增量**（用户选增量 scope；条件求值 `if False` 死分支 = XL，标后续独立立项）：
+- 根因：4 个 CFG builder 的 `identify_basic_blocks` 只遍历函数顶层，`_is_block_terminator` 把 if/for/while 当终止符 → 体内语句无 block → `_locate_block` None → `finder._verify_cfg_reachability` continue 视为可达（嵌套 sink 误判可达）。
+- 关键发现：`build_cfg_edges` 的 `_build_if/while/for/try/match edges` 用 `blocks[index+1]` 当分支目标——设计本假设"体紧接父 block"，递归 identify_basic_blocks 后歪打正着连对边，**无需重写 build_cfg_edges**。
+- 实施：`base.py` 加 `_collect_compound_body` + `_recurse_compound_body` 共享 helper（build_cfg 绑 `self._ast_graph`）；4 builder（py/java/js/go）identify_basic_blocks 终止符分支加递归 hook；`finder` `_locate_block` None 加可观测性 debug log（不改行为，零回归）。
+- 收益：嵌套 sink（if/for/while 体）进真实 CFG 可达性检查（消除"block 缺失 → continue 误判可达"）。**不解决 `if False` 死分支**（CFG 结构可达，需条件求值，标后续）。
+- 验证：新建 `test_cfg_recursion.py` 3 测试（if 体 sink 进 block / 无 ast_graph 兼容 / `_collect_compound_body` 取体）；全 test_l3 **2203 passed / 18 既有失败（零回归）**；ruff F 零新增；ast OK。
+
+**改动文件**：`scan_orchestrator.py`（C6 Tier2）+ `cfg/base.py` + `cfg/builders/{python,java,js,go}_cfg.py` + `path_finder/finder.py`（P3）+ 新建 `test_cfg_recursion.py`。**未提交**。
 
 ---
 

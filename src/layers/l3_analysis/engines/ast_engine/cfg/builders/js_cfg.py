@@ -127,6 +127,10 @@ class JSCFGBuilder(LanguageCFGBuilder):
                 current_block.leader_type = stmt_type
                 blocks.append(current_block)
 
+                # P3: recurse into the compound body (if/for/while/...) so
+                # nested sinks get their own basic blocks for edge connection.
+                blocks.extend(self._recurse_compound_body(stmt, file_path))
+
                 if i < len(function_body) - 1:
                     current_block = BasicBlock(
                         start_line=function_body[i + 1].line,

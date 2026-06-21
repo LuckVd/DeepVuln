@@ -28,6 +28,10 @@ class LanguageCFGBuilder(ABC):
     def __init__(self) -> None:
         """Initialize the language CFG builder."""
         self.logger = get_logger(__name__)
+        # Bound per build_cfg() call so identify_basic_blocks can recurse
+        # into compound-statement bodies (if/for/while/...). None when
+        # identify_basic_blocks is called outside build_cfg (no recursion).
+        self._ast_graph: Any = None
 
     @abstractmethod
     def get_language(self) -> str:
@@ -125,6 +129,7 @@ class LanguageCFGBuilder(ABC):
             Complete ControlFlowGraph for the function
         """
         self.logger.debug(f"Building CFG for function {function_id}")
+        self._ast_graph = ast_graph  # P3: enable basic-block recursion
 
         cfg = ControlFlowGraph(
             function_id=function_id,
@@ -214,6 +219,44 @@ class LanguageCFGBuilder(ABC):
             if child and child.type.endswith("_statement"):
                 body.append(child)
         return body
+
+    def _collect_compound_body(self, stmt: Any) -> list[Any]:
+        """Return the primary body statements of a compound statement.
+
+        Phase 18/P3: lets identify_basic_blocks recurse so a sink nested in
+        an if/for/while/try body gets its own basic block and goes through
+        real CFG reachability, instead of being silently treated as
+        reachable (the old ``_locate_block -> None -> continue`` fallback).
+        Targets the first block/statement_block child (consequence / loop
+        body / try body) — shared across python/java/js/go grammars. Returns
+        [] when no AST graph is bound (behaviour unchanged).
+        """
+        if self._ast_graph is None:
+            return []
+        body_wrappers = {"block", "statement_block"}
+        for child_id in stmt.children:
+            child = self._ast_graph.get_node(child_id)
+            if child and child.type in body_wrappers:
+                body: list[Any] = []
+                for stmt_id in child.children:
+                    nested = self._ast_graph.get_node(stmt_id)
+                    if nested:
+                        body.append(nested)
+                return body
+        return []
+
+    def _recurse_compound_body(
+        self, stmt: Any, file_path: str
+    ) -> list[BasicBlock]:
+        """Recurse into a compound statement's body, returning its basic
+        blocks. identify_basic_blocks nests these right after the compound's
+        own block so build_cfg_edges (which targets ``blocks[index+1]``)
+        connects them correctly.
+        """
+        body_stmts = self._collect_compound_body(stmt)
+        if not body_stmts:
+            return []
+        return self.identify_basic_blocks(body_stmts, file_path)
 
     def _calculate_loop_depth(self, cfg: ControlFlowGraph) -> None:
         """Calculate loop nesting depth for each node."""
