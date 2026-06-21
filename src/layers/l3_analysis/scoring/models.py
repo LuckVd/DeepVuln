@@ -98,6 +98,15 @@ class MultiDimScore:
     # Derived exploitability status
     exploitability_status: ExploitabilityStatus = ExploitabilityStatus.NEEDS_REVIEW
 
+    # Evidence-tier counts (Phase 18/P6): dataflow-confirming vs
+    # reachability-supporting dimensions, produced by MultiDimScorer's
+    # evidence gate. confirming>=1 means the EXPLOITABLE verdict is backed by
+    # a real source->sink dataflow (CodeQL full dataflow or taint
+    # is_exploitable), not merely reachability. Consumed by the gatekeeper's
+    # dataflow_backed check.
+    confirming_evidence_count: int = 0
+    supporting_evidence_count: int = 0
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -113,6 +122,8 @@ class MultiDimScore:
             "dimensions_used": self.dimensions_used,
             "missing_dimensions": self.missing_dimensions,
             "exploitability_status": self.exploitability_status.value,
+            "confirming_evidence_count": self.confirming_evidence_count,
+            "supporting_evidence_count": self.supporting_evidence_count,
         }
 
     def get_dimension(self, dimension: str) -> DimensionScore:
@@ -141,17 +152,15 @@ class MultiDimConfig:
     exploitable_threshold: float = 0.6  # Score above this = exploitable (lowered for better coverage)
     not_exploitable_threshold: float = 0.3  # Score below this = not exploitable
 
-    # Evidence gate (precision-first): EXPLOITABLE requires at least
-    # ``min_evidence_dimensions`` of the hard-evidence dimensions (CodeQL
-    # dataflow / taint tracking / reachability) to be available. The
-    # attack_surface dimension is a label, NOT hard evidence, so it cannot
-    # confirm a vulnerability on its own.
-    evidence_dimensions: tuple[str, ...] = (
-        ScoringDimension.CODEQL.value,
-        ScoringDimension.TAINT_TRACKING.value,
-        ScoringDimension.REACHABILITY.value,
-    )
-    min_evidence_dimensions: int = 1
+    # Evidence gate (precision-first, Phase 18/P6): EXPLOITABLE requires at
+    # least one *confirming* dataflow dimension — CodeQL full dataflow
+    # (source+sink) or taint is_exploitable. Findings with only *supporting*
+    # evidence (taint reachable-but-not-exploitable, or reachability only)
+    # are downgraded to CONDITIONAL. The attack_surface dimension is a label,
+    # not evidence, so it never confirms on its own. Set
+    # ``require_confirming_for_exploitable=False`` to restore the legacy
+    # "any available hard dimension" behaviour.
+    require_confirming_for_exploitable: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -162,6 +171,5 @@ class MultiDimConfig:
             "require_min_dimensions": self.require_min_dimensions,
             "exploitable_threshold": self.exploitable_threshold,
             "not_exploitable_threshold": self.not_exploitable_threshold,
-            "evidence_dimensions": list(self.evidence_dimensions),
-            "min_evidence_dimensions": self.min_evidence_dimensions,
+            "require_confirming_for_exploitable": self.require_confirming_for_exploitable,
         }

@@ -137,18 +137,22 @@ class VerificationGatekeeper:
                     should_verify=False,
                 )
 
-        # Check 4: High confidence + exploitability + strong evidence = confirmed.
-        # Require _has_strong_evidence because the "exploitable" label itself
-        # can be produced by LLM assessment without a real PoC.
+        # Check 4: High confidence + dataflow-backed exploitability = confirmed.
+        # Phase 18/P6: the multi-dim evidence gate now backs the "exploitable"
+        # label with a real source->sink dataflow (CodeQL full dataflow or
+        # taint is_exploitable), recorded as metadata["dataflow_backed"]. So
+        # we trust the label when it is dataflow-backed, without requiring an
+        # extra PoC. LLM-only overrides leave dataflow_backed False and still
+        # require verification.
         if finding.confidence >= 0.85:
             if (
                 finding.exploitability
                 and finding.exploitability in ["exploitable", "confirmed"]
-                and self._has_strong_evidence(finding)
+                and self._is_dataflow_backed(finding)
             ):
                 return GatekeeperResult(
                     decision=AutoDecision.CONFIRMED,
-                    reason="High confidence + exploitability + strong evidence - auto-confirm",
+                    reason="High confidence + dataflow-backed exploitability - auto-confirm",
                     should_verify=False,
                 )
 
@@ -223,6 +227,16 @@ class VerificationGatekeeper:
                 return True
 
         return False
+
+    def _is_dataflow_backed(self, finding: Finding) -> bool:
+        """Check whether the finding's exploitability is backed by a real
+        source->sink dataflow.
+
+        Set by the multi-dim evidence gate (round_four) as structured
+        metadata, so it cannot be faked by LLM prose. A LLM-only override of
+        EXPLOITABLE leaves this False, so it still requires verification.
+        """
+        return bool((finding.metadata or {}).get("dataflow_backed"))
 
     def auto_decide(self, finding: Finding, reason: str) -> str:
         """

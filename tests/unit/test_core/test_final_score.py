@@ -61,6 +61,9 @@ class TestConstants:
         assert EXPLOITABILITY_SCORES["possible"] == 0.5
         assert EXPLOITABILITY_SCORES["unlikely"] == 0.3
         assert EXPLOITABILITY_SCORES["not_exploitable"] == 0.0
+        # Phase 18/P6: CONDITIONAL / NEEDS_REVIEW map below possible.
+        assert EXPLOITABILITY_SCORES["conditional"] == 0.45
+        assert EXPLOITABILITY_SCORES["needs_review"] == 0.35
 
     def test_engine_weights(self):
         """Test engine weight mapping."""
@@ -131,6 +134,16 @@ class TestGetExploitabilityScore:
     def test_not_exploitable(self):
         """Test NOT_EXPLOITABLE score."""
         assert get_exploitability_score("not_exploitable") == 0.0
+
+    def test_conditional_and_needs_review_below_possible(self):
+        """Phase 18/P6: CONDITIONAL/NEEDS_REVIEW map below possible, and
+        NEEDS_REVIEW ranks below CONDITIONAL (less evidence)."""
+        assert get_exploitability_score("conditional") == 0.45
+        assert get_exploitability_score("needs_review") == 0.35
+        assert get_exploitability_score("conditional") < 0.5
+        assert get_exploitability_score("needs_review") < get_exploitability_score(
+            "conditional"
+        )
 
     def test_aliases(self):
         """Test alias values."""

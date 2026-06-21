@@ -1577,21 +1577,28 @@ class ScanOrchestrator:
             logger.warning("No verification LLM config found, skipping adversarial verification")
             return {"verified_count": 0, "confirmed": 0, "rejected": 0, "skipped": True}
 
-        # Filter findings that should be verified
-        findings_to_verify = [
-            f for f in all_findings
-            if adversarial_service.should_verify_finding(f)
-        ]
+        # Phase 18/P6: filter findings via the verification gatekeeper,
+        # replacing the hand-written severity/confidence filter. The
+        # gatekeeper auto-confirms dataflow-backed EXPLOITABLE / PoC-backed
+        # findings, auto-rejects clear false positives, and skips low-value
+        # ones — saving ~40% of adversarial LLM calls. The adversarial
+        # service itself is still used below for findings that pass the gate.
+        from src.layers.l3_analysis.verification.verification_gatekeeper import (
+            should_verify_finding,
+        )
 
-        # Broadcast skipped findings
-        skipped_findings = [f for f in all_findings if not adversarial_service.should_verify_finding(f)]
-        for f in skipped_findings:
-            skip_reason = "低严重等级" if hasattr(f, 'severity') and str(f.severity).lower() == 'info' else "低置信度"
+        gate_decisions = [(f, should_verify_finding(f)) for f in all_findings]
+        findings_to_verify = [f for f, (verify, _) in gate_decisions if verify]
+
+        # Broadcast skipped findings with the gatekeeper's reason.
+        for f, (verify, reason) in gate_decisions:
+            if verify:
+                continue
             await self.progress_callback.broadcast_event("finding_skipped", {
                 "finding_id": f.id or "unknown",
                 "finding_title": getattr(f, 'title', '') or '',
                 "severity": str(getattr(f, 'severity', '')),
-                "reason": skip_reason,
+                "reason": reason,
             })
 
         if not findings_to_verify:

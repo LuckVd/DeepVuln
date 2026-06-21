@@ -899,6 +899,16 @@ class RoundFourExecutor:
                 status = multi_score.exploitability_status
                 confidence = multi_score.final_confidence
 
+                # Phase 18/P6: record whether the verdict is backed by a real
+                # source->sink dataflow. The verification gatekeeper reads
+                # this to auto-confirm safely (dataflow-backed EXPLOITABLE)
+                # and to ignore LLM-only overrides that lack dataflow backing.
+                if finding.metadata is None:
+                    finding.metadata = {}
+                finding.metadata["dataflow_backed"] = (
+                    multi_score.confirming_evidence_count >= 1
+                )
+
                 # Build reasoning from multi-dim evidence
                 reasoning_parts = [
                     f"Multi-dimensional scoring (strategy: {multi_score.strategy_used})",

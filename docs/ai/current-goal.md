@@ -1,9 +1,9 @@
 # Current Goal
 
-> **状态**: 进行中 🚧 — 第一/二批 + P6-eval + 第三批 P5/P7 + 第四批 P6 低风险子项（子项3/4/5，`4c293b1`）+ 第五批 P7-C6 引擎级 checkpoint（Tier1，`7f6c242`）**均已提交并 push**（本地=origin，工作区干净）；P6 对抗接线硬骨头（子项1 gatekeeper / 子项2 min_evidence_dimensions）留独立会话；剩 P3 可达性质量 / P6 硬骨头。**权威测试基线：test_l3 2186 passed / 23 既有失败（2026-06-21 实跑确认）**
+> **状态**: 进行中 🚧 — 第一~五批已 push（`7f6c242`，本地=origin）+ **第六批 P6 硬骨头**（子项1 gatekeeper 接线 + 子项2 证据门重设计，已完成、未提交）；**剩 P3 可达性质量 / C6 Tier2**。**权威测试基线：test_l3 2200 passed / 18 既有失败（2026-06-21 实跑，零回归）**
 > **目标**: Phase 18 — 精度链路接通与多语言可达性补齐（基于全量实现审查）
 > **Goal ID**: phase18-precision-link-reachability
-> **创建日期**: 2026-06-20（最近更新：2026-06-21 第五批 P7-C6 已提交+push，并据 git 真相对齐文档）
+> **创建日期**: 2026-06-20（最近更新：2026-06-21 第六批 P6 硬骨头完成：证据门读证据结论 + gatekeeper 接线）
 >
 > **📊 进度快照（新会话先看这个）**：
 > - ✅ **第一批**（`4ee490b`）：P0 精度链路 / P1 Java call_graph 注册 / P4 语言收敛+CodeQL 类型
@@ -96,7 +96,30 @@ TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归�
 
 **验证**：新增 `TestEngineLevelCheckpoint` 4 测试（restore completed_engines / 交集防错 / 已完成引擎不重跑 / 逐引擎存档含 completed_engines）。全 test_l3 **2186 passed / 23 既有失败不变**（C6 改动在 web 不影响 test_l3）；test_web **+4 passed、12 failed/21 errors 全既有**（stash 对比确认零回归）；ruff F 改动文件 0 新增（scan_orchestrator.py 既有的 exclude_files@756/CodeQLEngine@954 与本批无关）。
 
-**改动文件**：`scan_orchestrator.py`（`__init__`/`_serialize_resume_data`/`_save_engine_checkpoint`/`_restore_state_from_checkpoint`/`_execute_engines`）+ `scan_pipeline_adapters.py`（`WebCheckpointSink.save` 改用单一序列化）+ 测试（`test_scan_resume_findings.py` 加 `TestEngineLevelCheckpoint` 4 测试 + 更新 1 个既有断言 resume_data 现含 completed_engines）。**未 commit**。
+**改动文件**：`scan_orchestrator.py`（`__init__`/`_serialize_resume_data`/`_save_engine_checkpoint`/`_restore_state_from_checkpoint`/`_execute_engines`）+ `scan_pipeline_adapters.py`（`WebCheckpointSink.save` 改用单一序列化）+ 测试（`test_scan_resume_findings.py` 加 `TestEngineLevelCheckpoint` 4 测试 + 更新 1 个既有断言 resume_data 现含 completed_engines）。已提交并 push `7f6c242`。
+
+---
+
+## 第六批实施记录（2026-06-21，P6 硬骨头 完成 ✅，未提交）
+
+**核心修复**：证据门（evidence gate）此前看"引擎跑没跑"（`available`）而非"证据结论是否支持可利用"——又一道名义精度门没真正 guard（与 Phase 17 同类病灶）。本批重设计为读证据结论，并接通 gatekeeper。
+
+**子项2 证据门重设计**（`scoring/`）：
+- 新增 `_classify_evidence(dimensions)` 读各维度 `evidence` dict 结论：**confirming**（数据流级：CodeQL `has_source+has_sink` 无 sanitizer / taint `is_exploitable`）vs **supporting**（可达级：taint 可达未确认 / reachability 可达）。attack_surface 是 label，不参与。
+- `_derive_status` 重写（用户取向）：`score>=阈值` 时 **confirming>=1→EXPLOITABLE**；仅 supporting→**CONDITIONAL**（不直接 EXPLOITABLE）；都无→NEEDS_REVIEW。本机无 CodeQL 时 taint 真数据流仍能确认真漏洞。证据门只在 `score>=阈值` 起作用，中间区纯按 score 中点判 CONDITIONAL/UNLIKELY（避免低分误升）。
+- `MultiDimScore` 加 `confirming_evidence_count`/`supporting_evidence_count`；`MultiDimConfig` 删 `evidence_dimensions`/`min_evidence_dimensions`（旧"available 即证据"语义已错），换 `require_confirming_for_exploitable` 开关（False 退回旧行为）。
+
+**`dataflow_backed` 桥梁**（`round_four.py`）：`_verify_exploitability` 把 `confirming_count>=1` 落到 `finding.metadata["dataflow_backed"]`，让 gatekeeper 能区分"数据流背书的 EXPLOITABLE"与"LLM 覆盖的 EXPLOITABLE"。
+
+**子项1 gatekeeper 接线**（`verification_gatekeeper.py` + `scan_orchestrator.py`）：
+- Check4 放宽：`confidence>=0.85 + exploitable + _is_dataflow_backed`→CONFIRMED（不再强求 PoC metadata，因子项2 让标签可信）；新增 `_is_dataflow_backed`。
+- `scan_orchestrator:1580` 用 gatekeeper `should_verify_finding(f)->(bool,str)` 替换手写极简版，`reason` 用 gatekeeper 返回值（省 ~40% 对抗验证 LLM 调用）。
+
+**连带修复**（`core/final_score.py`）：`EXPLOITABILITY_SCORES` 补 `conditional=0.45`/`needs_review=0.35`（消除 NEEDS_REVIEW 被抹成 0.5=possible）。
+
+**验证**：新建 `test_multi_dim_gate.py` 8 测试；修 `test_verification_gatekeeper` 5 个既有失败（3 字符串PoC→结构化metadata、2 加 dataflow_backed）+ 新增 LLM 防绕过测试；`test_final_score` 加 conditional/needs_review 断言。全 test_l3 **2200 passed / 18 既有失败（零回归）**；ruff F 改动文件 0 新增；ast OK；scan_orchestrator 模块可加载。⚠️ `test_web` 因环境缺 `slowapi` 无法 collection（既有环境问题），web 接线端到端未跑、待有 slowapi 环境补验。
+
+**改动文件**：`scoring/models.py` + `scoring/multi_dim_scorer.py` + `rounds/round_four.py` + `verification/verification_gatekeeper.py` + `web/services/scan_orchestrator.py` + `core/final_score.py` + 3 测试文件。**未 commit**。
 
 ---
 

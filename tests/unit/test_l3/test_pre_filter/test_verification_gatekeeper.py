@@ -135,7 +135,7 @@ class TestStrongEvidenceDetection:
                 snippet='os.system(user_input)',
             ),
             source="agent",
-            metadata={"poc": "curl 'http://target/cmd?cmd=whoami'"},
+            metadata={"poc": {"url": "http://target/cmd", "command": "whoami"}},
         )
 
         result = gatekeeper.should_verify(finding)
@@ -163,6 +163,9 @@ class TestStrongEvidenceDetection:
                 snippet='execute(f"SELECT * FROM users WHERE id = {user_id}")',
             ),
             source="agent",
+            # Structured PoC record (dict) counts as strong evidence; the
+            # free-text "Working PoC" in description alone is NOT trusted.
+            metadata={"poc": {"payload": "OR 1=1", "result": "all rows"}},
         )
 
         result = gatekeeper.should_verify(finding)
@@ -282,6 +285,9 @@ class TestConfirmedExploitability:
                 snippet='execute(f"SELECT * FROM users WHERE id = {user_id}")',
             ),
             source="agent",
+            # Phase 18/P6: the "confirmed" label is trusted only when backed
+            # by a real source->sink dataflow (set by the evidence gate).
+            metadata={"dataflow_backed": True},
         )
 
         result = gatekeeper.should_verify(finding)
@@ -310,12 +316,44 @@ class TestConfirmedExploitability:
                 snippet='os.system(cmd)',
             ),
             source="agent",
+            # Phase 18/P6: dataflow-backed EXPLOITABLE auto-confirms.
+            metadata={"dataflow_backed": True},
         )
 
         result = gatekeeper.should_verify(finding)
 
         assert result.decision == AutoDecision.CONFIRMED
         assert result.should_verify is False
+
+    def test_exploitable_without_dataflow_backing_requires_verification(self):
+        """Phase 18/P6: an EXPLOITABLE label without dataflow backing (e.g. a
+        LLM-only override) must still require verification — never auto-confirm
+        a label that no real source->sink dataflow supports.
+        """
+        gatekeeper = VerificationGatekeeper()
+
+        finding = Finding(
+            id="test-llm-override",
+            rule_id="cmd_injection",
+            type=FindingType.VULNERABILITY,
+            severity=SeverityLevel.HIGH,
+            confidence=0.85,
+            exploitability="exploitable",
+            title="Command Injection",
+            description="Possibly exploitable",
+            fix_suggestion="Use subprocess",
+            location=CodeLocation(
+                file="test.py",
+                line=10,
+                end_line=10,
+                snippet='os.system(cmd)',
+            ),
+            source="agent",
+        )
+
+        result = gatekeeper.should_verify(finding)
+
+        assert result.should_verify is True
 
 
 class TestAutoDecision:
@@ -484,7 +522,7 @@ class TestIntegrationScenarios:
                 snippet='eval(request.data["cmd"])',
             ),
             source="agent",
-            metadata={"poc": "python -c 'import socket; ...'"},
+            metadata={"poc": {"command": "python -c 'import socket; ...'"}},
         )
 
         result = gatekeeper.should_verify(finding)

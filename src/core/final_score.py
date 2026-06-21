@@ -40,6 +40,8 @@ EXPLOITABILITY_SCORES: dict[str, float] = {
     "exploitable": 1.0,
     "likely": 0.7,
     "possible": 0.5,
+    "conditional": 0.45,  # Supporting evidence only — needs review, below possible
+    "needs_review": 0.35,  # Insufficient evidence to confirm — below possible
     "unlikely": 0.3,
     "not_exploitable": 0.0,
     # Aliases
