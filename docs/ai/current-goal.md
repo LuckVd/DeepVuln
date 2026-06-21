@@ -1,9 +1,9 @@
 # Current Goal
 
-> **状态**: 进行中 🚧 — 第一/二批 + P6-eval + 第三批 P5/P7 已 push（`a9ef21a`+`bc1db1f`）；**第四批 P6 低风险子项（子项3/4/5）已提交 `4c293b1`（未 push）**；**第五批 P7-C6 引擎级 checkpoint（Tier1）已完成、未提交**；P6 对抗接线硬骨头（子项1 gatekeeper / 子项2 min_evidence_dimensions）仍留独立会话；剩 P3 可达性质量 / P6 硬骨头
+> **状态**: 进行中 🚧 — 第一/二批 + P6-eval + 第三批 P5/P7 + 第四批 P6 低风险子项（子项3/4/5，`4c293b1`）+ 第五批 P7-C6 引擎级 checkpoint（Tier1，`7f6c242`）**均已提交并 push**（本地=origin，工作区干净）；P6 对抗接线硬骨头（子项1 gatekeeper / 子项2 min_evidence_dimensions）留独立会话；剩 P3 可达性质量 / P6 硬骨头。**权威测试基线：test_l3 2186 passed / 23 既有失败（2026-06-21 实跑确认）**
 > **目标**: Phase 18 — 精度链路接通与多语言可达性补齐（基于全量实现审查）
 > **Goal ID**: phase18-precision-link-reachability
-> **创建日期**: 2026-06-20（最近更新：2026-06-20 第三批 P5/P7 push 后）
+> **创建日期**: 2026-06-20（最近更新：2026-06-21 第五批 P7-C6 已提交+push，并据 git 真相对齐文档）
 >
 > **📊 进度快照（新会话先看这个）**：
 > - ✅ **第一批**（`4ee490b`）：P0 精度链路 / P1 Java call_graph 注册 / P4 语言收敛+CodeQL 类型
@@ -11,7 +11,7 @@
 > - ✅ **P6-eval**（`4409eb4`）：round_four severity 保底（防漏报）
 > - ✅ **第三批 P5 续扫完整性**（`a9ef21a`）：H2a pause 真停（revoke）+ H2b clone 防挂死（kill_after_timeout）+ task6 `_finalize_results` DB 去重 + task7 阶段命名统一收敛 ScanPhase（**修复 resume 全量重跑根因**）
 > - ✅ **第三批 P7 可靠性**（`a9ef21a`+`bc1db1f`）：C3 git timeout + C4 baseline fixed 加 scanned_files 覆盖判定 + C5 增量 relative import level 解析 + C7 finding_budget 截断前排序 + 删死代码（`_deduplicate_findings`/`calculate_finding_confidence`）
-> - ✅ **P8 测试真实性**（横穿，`a9ef21a`）：3 个 web 测试文件 fixture 修复（AsyncSessionLocal→get_session_local，setup ERROR→全绿）+ 删 4 CLIAdapter 死测试；全 test_l3 **2200 passed / 23 既有失败（零回归，+10 新真实测试）**
+> - ✅ **P8 测试真实性**（横穿，`a9ef21a`）：3 个 web 测试文件 fixture 修复（AsyncSessionLocal→get_session_local，setup ERROR→全绿）+ 删 4 CLIAdapter 死测试；第三批当时全 test_l3 **2200 passed / 23 既有失败（零回归，+10 新真实测试）**（注：第四批删 test_enhanced 后基线降为 2186，见顶部权威基线）
 > - ✅ **已 push** `origin/feat/static-evidence-grounding`（fca0c22..bc1db1f，本地=origin，工作区干净）
 > - ⏳ **P6 对抗接线 → 独立会话**（用户 2026-06-20 决定）：子项评估见下；**C6 引擎级 checkpoint / P3 可达性质量** 也待做
 > - ⚠️ **治本（P6-rootcause）已评估回退**：taint→None 正确但与 round_four_llm/codeql 测试架构冲突（8 回归），保底已解决核心，归后续重构测试架构时做
@@ -60,7 +60,7 @@ TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归�
 
 ---
 
-## 第四批实施记录（2026-06-20，P6 低风险子项 完成 ✅，未提交）
+## 第四批实施记录（2026-06-20，P6 低风险子项 完成 ✅，已提交并 push `4c293b1`）
 
 用户决定 P6 硬骨头（子项1 gatekeeper 接线 / 子项2 min_evidence_dimensions）留独立会话，本批先把低风险高确定性的子项3/4 清掉，并按"删花哨的、留有用的、把它接对"新增**子项5（真能力提升）**。全 test_l3 **2186 passed / 23 既有失败（零回归）**。
 
@@ -78,7 +78,7 @@ TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归�
 
 ---
 
-## 第五批实施记录（2026-06-21，P7-C6 引擎级 checkpoint Tier1 完成 ✅，未提交）
+## 第五批实施记录（2026-06-21，P7-C6 引擎级 checkpoint Tier1 完成 ✅，已提交并 push `7f6c242`）
 
 **核心价值**：长扫描在 `engine_execution` 阶段中途崩溃（尤其 CodeQL 跑完、并发引擎跑一半时），resume **跳过已完成的引擎**，不白跑昂贵的 CodeQL。
 
@@ -273,7 +273,7 @@ export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"
 # glm-4.5-air（快）；本机 1.9GB（无 CodeQL）；测试用 sqlite
 
 # 全量回归
-python3 -m pytest tests/unit/test_l3 -q 2>&1 | tail -30   # 期望 2195 passed / 23 既有失败，关注失败数不增
+python3 -m pytest tests/unit/test_l3 -q 2>&1 | tail -30   # 期望 2186 passed / 23 既有失败，关注失败数不增
 # 防回归
 python3 -c "import ast,pathlib;[ast.parse(f.read_text()) for f in pathlib.Path('src').rglob('*.py')];print('OK')"
 ruff check src/ --select F
@@ -306,6 +306,6 @@ ruff check src/ --select F
 | **C6 引擎级 checkpoint** | `src/web/services/scan_orchestrator.py:926`(`_execute_engines`) / `scan_pipeline` engine_execution | engine_execution 现**整阶段级** checkpoint（全引擎跑完才写）。改 per-engine：每引擎完成写 + resume 跳过已完成引擎。⚠️ `_execute_engines` 是并发（cpu_intensive+concurrent 两路 ThreadPoolExecutor），per-engine checkpoint 需处理并发同步 + resume 恢复 completed_engines。**会话末尾不宜仓促做** | M-L |
 | **P6 对抗接线**（→ 独立会话） | `verification_gatekeeper.py:54` / `scoring/models.py:154`(`min_evidence_dimensions`) / `round_three.py:315`(`LIKELY→HIGH`) / `adversarial_service.py:573`(手写版) / `scan_orchestrator.py:1522`(调用点) | **用户 2026-06-20 决定整体留独立会话**。子项评估（独立会话起点）：**子项3** round_three:315 `LIKELY→MEDIUM`（一行，低风险，防与 CONFIRMED 同级误升 EXPLOITABLE）；**子项4** 删 enhanced_adversarial/convergence/strategy_library 1926行（✅ 已确认只 `verification/__init__.py` re-export、无功能引用，可删 + 清 __init__）；**子项2** `min_evidence_dimensions` 1→2（⚠️ 精度/召回权衡，本机无 CodeQL→仅 taint+reachability 达2，改后单硬证据真漏洞可能漏报，需评估召回）；**子项1** VerificationGatekeeper 接线替换 adversarial_service:573 手写版（⚠️ `test_verification_gatekeeper` 有5个既有失败，接线前先修 gatekeeper 本身） | M |
 
-**开工第一步**：先跑回归确认基线 `python3 -m pytest tests/unit/test_l3 -q`（期望 **2200 passed / 23 既有失败**）。P6 在独立会话做（子项评估见上表）；C6/P3 可在本会话继续。
+**开工第一步**：先跑回归确认基线 `python3 -m pytest tests/unit/test_l3 -q`（期望 **2186 passed / 23 既有失败**，2026-06-21 实跑确认）。P6 在独立会话做（子项评估见上表）；C6 Tier1 已完成（`7f6c242`），剩 C6 Tier2 / P3 可在本会话继续。
 
 > **上一目标**：Phase 17 — AI 与静态最优结合的深化（status: completed，commit `fca0c22`）。其"全部 done"的结论已被本次审查修正——多项功能实际未生效，正是本 Phase 18 要接通的。

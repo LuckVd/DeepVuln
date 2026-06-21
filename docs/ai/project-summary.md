@@ -35,8 +35,8 @@ DeepVuln 是多层（L1 情报 + L3 分析）架构的智能漏洞挖掘系统�
 
 ## Recent Maintenance Notes
 
-- Phase 18（进行中，web-only）：基于 2026-06-20 全量实现审查，修复"声称完成但生产路径未生效"的精度核心。已完成第一/二批 + P6-eval 并 push（代码 `4409eb4` + docs `a8eba71`，本地=origin）：P0 精度链路（四轮回填 candidate / 裁决映射属性名 / D5 confidence 同步）、P1 Java call_graph 注册、P4 语言收敛 + CodeQL 类型、P2-前置 CPG entry/callee/sink 连通、P2-Go go_builder+provider（**三语言 py/go/java CPG 可达性端到端通**）、P6-eval（critical/high 防漏报）。全 test_l3 **2195 passed / 23 既有失败（零回归）**。
-- 第三批待做：P5 续扫完整（阶段命名统一 / resume 恢复实例状态 / `_finalize_results` upsert 去重 / `pause_scan` 接 revoke）；P7 可靠性（git clone 超时 / baseline 覆盖判定 / 增量 import 拼接 / budget 排序）；P3 可达性质量（需条件求值）；P6 对抗接线（gatekeeper / min_evidence_dimensions / LIKELY→MEDIUM / 1926 行 enhanced 层去留）。
+- Phase 18（进行中，web-only）：基于 2026-06-20 全量实现审查，修复"声称完成但生产路径未生效"的精度核心。**第一~五批均已完成并 push**（最新 `7f6c242`，本地=origin）：P0 精度链路、P1 Java/P2-Go call_graph（**三语言 py/go/java CPG 可达性端到端通**）、P4 语言收敛 + CodeQL 类型、P5 续扫完整（阶段命名统一 / resume 恢复实例状态 / 落库去重 / pause 接 revoke）、P7 可靠性（C3 git timeout / C4 baseline 覆盖 / C5 增量 import / C7 budget 排序 / 删死代码 + **C6 引擎级 checkpoint Tier1**）、P6 低风险子项（LIKELY→MEDIUM / 删 1155 行对抗死机械 / strategy_library 接进 prompts）、P8 测试真实性。全 test_l3 **2186 passed / 23 既有失败（零回归，2026-06-21 实跑确认）**。
+- 剩余：**P6 硬骨头**（子项1 gatekeeper 接线需先修 5 个既有失败；子项2 `min_evidence_dimensions` 是精度/召回权衡待定）+ **P3 可达性质量**（需条件求值设计）+ C6 Tier2。安全组降级（单用户内网）、放弃 C/C++。
 - 关键约束：web-only（CLI 已移除）、放弃 C/C++ 聚焦 py/go/java、安全组降级（单用户内网）、本机无 CodeQL（保引擎降级路径）。
 - 环境：本机 1.9GB 内存，无 CodeQL；测试用 sqlite；LLM 走 GLM 兼容端点。
 - 上一个目标：Phase 17 — AI 与静态最优结合的深化（status: completed，commit `fca0c22`；其"全部 done"结论已被 Phase 18 审查修正——多项功能实际未生效，正是 Phase 18 要接通的）。
