@@ -10,9 +10,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# 设置环境变量
-export PYTHONPATH=/opt/projects/DeepVuln:$PYTHONPATH
-export DATABASE_URL="postgresql+asyncpg://deepvuln:deepvuln_password@localhost:5432/deepvuln"
+# 设置环境变量（PYTHONPATH 以脚本所在目录为准，不再硬编码他人机器路径）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
+# 代码只读 DEEPVULN_DB_* 前缀（audit B3：DATABASE_URL 从未生效）
+export DEEPVULN_DB_URL="${DEEPVULN_DB_URL:-postgresql+asyncpg://deepvuln:deepvuln_password@localhost:5432/deepvuln}"
 export CELERY_BROKER_URL="redis://localhost:6379/0"
 export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-}"

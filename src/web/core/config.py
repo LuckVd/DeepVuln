@@ -10,7 +10,10 @@ class DatabaseSettings(BaseSettings):
     """Database configuration settings."""
     model_config = SettingsConfigDict(
         env_prefix="DEEPVULN_DB_",
-        env_file="/opt/projects/DeepVuln/.env",
+        # Relative to the process CWD (repo root / /app in containers). The
+        # old absolute path pointed at a machine that no longer hosts this
+        # repo (audit B3).
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -41,7 +44,7 @@ class WebSettings(BaseSettings):
     """Web service configuration settings."""
     model_config = SettingsConfigDict(
         env_prefix="DEEPVULN_WEB_",
-        env_file="/opt/projects/DeepVuln/.env",
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -97,8 +100,8 @@ class WebSettings(BaseSettings):
 
     # Upload
     upload_dir: str = Field(
-        default="/opt/projects/deepvuln/uploads",
-        description="Directory for uploaded files"
+        default="./uploads",
+        description="Directory for uploaded files (relative to process CWD)"
     )
     max_upload_mb: int = Field(
         default=100,
@@ -134,7 +137,7 @@ class SecuritySettings(BaseSettings):
     """Security configuration settings."""
     model_config = SettingsConfigDict(
         env_prefix="DEEPVULN_SECURITY_",
-        env_file="/opt/projects/DeepVuln/.env",
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )

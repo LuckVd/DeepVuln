@@ -66,13 +66,13 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.lkeap.cloud.tencent.com/coding/v3}
       - PYTHONUNBUFFERED=1
       # 数据库连接
-      - DATABASE_URL=postgresql+asyncpg://deepvuln:deepvuln_password@postgres:5432/deepvuln
+      # 代码只读 DEEPVULN_DB_* 前缀（audit B3：DATABASE_URL 从未生效）
+      - DEEPVULN_DB_URL=postgresql+asyncpg://deepvuln:deepvuln_password@postgres:5432/deepvuln
       # Redis 连接
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     volumes:
       - ./src:/app/src:ro
-      - ./config.local.toml:/app/config.local.toml:ro
       - deepvuln-cache:/home/deepvuln/.cache
       - codeql-databases:/tmp/codeql_cache
       - codeql-packs:/home/deepvuln/.codeql
@@ -104,7 +104,8 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.lkeap.cloud.tencent.com/coding/v3}
       - PYTHONUNBUFFERED=1
       # 数据库连接
-      - DATABASE_URL=postgresql+asyncpg://deepvuln:deepvuln_password@postgres:5432/deepvuln
+      # 代码只读 DEEPVULN_DB_* 前缀（audit B3：DATABASE_URL 从未生效）
+      - DEEPVULN_DB_URL=postgresql+asyncpg://deepvuln:deepvuln_password@postgres:5432/deepvuln
       # Redis 连接
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -112,7 +113,6 @@ services:
       - "8000:8000"
     volumes:
       - ./src:/app/src:ro
-      - ./config.local.toml:/app/config.local.toml:ro
       - deepvuln-cache:/home/deepvuln/.cache
       - codeql-databases:/tmp/codeql_cache
       - codeql-packs:/home/deepvuln/.codeql

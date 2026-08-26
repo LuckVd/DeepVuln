@@ -208,12 +208,14 @@ RUN set -eu; \
      env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u no_proxy \
         python -m pip install --no-cache-dir uv)
 
-# Create venv and install Python dependencies using PyPI mirror
+# Create venv and install Python dependencies using PyPI mirror.
+# The `web` extra is required: the project is web-only since the CLI was
+# removed (audit B2) — without fastapi/uvicorn/celery no container can start.
 # uv is installed to ~/.local/bin by official installer
 RUN env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u no_proxy \
     uv venv /app/.venv \
     && env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u no_proxy \
-        uv pip install --python /app/.venv/bin/python -e ".[analysis]" semgrep
+        uv pip install --python /app/.venv/bin/python -e ".[analysis,web]" semgrep
 
 RUN useradd -m -s /bin/bash deepvuln \
     && mkdir -p /target /tmp/codeql_cache /home/deepvuln/.cache /home/deepvuln/.codeql /go /opt/runtimes \
@@ -239,5 +241,9 @@ WORKDIR /target
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import shutil; assert shutil.which('codeql'); print('healthy')" || exit 1
 
-ENTRYPOINT ["python", "-m", "src.cli.main"]
-CMD ["--help"]
+# Web entrypoint (audit B2): the CLI module src.cli.main was removed when the
+# project went web-only; the old ENTRYPOINT crashed every container on start.
+# Deliberately NO ENTRYPOINT so compose `command:` fully replaces CMD for the
+# api / celery-worker roles. PYTHONPATH lets commands run from any WORKDIR.
+ENV PYTHONPATH=/app
+CMD ["python", "-m", "uvicorn", "src.web.main:app", "--host", "0.0.0.0", "--port", "8000"]

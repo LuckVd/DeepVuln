@@ -18,6 +18,10 @@
 #     -v /opt/projects/benchmark/Qbenchmark/env_validation/java-simple-vuln:/target:ro \
 #     deepvuln scan -p /target --base
 
+# ⚠️ 已废弃（audit B2，2026-08-25）：CLI（src.cli.main）已随 web-only 迁移移除，
+# 本文件围绕 `deepvuln scan ...` CLI 用法编写，已不可用。Web 部署请使用
+# docker-compose-web.yml（容器栈）或 docker-compose-web-host.yml（主机数据库）。
+# 保留本文件仅作历史参考/构建参数参考。
 version: "3.8"
 
 services:
