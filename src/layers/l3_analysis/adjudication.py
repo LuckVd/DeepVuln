@@ -23,6 +23,7 @@ P4-03: Global Adjudication Consistency
 - No silent fixes, no auto-merge, explicit errors only
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -493,44 +494,11 @@ async def adjudicate_findings(
         # P6-17: Use ClusterBasedDeduplicator instead of ASTDeduplicator
         # to solve cross-engine deduplication failure
 
-        # P18: Use provided llm_client or try to create one
+        # P18/B16: use exactly what the caller provides. No env/config-side
+        # client construction here — that was a fourth configuration fork with
+        # an inconsistent timeout; None now means ASTDeduplicator, matching the
+        # note below.
         dedup_llm_client = llm_client
-        if dedup_llm_client is None:
-            try:
-                from src.core.config import get_llm_model, get_llm_provider, get_openai_config, get_ollama_config
-                from src.layers.l3_analysis.llm.openai_client import OpenAIClient
-                from src.layers.l3_analysis.engines.opencode_agent import DEFAULT_MODELS, LLMProvider
-
-                provider = get_llm_provider()
-                model = get_llm_model()
-
-                if provider.lower() == "openai":
-                    # Get OpenAI config with api_key and base_url
-                    openai_config = get_openai_config()
-                    dedup_llm_client = OpenAIClient(
-                        model=model or DEFAULT_MODELS[LLMProvider.OPENAI],
-                        api_key=openai_config.get("api_key"),
-                        base_url=openai_config.get("base_url"),
-                        max_tokens=1000,
-                        temperature=0.1,
-                        timeout=30,
-                    )
-                    logger.info("Created LLM client from config for deduplication")
-                elif provider.lower() == "ollama":
-                    from src.layers.l3_analysis.llm.ollama_client import OllamaClient
-                    # Get Ollama config with base_url
-                    ollama_config = get_ollama_config()
-                    dedup_llm_client = OllamaClient(
-                        model=model or DEFAULT_MODELS[LLMProvider.OLLAMA],
-                        base_url=ollama_config.get("base_url"),
-                        max_tokens=1000,
-                        temperature=0.1,
-                        timeout=30,
-                    )
-                    logger.info("Created Ollama client from config for deduplication")
-            except Exception as e:
-                logger.warning(f"Failed to create LLM client for deduplication: {e}")
-                logger.info("Falling back to ASTDeduplicator (no LLM support)")
 
         # Choose deduplicator based on LLM availability
         if dedup_llm_client is None:
@@ -551,7 +519,12 @@ async def adjudicate_findings(
             )
             logger.info("Using ClusterBasedDeduplicator (LLM enabled)")
 
-        dedup_result = await deduplicator.deduplicate(findings)
+        # ASTDeduplicator.deduplicate is sync; ClusterBasedDeduplicator is
+        # async. Await only when a coroutine comes back (B16: with the config
+        # fallback gone, None llm_client now really lands on the sync path).
+        dedup_result = deduplicator.deduplicate(findings)
+        if asyncio.iscoroutine(dedup_result):
+            dedup_result = await dedup_result
 
         # Update findings to deduplicated list
         findings = dedup_result.unique_findings

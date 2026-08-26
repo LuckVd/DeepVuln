@@ -28,6 +28,7 @@ class MockFinding:
         severity="high",
         exploitability=None,
         final_score=0.8,
+        confidence=0.8,
         metadata=None,
     ):
         self.id = finding_id
@@ -35,6 +36,7 @@ class MockFinding:
         self.severity = severity
         self.exploitability = exploitability
         self.final_score = final_score
+        self.confidence = confidence
         self.final_status = None
         self.metadata = metadata or {}
         self.location = MockLocation()
@@ -281,7 +283,8 @@ class TestValidateNoConflict:
 class TestAdjudicateFindings:
     """Test adjudicate_findings function."""
 
-    def test_batch_adjudication(self):
+    @pytest.mark.asyncio
+    async def test_batch_adjudication(self):
         """Test adjudicating multiple findings."""
         # Use different rule_ids to avoid consistency conflicts
         findings = [
@@ -290,7 +293,7 @@ class TestAdjudicateFindings:
             MockFinding(finding_id="f3", rule_id="rule-c", severity="medium", exploitability="possible"),
         ]
 
-        result, summary = adjudicate_findings(findings)
+        result, summary = await adjudicate_findings(findings)
 
         assert summary.total_findings == 3
         assert summary.by_status["exploitable"] == 1
@@ -300,7 +303,8 @@ class TestAdjudicateFindings:
         assert summary.consistency_check is not None
         assert summary.consistency_check["passed"] is True
 
-    def test_overrides_counted(self):
+    @pytest.mark.asyncio
+    async def test_overrides_counted(self):
         """Test that overrides are counted."""
         # Use different rule_ids to avoid consistency conflicts
         findings = [
@@ -308,12 +312,13 @@ class TestAdjudicateFindings:
             MockFinding(finding_id="f2", rule_id="rule-y", severity="high", exploitability="unlikely"),
         ]
 
-        result, summary = adjudicate_findings(findings)
+        result, summary = await adjudicate_findings(findings)
 
         # Both should have overrides applied
         assert summary.overrides_applied >= 2
 
-    def test_conflicts_detected(self):
+    @pytest.mark.asyncio
+    async def test_conflicts_detected(self):
         """Test that conflicts are detected when validate is enabled.
 
         Note: Conflicts can only occur if final_status is manually set after
@@ -325,7 +330,7 @@ class TestAdjudicateFindings:
             MockFinding(finding_id="f1", rule_id="rule-z", severity="high", exploitability="not_exploitable"),
         ]
 
-        result, summary = adjudicate_findings(findings, validate=True)
+        result, summary = await adjudicate_findings(findings, validate=True)
 
         # No conflict because override correctly sets NOT_EXPLOITABLE
         assert summary.conflicts_detected == 0
