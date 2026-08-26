@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from src.core.logger.logger import get_logger
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     EntryPoint,
     EntryPointType,
 )

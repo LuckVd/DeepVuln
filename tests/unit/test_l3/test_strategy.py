@@ -19,7 +19,7 @@ from src.layers.l3_analysis.strategy.models import (
 )
 from src.layers.l3_analysis.strategy.calculator import PriorityCalculator
 from src.layers.l3_analysis.strategy.engine import StrategyEngine
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     AttackSurfaceReport,
     EntryPoint,
     EntryPointType,

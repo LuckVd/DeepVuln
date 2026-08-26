@@ -10,7 +10,7 @@ from src.layers.l1_intelligence.attack_surface.http_detector import (
     GinDetector,
     SpringDetector,
 )
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     AttackSurfaceReport,
     EntryPoint,
     EntryPointType,

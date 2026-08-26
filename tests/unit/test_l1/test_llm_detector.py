@@ -18,7 +18,7 @@ from src.layers.l1_intelligence.attack_surface.llm_detector import (
     ENTRY_POINT_DETECTION_PROMPT,
     BATCH_ENTRY_POINT_DETECTION_PROMPT,
 )
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     EntryPoint,
     EntryPointType,
     HTTPMethod,

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger.logger import get_logger
 from src.layers.l1_intelligence.attack_surface.detector import AttackSurfaceDetector
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     AttackSurfaceReport,
     EntryPoint,
     EntryPointType,

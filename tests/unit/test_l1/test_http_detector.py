@@ -10,7 +10,7 @@ from src.layers.l1_intelligence.attack_surface.http_detector import (
     get_detector_for_file,
     get_detector_for_framework,
 )
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     EntryPoint,
     EntryPointType,
     HTTPMethod,

@@ -7,7 +7,7 @@ from typing import Any
 from tree_sitter import Language, Parser
 
 from src.core.logger.logger import get_logger
-from src.layers.l1_intelligence.attack_surface.models import EntryPoint
+from src.core.models.attack_surface import EntryPoint
 
 
 class ASTDetector(ABC):

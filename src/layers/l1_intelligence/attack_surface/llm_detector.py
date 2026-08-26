@@ -19,7 +19,7 @@ from src.core.exceptions.llm import (
     LLMError,
     LLMTruncatedResponseError,
 )
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     EntryPoint,
     EntryPointType,
     HTTPMethod,

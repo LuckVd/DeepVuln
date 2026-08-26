@@ -7,7 +7,7 @@ from src.layers.l1_intelligence.attack_surface.ast import (
     PythonASTDetector,
 )
 from src.layers.l1_intelligence.attack_surface.detector import AttackSurfaceDetector
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     AttackSurfaceReport,
     EntryPoint,
     EntryPointType,

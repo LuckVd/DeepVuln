@@ -25,7 +25,7 @@ from src.layers.l3_analysis.rounds.round_four import (
 )
 from src.layers.l3_analysis.llm.client import LLMClient
 from src.layers.l3_analysis.models import Finding, SeverityLevel
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     AttackSurfaceReport,
 )
 

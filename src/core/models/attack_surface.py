@@ -7,6 +7,7 @@ P15: Moved from src/layers/l1_intelligence/attack_surface/models.py
 """
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -184,6 +185,24 @@ class AttackSurfaceReport(BaseModel):
     def total_entry_points(self) -> int:
         """Total number of entry points."""
         return len(self.entry_points)
+
+    def get_summary(self) -> dict[str, Any]:
+        """Return a compact summary dict for API/report consumers.
+
+        Keys mirror the detector test contract: per-type counts, the total,
+        and detected frameworks (under the shorter "frameworks" alias).
+        """
+        return {
+            "total_entry_points": self.total_entry_points,
+            "http_endpoints": self.http_endpoints,
+            "rpc_services": self.rpc_services,
+            "grpc_services": self.grpc_services,
+            "mq_consumers": self.mq_consumers,
+            "cron_jobs": self.cron_jobs,
+            "file_inputs": self.file_inputs,
+            "websocket_endpoints": self.websocket_endpoints,
+            "frameworks": list(self.frameworks_detected),
+        }
 
     def get_unauthenticated(self) -> list[EntryPoint]:
         """Get entry points without authentication."""

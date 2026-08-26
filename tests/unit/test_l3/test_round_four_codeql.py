@@ -664,7 +664,7 @@ class TestCodeQLIntegrationScenarios:
         self, tmp_path, sample_codeql_finding
     ):
         """Test CodeQL integration works with attack surface report."""
-        from src.layers.l1_intelligence.attack_surface.models import (
+        from src.core.models.attack_surface import (
             AttackSurfaceReport,
             EntryPoint,
             EntryPointType,

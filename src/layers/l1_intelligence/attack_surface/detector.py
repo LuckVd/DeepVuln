@@ -13,7 +13,7 @@ from src.layers.l1_intelligence.attack_surface.http_detector import (
 from src.layers.l1_intelligence.attack_surface.http_detector import (
     get_detector_for_framework as get_http_detector_for_framework,
 )
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     AttackSurfaceReport,
     EntryPoint,
 )
@@ -214,7 +214,7 @@ class AttackSurfaceDetector:
             )
 
             # Add entry points to report (P5-04: mark as LLM source)
-            from src.layers.l1_intelligence.attack_surface.models import DetectionSource
+            from src.core.models.attack_surface import DetectionSource
             for entry in entry_points:
                 entry.detection_source = DetectionSource.LLM
                 report.add_entry_point(entry)
@@ -330,7 +330,7 @@ class AttackSurfaceDetector:
         """
         import asyncio
 
-        from src.layers.l1_intelligence.attack_surface.models import DetectionSource
+        from src.core.models.attack_surface import DetectionSource
 
         self.logger.info(f"Starting parallel detection (static + LLM) for {source_path}")
 

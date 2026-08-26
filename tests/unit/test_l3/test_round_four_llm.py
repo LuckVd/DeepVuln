@@ -430,7 +430,7 @@ class TestAttackSurfaceReportIntegration:
     @pytest.fixture
     def sample_attack_surface_report(self):
         """Create a sample attack surface report."""
-        from src.layers.l1_intelligence.attack_surface.models import (
+        from src.core.models.attack_surface import (
             AttackSurfaceReport,
             EntryPoint,
             EntryPointType,

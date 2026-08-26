@@ -10,7 +10,7 @@ from src.layers.l1_intelligence.attack_surface.ast.base import (
     ASTDetector,
     register_ast_detector,
 )
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     EntryPoint,
     EntryPointType,
     HTTPMethod,

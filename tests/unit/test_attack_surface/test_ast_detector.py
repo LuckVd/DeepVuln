@@ -9,7 +9,7 @@ from src.layers.l1_intelligence.attack_surface.ast import (
     JavaASTDetector,
     PythonASTDetector,
 )
-from src.layers.l1_intelligence.attack_surface.models import (
+from src.core.models.attack_surface import (
     EntryPointType,
     HTTPMethod,
 )
