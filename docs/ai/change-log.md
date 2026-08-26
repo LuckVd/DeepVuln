@@ -1,5 +1,45 @@
 # Change Log
 
+## 2026-08-25
+
+### 全量体检修复 — A 类检测失效 + 部署三连 + 死代码清理 ✅
+
+- **依据**: `docs/ai/audit-2026-08-25-findings.md`（5 路并行审计）；本批按"先检测失效 → 部署 → 死代码"顺序修复
+- **A 类·检测能力**:
+  - **A1** `detectors/base_detector.py`：规则加载按 `id:language` 做 key（此前同 id 跨语言文件相互覆盖，Python eval/exec 检测静默丢失）；finding 的 rule_id 仍用干净 id。新增 `test_rule_id_collision.py` 5 测试；2 个既有 eval 失败翻绿
+  - **A2** `pyproject.toml`：补 `tree-sitter-javascript/typescript>=0.23.0`（venv 手工装过、声明缺失，干净安装 JS/TS AST+CPG 静默失效）。⚠️ uv.lock 待有网时 `uv lock` 同步（本机 PyPI 不可达）
+  - **A3** `engines/base.py`：新增 `resolve_binary_path()`（PATH → 解释器同目录探测），`semgrep.py` 执行与版本检查改用解析后的绝对路径 —— venv 未上 PATH 时 semgrep 不再静默跳过；顺带修 `--lang` 过滤在无显式 config 时被丢弃。9 个既有 semgrep 失败翻绿
+  - **A4** `scan_orchestrator._run_adjudication`：裁决前统一调 `assign_scores_to_findings`（该入口此前零生产调用，dedup "keep highest final_score" 恒比较 None）。新增 `test_final_score_wiring.py`
+  - **A5** `scan_executor.create_scan`：ScanConfig 先 `model_dump(mode="json")` 再入库（修复 REST POST /scans 必 500）。新增回归测试
+  - **A6** 引擎默认值收敛为 `schemas.DEFAULT_SCAN_ENGINES` 单一来源（orchestrator 兜底 / zip 端点 / schema 三处不一致，AST 引擎多数路径默认不跑）
+- **部署与数据完整性**:
+  - **B2** Dockerfile/Dockerfile.lite：删指向已删除 CLI 的 ENTRYPOINT，CMD 改 web API 入口，安装加 `web` extra（此前镜像根本没有 fastapi/celery，web 栈无法启动）；compose `command:` 现可完整生效
+  - **B3** compose×2 / start-web.sh / .env.web.example：`DATABASE_URL` → `DEEPVULN_DB_URL`（代码只读后者，此前全部无效）；config.py env_file/upload_dir 去硬编码他人机器路径；start-web.sh PYTHONPATH 改脚本相对
+  - **B17** 删除三个活文件里不存在的 config.local.toml 挂载；CLI 时代三个 compose（yml/china/tun）加废弃声明指向 docker-compose-web.yml
+  - **B1** `pause_scan` 复用 scan 行已带的 checkpoint 合并 resume_data（此前手工最小 payload 整体覆盖，恢复丢全部引擎结果强制重跑）
+- **死代码清理（约 8000+ 行，同步删测试）**:
+  - B6 删 `l3_analysis/incremental/`（3423 行双实现之一）+ test_incremental.py + __init__ 再导出
+  - B10 删 `l3_analysis/pre_filter/`（1416 行零生产引用）+ 4 个测试文件；`test_verification_gatekeeper.py` 是活代码测试，移至 `tests/unit/test_l3/`
+  - B7 删 `phase_manager.py`（590 行，唯一引用是赋值后从未读的属性）+ test_phase_manager.py + executor 引用
+  - B8 删 checkpoint write-only 的 /tmp 文件备份（方法 + 调用点 + 相关测试）
+  - B12 删根目录 celery_worker.py + 死任务 check_scan_progress（含孤立 helper 与路由项）
+  - B18 删 `auto_security_scan.py` + `security_analyzer/` + 连带测试与再导出
+- **既有失败测试修复（体检 C 节定性落地）**: test_deduplicator×5 / test_adjudication×3 改为正确 await async API（MockFinding 补 confidence 字段）；test_opencode_agent 默认并发断言对齐 P5-05 语义（2→5）
+- **Tests**: test_l3 基线 2203 passed/18 failed → 预期全绿（详见当次运行结果）；ruff F 错误 183 → 175（零新增，净减 8）；ast OK
+- **Security**: 无新增密钥；删除代码无安全影响
+- **Commit**: 未提交（遵循不自动提交规则）
+
+### 体检修复第四批 — B16 配置岔路 + B14 模型归位 + README 对齐 ✅
+
+- **B16** `adjudication.py`：删 llm_client=None 时从 TOML/env 现建 LLM client 的兜底（第四条配置岔路，timeout=30 与主链路不一致）。**连带揭出并修复潜在 bug**：ASTDeduplicator.deduplicate 是同步方法，调用处无条件 await —— 此前测试能过恰因兜底从环境变量悄悄建出异步 client；现按 iscoroutine 分派
+- **B14** 模型职责归位：`core/models/` 补 `__init__.py` 导出；21 处引用从 `l1_intelligence.attack_surface.models` 垫片直连 `core.models.attack_surface`；删除垫片。顺带补 `AttackSurfaceReport.get_summary()`（测试契约存在但实现缺失的既有失败，test_attack_surface 首次被跑到）
+- **B11** 定性为保留：engine_registry 有测试覆盖 + 引擎自注册是有意机制，代码已有 NOTE 注明生产流未用（体检"留注释"选项）
+- **README** 对齐 web-only 现实：删 CLI 快速开始/参数表（CLI 已移除）、语言收敛为核心 py/go/java（AST 另覆盖 js/ts）、删已清理死代码（pre_filter 五件套）的特性宣称、项目结构更新（src/web、pipeline）、配置节改为 DEEPVULN_* 环境变量
+- **Tests**: test_l3+test_l1+test_attack_surface 全量 **2258 passed / 0 failed**；ruff F 保持 175（零新增）；ast OK
+- **Commit**: 未提交
+
+
+
 ## 2026-06-19
 
 ### Phase 17 — E5 AI 补漏逻辑漏洞（LogicVulnDetector）✅
