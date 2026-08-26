@@ -984,35 +984,39 @@ class TestClusterFindingsByLocation:
 class TestClusterBasedDeduplicator:
     """Test ClusterBasedDeduplicator (P6-17b, P6-17c)."""
 
-    def test_empty_list(self):
+    @pytest.mark.asyncio
+    async def test_empty_list(self):
         """Test deduplicating empty list."""
         dedup = ClusterBasedDeduplicator()
-        result = dedup.deduplicate([])
+        result = await dedup.deduplicate([])
         assert len(result.unique_findings) == 0
         assert result.removed_count == 0
         assert result.merged_groups == 0
 
-    def test_single_finding(self):
+    @pytest.mark.asyncio
+    async def test_single_finding(self):
         """Test deduplicating single finding."""
         findings = [MockFinding(location=MockLocation(file="test.py", line=10))]
         dedup = ClusterBasedDeduplicator()
-        result = dedup.deduplicate(findings)
+        result = await dedup.deduplicate(findings)
         assert len(result.unique_findings) == 1
         assert result.removed_count == 0
 
-    def test_no_llm_client_keeps_all(self):
+    @pytest.mark.asyncio
+    async def test_no_llm_client_keeps_all(self):
         """Test without LLM client, all findings in cluster are kept."""
         findings = [
             MockFinding(location=MockLocation(file="test.py", line=10)),
             MockFinding(location=MockLocation(file="test.py", line=15)),
         ]
         dedup = ClusterBasedDeduplicator(llm_client=None)
-        result = dedup.deduplicate(findings)
+        result = await dedup.deduplicate(findings)
         # Without LLM, should keep all findings in cluster
         assert len(result.unique_findings) == 2
         assert result.removed_count == 0
 
-    def test_llm_dedup_disabled_keeps_all(self):
+    @pytest.mark.asyncio
+    async def test_llm_dedup_disabled_keeps_all(self):
         """Test with LLM dedup disabled, all findings are kept."""
         findings = [
             MockFinding(location=MockLocation(file="test.py", line=10)),
@@ -1020,18 +1024,19 @@ class TestClusterBasedDeduplicator:
         ]
         config = ClusterDeduplicatorConfig(enable_llm_dedup=False)
         dedup = ClusterBasedDeduplicator(config=config)
-        result = dedup.deduplicate(findings)
+        result = await dedup.deduplicate(findings)
         assert len(result.unique_findings) == 2
         assert result.removed_count == 0
 
-    def test_separate_clusters_kept(self):
+    @pytest.mark.asyncio
+    async def test_separate_clusters_kept(self):
         """Test findings in separate clusters are all kept."""
         findings = [
             MockFinding(location=MockLocation(file="test1.py", line=10)),
             MockFinding(location=MockLocation(file="test2.py", line=10)),
         ]
         dedup = ClusterBasedDeduplicator()
-        result = dedup.deduplicate(findings)
+        result = await dedup.deduplicate(findings)
         assert len(result.unique_findings) == 2
         assert result.removed_count == 0
 

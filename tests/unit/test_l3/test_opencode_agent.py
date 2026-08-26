@@ -60,7 +60,7 @@ class TestOpenCodeAgentInit:
         assert agent.description == "AI-powered deep security audit engine"
         assert agent.max_file_size == 100000
         assert agent.max_files == 50
-        assert agent.max_concurrent == 2  # Default is 2, not 3
+        assert agent.max_concurrent == 5  # P5-05 default follows global LLM concurrency config
 
     def test_custom_init(self):
         """Test custom initialization."""
