@@ -28,10 +28,15 @@ class TestFrameworkDetectorMetadata:
         assert detector.detector_type() == "framework"
 
     def test_default_rules_dir(self):
-        """Test default rules directory path."""
+        """Test default rules directory path.
+
+        The default dir must be absolute (resolved from the detectors module
+        location) so rule loading works regardless of the process cwd.
+        """
         detector = FrameworkDetector()
         rules_dir = detector._get_default_rules_dir()
-        assert str(rules_dir) == "rules/ast_query/framework"
+        assert rules_dir.is_absolute()
+        assert str(rules_dir).endswith("rules/ast_query/framework")
 
     def test_rules_loaded(self):
         """Test that framework rules are loaded."""

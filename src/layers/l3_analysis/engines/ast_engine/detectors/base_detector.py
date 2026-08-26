@@ -194,8 +194,18 @@ class BaseDetector(ABC):
         rules = self._query_engine.load_yaml_rules_from_dir(self._rules_dir)
         for rule in rules:
             rule_id = rule.get("id")
-            if rule_id:
+            if not rule_id:
+                continue
+            languages = rule.get("languages") or []
+            if languages:
+                # Rule files may share one id across languages (e.g.
+                # dangerous_eval for python and javascript). Key per language
+                # so one file cannot silently overwrite another; findings keep
+                # using the clean rule["id"] via _create_finding.
+                for lang in languages:
+                    self._rules[f"{rule_id}:{lang}"] = rule
+            else:
                 self._rules[rule_id] = rule
-                self.logger.debug(f"Loaded rule: {rule_id}")
+            self.logger.debug(f"Loaded rule: {rule_id}")
 
         self.logger.info(f"{self.detector_type()}: Loaded {len(self._rules)} rules")
