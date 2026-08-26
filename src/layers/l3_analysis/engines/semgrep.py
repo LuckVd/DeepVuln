@@ -134,6 +134,15 @@ class SemgrepEngine(BaseEngine):
         """
         return self.check_binary_available(self.semgrep_path)
 
+    def _resolved_semgrep_path(self) -> str:
+        """Return the semgrep binary as an absolute path when resolvable.
+
+        Falls back to the configured name so error messages stay unchanged
+        when semgrep is genuinely missing.
+        """
+        resolved = self.resolve_binary_path(self.semgrep_path)
+        return resolved or self.semgrep_path
+
     async def get_version(self) -> str | None:
         """
         Get the Semgrep version.
@@ -145,7 +154,7 @@ class SemgrepEngine(BaseEngine):
             return None
         try:
             _, stdout, _ = await self.run_command(
-                [self.semgrep_path, "--version"]
+                [self._resolved_semgrep_path(), "--version"]
             )
             return stdout.strip()
         except Exception:
@@ -442,7 +451,7 @@ class SemgrepEngine(BaseEngine):
             Command as list of strings.
         """
         cmd = [
-            self.semgrep_path,
+            self._resolved_semgrep_path(),
             "--json",
             "--quiet",
         ]
@@ -486,9 +495,11 @@ class SemgrepEngine(BaseEngine):
             cmd.extend(["--config", ",".join(configs)])
 
         # Add language filter
-        # NOTE: --lang is only valid with --pattern or explicit --config (NOT --config auto)
-        # When using --config auto, Semgrep auto-detects languages, so --lang causes an error
-        if languages and configs and not using_auto:
+        # NOTE: --lang is only invalid with --config auto (Semgrep
+        # auto-detects languages there and --lang causes an error). With an
+        # explicit config or none at all, --lang restricts scanning to the
+        # requested languages and must not be silently dropped.
+        if languages and not using_auto:
             for lang in languages:
                 cmd.extend(["--lang", lang])
 

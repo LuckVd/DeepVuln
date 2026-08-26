@@ -83,7 +83,9 @@ class TestSemgrepScanCommand:
             use_auto_config=False,
         )
 
-        assert "semgrep" in cmd
+        # The binary may be resolved to an absolute venv path (A3), so match
+        # on basename rather than exact list membership.
+        assert any(c.endswith("semgrep") for c in cmd)
         assert "--json" in cmd
         assert "--quiet" in cmd
         assert "--metrics=off" in cmd

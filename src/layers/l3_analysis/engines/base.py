@@ -6,7 +6,9 @@ and implement the required methods.
 """
 
 import asyncio
+import os
 import shutil
+import sys
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
@@ -203,7 +205,7 @@ class BaseEngine(ABC):
     @staticmethod
     def check_binary_available(binary_name: str) -> bool:
         """
-        Check if a binary is available in PATH.
+        Check if a binary is available in PATH or the active interpreter env.
 
         Args:
             binary_name: Name of the binary to check.
@@ -211,7 +213,38 @@ class BaseEngine(ABC):
         Returns:
             True if the binary is available.
         """
-        return shutil.which(binary_name) is not None
+        return BaseEngine.resolve_binary_path(binary_name) is not None
+
+    @staticmethod
+    def resolve_binary_path(binary_name: str) -> str | None:
+        """
+        Resolve a binary to an executable path.
+
+        Search order:
+        1. PATH (shutil.which) — system-installed binaries.
+        2. The directory of the running interpreter — covers pip-installed
+          tools inside a virtualenv whose bin dir is not on PATH
+          (e.g. ``.venv/bin/semgrep``), which shutil.which misses and used to
+          make engines silently unavailable.
+
+        Args:
+            binary_name: Name of the binary to resolve.
+
+        Returns:
+            Absolute path to the executable, or None if not found.
+        """
+        found = shutil.which(binary_name)
+        if found:
+            return found
+
+        interpreter_dir = Path(sys.executable).parent
+        for candidate in (
+            interpreter_dir / binary_name,
+            interpreter_dir / "Scripts" / binary_name,  # Windows venv layout
+        ):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        return None
 
     def get_last_scan_result(self) -> ScanResult | None:
         """
