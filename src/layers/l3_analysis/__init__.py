@@ -16,33 +16,12 @@ Core components:
 - StrategyEngine: Priority-based audit strategy generation
 - TaskDispatcher: Agent task dispatch and execution
 - RoundController: Multi-round audit management
-- IncrementalScanner: Incremental analysis for 70%+ speedup
 """
 
 from src.layers.l3_analysis.engines.base import BaseEngine, EngineRegistry
 from src.layers.l3_analysis.engines.codeql import CodeQLEngine
 from src.layers.l3_analysis.engines.opencode_agent import OpenCodeAgent
 from src.layers.l3_analysis.engines.semgrep import SemgrepEngine
-from src.layers.l3_analysis.incremental import (
-    BaselineDiff,
-    BaselineManager,
-    ChangeDetector,
-    ChangeInfo,
-    ChangeType,
-    DependencyEdge,
-    DependencyGraph,
-    DependencyNode,
-    DependencyType,
-    DiffResult,
-    ImpactAnalyzer,
-    ImpactLevel,
-    ImpactResult,
-    IncrementalScanConfig,
-    IncrementalScanner,
-    IncrementalScanResult,
-    VulnerabilityBaseline,
-    VulnerabilityStatus,
-)
 from src.layers.l3_analysis.models import (
     CodeLocation,
     CodeQLErrorType,
@@ -152,23 +131,4 @@ __all__ = [
     "CoverageStats",
     "EngineStats",
     "AuditSession",
-    # Incremental Analysis
-    "ChangeDetector",
-    "ChangeInfo",
-    "ChangeType",
-    "DiffResult",
-    "ImpactAnalyzer",
-    "ImpactResult",
-    "ImpactLevel",
-    "DependencyGraph",
-    "DependencyNode",
-    "DependencyEdge",
-    "DependencyType",
-    "BaselineManager",
-    "VulnerabilityBaseline",
-    "VulnerabilityStatus",
-    "BaselineDiff",
-    "IncrementalScanner",
-    "IncrementalScanConfig",
-    "IncrementalScanResult",
 ]

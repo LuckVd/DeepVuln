@@ -175,14 +175,11 @@ class TestSaveCheckpoint:
                 with patch.object(
                     service.scan_repo, "update", new=AsyncMock(return_value=mock_scan)
                 ):
-                    with patch.object(
-                        service, "_save_checkpoint_to_file", new=AsyncMock(return_value=True)
-                    ):
-                        result = await service.save_checkpoint(
-                            scan_id=1,
-                            phase=PhaseName.L3_AGENT,
-                            data={"global_state": {"test": "data"}},
-                        )
+                    result = await service.save_checkpoint(
+                        scan_id=1,
+                        phase=PhaseName.L3_AGENT,
+                        data={"global_state": {"test": "data"}},
+                    )
 
         assert result is True
 
@@ -331,10 +328,7 @@ class TestCleanCheckpoint:
             with patch.object(
                 service.scan_repo, "update", new=AsyncMock(return_value=mock_scan_with_checkpoint)
             ):
-                with patch.object(
-                    service, "_delete_checkpoint_file", new=AsyncMock(return_value=True)
-                ):
-                    result = await service.clean_checkpoint(scan_id=1)
+                result = await service.clean_checkpoint(scan_id=1)
 
         assert result is True
 
@@ -520,35 +514,3 @@ class TestCheckpointDataModel:
 # Test File Operations
 # ============================================================================
 
-class TestFileOperations:
-    """Test checkpoint file operations."""
-
-    @pytest.mark.asyncio
-    async def test_save_checkpoint_to_file(self, temp_checkpoint_dir):
-        """Test saving checkpoint to file."""
-        service = CheckpointService()
-        service._checkpoint_dir = Path(temp_checkpoint_dir)
-
-        checkpoint = CheckpointData(scan_id=1)
-        result = await service._save_checkpoint_to_file(checkpoint)
-
-        assert result is True
-
-        # Verify file exists
-        file_path = Path(temp_checkpoint_dir) / "scan_1_checkpoint.json"
-        assert file_path.exists()
-
-    @pytest.mark.asyncio
-    async def test_delete_checkpoint_file(self, temp_checkpoint_dir):
-        """Test deleting checkpoint file."""
-        service = CheckpointService()
-        service._checkpoint_dir = Path(temp_checkpoint_dir)
-
-        # Create a dummy file
-        file_path = Path(temp_checkpoint_dir) / "scan_1_checkpoint.json"
-        file_path.write_text("test")
-
-        result = await service._delete_checkpoint_file(1)
-
-        assert result is True
-        assert not file_path.exists()

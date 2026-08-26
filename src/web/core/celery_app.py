@@ -94,7 +94,6 @@ def create_celery_app() -> Celery:
         # Task routing (optional)
         task_routes={
             "execute_scan_task": {"queue": "scan"},
-            "check_scan_progress": {"queue": "scan"},
         },
         # Default queue for tasks without explicit routing
         task_default_queue="scan",

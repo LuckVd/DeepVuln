@@ -136,20 +136,6 @@ class CheckpointService:
         """Initialize checkpoint service."""
         self.scan_repo = ScanRepository()
         self.phase_repo = ScanPhaseRepository()
-        self._checkpoint_dir: Optional[Path] = None
-
-    def _get_checkpoint_dir(self) -> Path:
-        """Get or create checkpoint directory.
-
-        Returns:
-            Path to checkpoint directory
-        """
-        if self._checkpoint_dir is None:
-            # Default to /tmp/deepvuln/checkpoints
-            checkpoint_path = Path("/tmp/deepvuln/checkpoints")
-            checkpoint_path.mkdir(parents=True, exist_ok=True)
-            self._checkpoint_dir = checkpoint_path
-        return self._checkpoint_dir
 
     async def save_checkpoint(
         self,
@@ -209,9 +195,6 @@ class CheckpointService:
                     db_obj=scan,
                     obj_in={"checkpoint_data": checkpoint_dict}
                 )
-
-                # Also save to file as backup for large data
-                await self._save_checkpoint_to_file(checkpoint)
 
                 await db.commit()
 
@@ -324,7 +307,6 @@ class CheckpointService:
                 )
 
                 # Remove file backup
-                await self._delete_checkpoint_file(scan_id)
 
                 await db.commit()
 
@@ -416,54 +398,7 @@ class CheckpointService:
                 reason=f"Error determining strategy: {e}"
             )
 
-    async def _save_checkpoint_to_file(
-        self,
-        checkpoint: CheckpointData,
-    ) -> bool:
-        """Save checkpoint to file as backup.
 
-        Args:
-            checkpoint: Checkpoint data to save
-
-        Returns:
-            True if save succeeded, False otherwise
-        """
-        try:
-            checkpoint_dir = self._get_checkpoint_dir()
-            file_path = checkpoint_dir / f"scan_{checkpoint.scan_id}_checkpoint.json"
-
-            with open(file_path, "w") as f:
-                f.write(checkpoint.model_dump_json(indent=2))
-
-            logger.debug(f"Saved checkpoint to file: {file_path}")
-            return True
-
-        except Exception as e:
-            logger.exception(f"Failed to save checkpoint to file: {e}")
-            return False
-
-    async def _delete_checkpoint_file(self, scan_id: int) -> bool:
-        """Delete checkpoint file for a scan.
-
-        Args:
-            scan_id: ID of the scan
-
-        Returns:
-            True if deletion succeeded, False otherwise
-        """
-        try:
-            checkpoint_dir = self._get_checkpoint_dir()
-            file_path = checkpoint_dir / f"scan_{scan_id}_checkpoint.json"
-
-            if file_path.exists():
-                file_path.unlink()
-                logger.debug(f"Deleted checkpoint file: {file_path}")
-
-            return True
-
-        except Exception as e:
-            logger.exception(f"Failed to delete checkpoint file: {e}")
-            return False
 
 
 # ============================================================================

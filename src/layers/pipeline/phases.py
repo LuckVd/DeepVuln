@@ -58,10 +58,10 @@ class PhaseSpec:
 
 
 # Canonical execution order of all scan phases. Single source of truth for
-# resume-skip computation (checkpoint_service.get_resume_strategy),
-# PhaseManager.PHASE_ORDER, and ScanExecutor._create_initial_phases — all of
-# which previously used the legacy PhaseName enum and never matched the
-# pipeline's actual phase values (Phase 18/P5-A5).
+# resume-skip computation (checkpoint_service.get_resume_strategy) and
+# ScanExecutor._create_initial_phases — both of which previously used the
+# legacy PhaseName enum and never matched the pipeline's actual phase values
+# (Phase 18/P5-A5).
 SCAN_PHASE_ORDER: list[ScanPhase] = [
     ScanPhase.L1_PREPARATION,
     ScanPhase.SOURCE_PREPARATION,
