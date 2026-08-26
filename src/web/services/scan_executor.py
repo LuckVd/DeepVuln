@@ -32,7 +32,6 @@ from src.web.repositories.finding import FindingRepository
 
 # Import checkpoint and phase services for pause/resume
 from src.web.services.checkpoint_service import CheckpointService, get_checkpoint_service
-from src.web.services.phase_manager import PhaseManager, get_phase_manager, PhaseStatus
 
 # Import Celery app for task control
 from src.web.core.celery_app import get_celery_app
@@ -59,7 +58,6 @@ class ScanExecutor:
         self.event_repo = ScanEventRepository()
         self.finding_repo = FindingRepository()
         self.checkpoint_service = get_checkpoint_service()
-        self.phase_manager = get_phase_manager()
 
     async def create_scan(
         self,
@@ -75,6 +73,14 @@ class ScanExecutor:
         """
         session_maker = get_session_local()
         async with session_maker() as db:
+            # Serialize the pydantic ScanConfig to a JSON-safe dict before
+            # storing: the SQLAlchemy JSON column cannot serialize pydantic
+            # objects (TypeError), and ScanOrchestrator consumes a plain dict.
+            config_data = (
+                scan_create.config.model_dump(mode="json")
+                if scan_create.config is not None
+                else None
+            )
             # Create scan record
             scan = Scan(
                 name=scan_create.name,
@@ -82,7 +88,7 @@ class ScanExecutor:
                 source_path=scan_create.source_path,
                 branch=scan_create.branch,
                 scan_type=scan_create.scan_type,
-                config=scan_create.config,
+                config=config_data,
                 status=ScanStatus.PENDING,
                 progress_percent=0,
                 created_at=datetime.now(timezone.utc),
@@ -439,14 +445,24 @@ class ScanExecutor:
             # Get current phase
             current_phase_name = scan.current_phase
             if current_phase_name:
-                # Save checkpoint before pausing
+                # Audit B1: save_checkpoint REPLACES the whole checkpoint, so a
+                # hand-rolled minimal payload used to wipe the orchestrator's
+                # resume_data (scan_results / completed_engines) — resuming then
+                # re-ran every engine and lost findings. Merge on top of the
+                # checkpoint already carried by the scan row instead.
+                prev_checkpoint = (
+                    scan.checkpoint_data
+                    if isinstance(scan.checkpoint_data, dict)
+                    else {}
+                )
+                prev_resume = prev_checkpoint.get("resume_data") or {}
                 checkpoint_data = {
                     "global_state": {
                         "scan_type": scan.scan_type,
                         "config": scan.config,
-                        "engines_completed": scan.engines_completed,
                     },
                     "resume_data": {
+                        **prev_resume,
                         "total_files": scan.total_files,
                         "analyzed_files": scan.analyzed_files,
                         "findings_count": scan.findings_count,

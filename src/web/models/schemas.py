@@ -71,6 +71,13 @@ class PhaseName(str):
 # Scan Schemas
 # ============================================================================
 
+# Single source of truth for the default engine selection. Every code path
+# that needs a fallback engine list (API schema, orchestrator fallback,
+# zip-upload endpoint) must reference this constant — audit A6 found three
+# divergent hardcoded copies, which silently skipped the AST engine on most
+# paths.
+DEFAULT_SCAN_ENGINES = ["semgrep", "codeql", "agent", "ast"]
+
 
 class ScanConfig(BaseModel):
     """Scan configuration schema with all supported parameters.
@@ -79,7 +86,7 @@ class ScanConfig(BaseModel):
     """
     # Engine selection
     engines: list[str] = Field(
-        default=["semgrep", "codeql", "agent", "ast"],
+        default_factory=lambda: list(DEFAULT_SCAN_ENGINES),
         description="List of engines to use"
     )
 

@@ -884,7 +884,8 @@ class ScanOrchestrator:
         from src.layers.l3_analysis.engines.opencode_agent import OpenCodeAgent
 
         selected_engines = {}
-        requested = self.config.get("engines", ["semgrep", "codeql", "agent"])
+        from src.web.models.schemas import DEFAULT_SCAN_ENGINES
+        requested = self.config.get("engines") or list(DEFAULT_SCAN_ENGINES)
 
         # Semgrep - always available if requested
         if "semgrep" in requested:
@@ -1478,6 +1479,16 @@ class ScanOrchestrator:
             }
 
         logger.info(f"Adjudicating {len(all_findings)} findings")
+
+        # A4: assign the unified final score BEFORE adjudication. The four
+        # rounds (D5) already synced finding.confidence/exploitability; this
+        # turns them into the single comparable score that ClusterBased-
+        # Deduplicator's "keep highest" logic and downstream reporting
+        # actually read. Without it every comparison saw None → arbitrary
+        # survivors.
+        from src.core.final_score import assign_scores_to_findings
+
+        all_findings = assign_scores_to_findings(all_findings)
 
         # Create adjudication service
         adjudication_service = create_adjudication_service(

@@ -195,6 +195,66 @@ class TestPauseScan:
         assert result["task_revoked"] is True
 
     @pytest.mark.asyncio
+    async def test_pause_scan_preserves_orchestrator_resume_data(self, mock_scan_running):
+        """Audit B1: pausing must not wipe the orchestrator's resume_data.
+
+        save_checkpoint REPLACES the whole checkpoint; a hand-rolled minimal
+        payload used to drop scan_results/completed_engines so resuming
+        re-ran every engine and lost findings.
+        """
+        executor = ScanExecutor()
+        # The orchestrator already saved a rich checkpoint mid-engine_execution.
+        mock_scan_running.checkpoint_data = {
+            "current_phase": "engine_execution",
+            "global_state": {"scan_type": "full"},
+            "resume_data": {
+                "scan_results": {"semgrep": {"findings": ["f1"]}},
+                "completed_engines": ["semgrep"],
+            },
+        }
+
+        save_mock = AsyncMock(return_value=True)
+
+        with patch.object(
+            executor.scan_repo, "get", new=AsyncMock(return_value=mock_scan_running)
+        ):
+            with patch.object(executor.checkpoint_service, "save_checkpoint", new=save_mock):
+                with patch.object(
+                    executor.scan_repo, "update_status", new=AsyncMock()
+                ):
+                    await executor.pause_scan(scan_id=1)
+
+        assert save_mock.await_count == 1
+        saved_resume = save_mock.await_args.kwargs["data"]["resume_data"]
+        # Engine results recorded by the orchestrator must survive the pause.
+        assert saved_resume["scan_results"] == {"semgrep": {"findings": ["f1"]}}
+        assert saved_resume["completed_engines"] == ["semgrep"]
+        # Live counters are refreshed on top of the preserved data.
+        assert saved_resume["total_files"] == 100
+        assert saved_resume["findings_count"] == 5
+
+    @pytest.mark.asyncio
+    async def test_pause_scan_without_prior_checkpoint_saves_counters(self, mock_scan_running):
+        """First-time pause (no prior checkpoint) still saves live counters."""
+        executor = ScanExecutor()
+        mock_scan_running.checkpoint_data = None
+
+        save_mock = AsyncMock(return_value=True)
+
+        with patch.object(
+            executor.scan_repo, "get", new=AsyncMock(return_value=mock_scan_running)
+        ):
+            with patch.object(executor.checkpoint_service, "save_checkpoint", new=save_mock):
+                with patch.object(
+                    executor.scan_repo, "update_status", new=AsyncMock()
+                ):
+                    await executor.pause_scan(scan_id=1)
+
+        saved_resume = save_mock.await_args.kwargs["data"]["resume_data"]
+        assert saved_resume["total_files"] == 100
+        assert saved_resume["analyzed_files"] == 50
+
+    @pytest.mark.asyncio
     async def test_pause_scan_without_task_id_does_not_revoke(self, mock_scan_running):
         """When there is no task_id, pause must not attempt to revoke."""
         mock_scan_running.task_id = None

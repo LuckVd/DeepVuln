@@ -140,12 +140,14 @@ async def create_scan_from_zip(
     # Create scan with ZIP file reference
     scan_repo = ScanRepository()
 
-    # Parse config JSON
+    # Parse config JSON; empty/invalid config falls back to the schema-level
+    # default engines (single source of truth, audit A6).
+    from src.web.models.schemas import DEFAULT_SCAN_ENGINES
     import json as json_lib
     try:
-        config_dict = json_lib.loads(config) if config else {"engines": ["semgrep", "codeql", "agent"]}
+        config_dict = json_lib.loads(config) if config else {"engines": list(DEFAULT_SCAN_ENGINES)}
     except Exception:
-        config_dict = {"engines": ["semgrep", "codeql", "agent"]}
+        config_dict = {"engines": list(DEFAULT_SCAN_ENGINES)}
 
     scan_data = ScanCreate(
         name=name,
