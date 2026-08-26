@@ -4,41 +4,11 @@ import pytest
 from pydantic import ValidationError
 
 from src.web.models.schemas import (
-    ProjectCreate, ProjectUpdate, ProjectResponse,
     ScanCreate, ScanResponse, ScanProgressResponse, TokenInfo, FindingSummary,
     FindingCreate, FindingUpdate, FindingResponse,
     AgentConversationResponse, AdversarialStatus, AgentConversationMessage,
     ScanStatus, ScanType, SeverityLevel, FindingStatus,
 )
-
-
-class TestProjectSchemas:
-    """Test project schemas."""
-
-    def test_project_create_valid(self):
-        """Test creating a valid project."""
-        project = ProjectCreate(
-            name="test-project",
-            source_type="git",
-            source_path="https://github.com/test/repo.git"
-        )
-        assert project.name == "test-project"
-        assert project.source_type == "git"
-
-    def test_project_create_invalid_source_type(self):
-        """Test project creation fails with invalid source type."""
-        with pytest.raises(ValidationError):
-            ProjectCreate(
-                name="test",
-                source_type="invalid",
-                source_path="/path"
-            )
-
-    def test_project_update_partial(self):
-        """Test partial project update."""
-        update = ProjectUpdate(name="new-name")
-        assert update.name == "new-name"
-        assert update.description is None
 
 
 class TestScanSchemas:
@@ -47,18 +17,21 @@ class TestScanSchemas:
     def test_scan_create_valid(self):
         """Test creating a valid scan."""
         scan = ScanCreate(
-            project_id=1,
+            name="test-scan",
+            source_type="local",
+            source_path="/tmp/target",
             scan_type=ScanType.FULL,
             config={"max_depth": 3}
         )
-        assert scan.project_id == 1
         assert scan.scan_type == ScanType.FULL
 
     def test_scan_create_invalid_type(self):
         """Test scan creation fails with invalid type."""
         with pytest.raises(ValidationError):
             ScanCreate(
-                project_id=1,
+                name="test-scan",
+                source_type="local",
+                source_path="/tmp/target",
                 scan_type="invalid"
             )
 

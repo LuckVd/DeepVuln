@@ -15,7 +15,6 @@ class TestScanRepository:
         repo = ScanRepository()
         assert hasattr(repo, "get_with_phases")
         assert hasattr(repo, "get_with_events")
-        assert hasattr(repo, "list_by_project")
         assert hasattr(repo, "list_by_status")
         assert hasattr(repo, "get_running_scans")
         assert hasattr(repo, "update_progress")

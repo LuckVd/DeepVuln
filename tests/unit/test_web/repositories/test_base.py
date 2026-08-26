@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.web.repositories.base import AsyncRepository
-from src.web.models.project import Project
+from src.web.models.scan import Scan
 
 
 class TestAsyncRepository:
@@ -12,13 +12,13 @@ class TestAsyncRepository:
 
     @pytest.mark.asyncio
     async def test_repository_initialization(self):
-        """Test that repository can be initialized with a model."""
-        repo = AsyncRepository(Project)
-        assert repo.model == Project
+        """Test that repository can be initialized with a model (Scan)."""
+        repo = AsyncRepository(Scan)
+        assert repo.model == Scan
 
     def test_get_method_exists(self):
         """Test that the repository has the expected methods."""
-        repo = AsyncRepository(Project)
+        repo = AsyncRepository(Scan)
         assert hasattr(repo, "get")
         assert hasattr(repo, "get_multi")
         assert hasattr(repo, "count")

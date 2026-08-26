@@ -3,31 +3,9 @@
 import pytest
 
 from src.web.models.database import Base
-from src.web.models.project import Project
 from src.web.models.scan import Scan, ScanPhase, ScanEvent, ScanStatus, ScanType, PhaseName
 from src.web.models.finding import Finding
 from src.web.models.checkpoint import ScanFile, ApiKey
-
-
-class TestProject:
-    """Test Project model."""
-
-    def test_project_create(self):
-        """Test creating a project instance."""
-        project = Project(
-            name="test-project",
-            source_type="git",
-            source_path="https://github.com/test/repo.git",
-            branch="main"
-        )
-        assert project.name == "test-project"
-        assert project.source_type == "git"
-        assert project.branch == "main"
-
-    def test_project_repr(self):
-        """Test Project string representation."""
-        project = Project(id=1, name="test", source_type="local", source_path="/tmp")
-        assert repr(project) == "<Project 1: test>"
 
 
 class TestScan:
@@ -36,13 +14,11 @@ class TestScan:
     def test_scan_create(self):
         """Test creating a scan instance."""
         scan = Scan(
-            project_id=1,
             status=ScanStatus.PENDING,
             scan_type=ScanType.FULL,
             config={"max_depth": 3},
             progress_percent=0
         )
-        assert scan.project_id == 1
         assert scan.scan_type == ScanType.FULL
         assert scan.status == ScanStatus.PENDING
         assert scan.progress_percent == 0
@@ -50,7 +26,6 @@ class TestScan:
     def test_scan_counts_initialization(self):
         """Test scan statistics are initialized to zero."""
         scan = Scan(
-            project_id=1,
             status=ScanStatus.PENDING,
             scan_type=ScanType.FULL,
             config={},
