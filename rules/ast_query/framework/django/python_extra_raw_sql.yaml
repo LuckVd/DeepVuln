@@ -9,7 +9,6 @@ languages:
 queries:
   python: |
     ((call
-      (attribute
-        (identifier) @obj)
-        (attribute) @method)
-     (#match? @method "^extra")))
+      function: (attribute
+        attribute: (identifier) @method))
+     (#match? @method "^extra$"))

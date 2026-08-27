@@ -1,5 +1,69 @@
 # Change Log
 
+## 2026-08-26
+
+### 可观测性 — LLM 调用追踪（opt-in JSONL）+ 首轮 mini 基线 ✅
+
+- **背景**: benchmark 实跑排查误报/漏报需要"模型当时看到什么、答了什么"；现有 token 聚合（scan.token_usage → `/token-usage` 端点）与会话存档（agent-conversation / adversarial-debate / events）都不含逐次原始报文
+- **改动** `src/layers/l3_analysis/llm/openai_client.py`: 新增 `_llm_trace_dir/_write_llm_trace`——env `DEEPVULN_LLM_TRACE=<目录>` 时，chat 每次调用以 JSONL 追加 `{ts, event(chat|rate_limited|http_error), model, base_url, attempt, duration_ms, request:{messages,max_tokens,temperature,json_mode}, response:{content,reasoning_content,finish_reason,usage}}` 到 `<目录>/llm_trace.jsonl`；env 逐次读取（进程内生效即可）、trace 异常静默不打断主流程、不落 api_key
+- **文档**: `.env.web.example` 增 DEEPVULN_LLM_TRACE / DEEPVULN_LOGGING_FILE 示例；benchmarks/README 增「可观测性」表
+- **验证**: py_compile OK；helper 开/关 env 行为正确；test_l3 LLM 相关 **72 passed**
+
+### 首轮 mini 实测基线（ox-alpha-free 全链路）✅
+
+- **环境**: 本机 sqlite DB + redis(apt) + celery solo pool + uvicorn；LLM = opencode-go / ox-alpha-free（DB seed）；DEEPVULN_LLM_TRACE 开启（38 条 JSONL）
+- **修复**: ① `run_benchmark.py` findings 端点 key `items`→`findings` ② worker 启动需 `-u ALL_PROXY`（环境 socks5h 代理 + httpx 缺 socksio 致 agent 引擎全挂）③ celery 需 `--pool=solo`（沙箱禁 /dev/shm Semaphore，prefork PermissionError）
+- **结果**（9 case，vuln/safe 成对）:
+  | conf>= | TP | FP(safe) | FN | P | R | F1 |
+  |---|---|---|---|---|---|---|
+  | 0.0 | 8 | 26 | 1 | 0.235 | 0.889 | 0.372 |
+  | 0.5 | 8 | 11 | 1 | 0.421 | 0.889 | 0.571 |
+  | 0.7 | 7 | 6 | 2 | 0.538 | 0.778 | 0.636 |
+- **总 token: 112,503**（~12.5K/case）；38 次 LLM 调用（含推理 reasoning_content）
+- **发现的问题**:
+  1. **Semgrep 0 findings**：`--config auto` 走了但产出空——需单独排查（可能 registry 拉取失败或规则包不匹配 mini 场景）
+  2. **java-cmdi FN**：agent 对 `Runtime.exec` 未产出 cmd_injection 类 finding，只给了 info_disclosure/resource_mgmt 两个 low conf suspicious
+  3. **safe 文件 FP 多**：agent 在参数化查询/ProcessBuilder 等 safe 文件上仍产大量低置信度 "suspicious_" 条目（26 个 FP 中绝大多数是这类）→ 提阈值或按 is_suspicious 标签过滤可显著提升 Precision
+  4. **CPG 可达性全标 not_exploitable**：exploitability_verification 的 reasoning 均为 "Code is not reachable from external entry points"（reachability=0.10）——Flask/Spring/net-http 入口未被 CPG 识别为可达入口，与 Phase 18 已知的入口识别问题一致，mini 基准精确暴露了此缺口
+  5. AST 引擎仅出 2 条（py-cmdi/py-eval 各 1），go/java 的 dangerous_api/framework 规则未命中 mini 场景（规则覆盖面问题非 bug）
+
+## 2026-08-26
+
+### AST 规则修复 — 7 条 tree-sitter 查询编译失败清零 + TS 语言加载 ✅
+
+- **发现**: benchmark mini 集离线预检（AST 引擎直扫）暴露大量 `Failed to create query` ERROR；诊断脚本枚举全部 27 条规则查询，**10 处失败**：6 条 S-expression 语法坏（括号错位/谓词嵌套过深）、4 条 TypeScript 规则因语言模块无 `.language` 属性加载失败
+- **修复 1 — 规则查询**（6 文件，全部按可用的 `dangerous_eval` 同款「顶层组+谓词」idiom 重写）:
+  - `django/python_extra_raw_sql.yaml` / `flask/python_render_string_template.yaml`: `(call function: (attribute attribute: (identifier) @method))` + `#match?`
+  - `java/java_jni_register_natives.yaml`: 补 `name:` field
+  - `go/go_context_without_deadline.yaml`: 删多余右括号
+  - `go/go_defer_close_file.yaml`: **根因是 go 语法树 block 下有 statement_list 包裹层**（"Impossible pattern"）；改为 `(block (statement_list (defer_statement ...)))` 双模式（裸 identifier + selector_expression）
+  - `dangerous_api/python_subprocess_shell.yaml`: argument_list 挂到 `call.arguments:` field 下
+- **修复 2 — TS 加载**: `tree_sitter_manager.py` 新增 `_LANGUAGE_ENTRYPOINTS` 回退表——多语法包（tree_sitter_typescript≥0.23）暴露 `language_typescript/language_tsx` 而非 `.language`；get_language 按 `.language → 已知工厂函数` 顺序解析
+- **验证**: 27/27 查询编译通过、mini 重扫零 ERROR；test_l3 ast/detector/rule 相关 **246 passed**；（全量回归见下方补记）
+- **影响**: 此前 TS 的 AST+CPG 全链路静默失效（A2 补了依赖声明但加载器用不了）；go/java 各有规则从未生效
+- **全量回归补记**: test_l3 **2075 passed / 4 failed**，4 个失败全部是 `test_semgrep_integration` 的**沙箱环境问题**（semgrep 需写 `~/.semgrep/semgrep.log`，本沙箱拒绝写 /root）——`HOME=<可写目录>` 重定向后 10/10 全过，与本次改动无关。沙箱内跑全量的姿势：`HOME=/tmp/fakehome pytest tests/unit/test_l3 -q`
+
+### LLM 接线 — opencode-go / ox-alpha-free ✅
+
+- **背景**: 用户指定 DeepVuln 用 DSH 当前默认模型 ox-alpha-free。链路坐实：DeepVuln LLM 客户端**只从 DB `llm_configs` 表构建**（scan_tasks→get_agent_scan_config / adversarial_service→get_verification_config），provider=custom 走 OpenAI 兼容分支
+- **新增 `benchmarks/eval/seed_llm_config.py`**: 幂等 upsert `{name:"opencode-go / ox-alpha-free (DSH)", provider:"custom", base_url:"https://opencode.ai/zen/go/v1", model:"ox-alpha-free", config_type:"both", is_default:true, context_size:1000000, max_tokens:131072}`；key 从 env `OPENCODE_GO_API_KEY` 或 DSH 凭据库 `~/.dsh/.credentials.yaml` refs 解析；写后回读验证 agent_scan + verification 两条消费链路
+- **模型元数据来源**: dsh pi-ai `providers/data/opencode-go.json`（openai-completions API, ctx 1M, maxTokens 131072）
+- **验证**: 临时 sqlite 三连跑（新增→更新→更新）幂等通过，两链路均取到配置；web 栈起后在真实库执行一次即生效
+
+### 基准建设 — py/go/java 检测基准落地 + mini 集 ✅
+
+- **背景**: Phase 18 关闭后"下一步建议①"（建检测基准出 P/R 数字，旧 /tmp/vuln_test 已丢失）。调研选定现成基准组合（见对话记录）：SecurityEval（Python 片段级）/ go-test-bench（Go 项目级，Contrast 官方）/ django.nV（Python 项目级）/ OWASP BenchmarkJava（Java 金标准）/ findsecbugs 用例（Java 补充）
+- **新增 `benchmarks/`**:
+  - `fetch.sh`: 一键下载第三方源到 `third_party/`（gitignore，27MB，已验证全部拉通；OWASP 只取 testcode 2740 文件 + expectedresults-1.2.csv）
+  - **mini 集**: 每语言 3 例共 9 例（py: sqli/cmdi/eval，go: cmdi/sqli/ssrf，java: cmdi/sqli/crypto），模式取自三大基准同型 taint 流，**vuln/safe 成对**（safe 文件无 SINK 注释，作 FP 对照）；`truth.json` 含 CWE + sink_comment 自检标记 + cwe_keywords 匹配词
+  - `owasp_subset_manifest.json`: BenchmarkJava 分层子集 **150 例（75 正/75 负，覆盖全部 11 类），seed=42 可复现**
+  - `eval/make_owasp_subset.py`: 确定性分层抽样
+  - `eval/run_benchmark.py`: 评测入口——`--mode selfcheck`（离线真值↔文件一致性）+ `--mode api`（Web API 提交扫描→轮询→分页拉 findings→TP/FP/FN→P/R/F1，mini 按 case 目录归属+关键词匹配，owasp-subset 先暂存再整体扫防噪声；另有 4 个探索性目标只报计数）；报告写 `results/<tag>_<target>/report.json`
+  - `README.md`: 结构/用法/指标口径/注意事项
+- **验证**: mini selfcheck 9/9 PASS；owasp manifest 150 例源文件齐全 PASS；两脚本 py_compile OK
+- **待办（下次会话可直接做）**: 起 docker-compose-web 后实跑 `--target mini` 与 `--target owasp-subset` 出首批 P/R 基线数字；探索性目标人工定性
+- **Commit**: 未提交（遵循不自动提交规则）
+
 ## 2026-08-25
 
 ### 全量体检修复 — A 类检测失效 + 部署三连 + 死代码清理 ✅

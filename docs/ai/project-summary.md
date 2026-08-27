@@ -1,6 +1,11 @@
 # Project Summary
 
-Status: Phase 18（精度链路接通 + 三语言可达性）- web-only（CLI 已移除，仅 Web 接口）
+Status: Phase 19 筹备（检测基准与 P/R 评测体系）- web-only（CLI 已移除，仅 Web 接口）
+
+## Recent Maintenance Notes
+
+- **2026-08-26**: benchmark 基础设施建成（benchmarks/ 目录：mini 集 9 case / OWASP 子集 150 例 / 评测脚本 / seed 脚本）；AST 规则修复 7 条编译失败清零；ox-alpha-free 接入 DB llm_configs；LLM 调用追踪 DEEPVULN_LLM_TRACE。**首轮 mini 基线：Recall=88.9% (8/9), Precision=0.235~0.538, 总 token 112,503**。开放问题：P1 Semgrep 空 / P2 CPG 入口未识别 / P3 safe 文件 FP 多 / P4 java-cmdi 漏报。详见 `docs/ai/current-goal.md` 与 `change-log.md` 2026-08-26 各条。
+- Phase 18（进行中→已关闭 2026-08-25）：精度链路接通 + 三语言可达性补齐 + 全量体检修复，test_l3 全绿 2079/0。
 
 ## Purpose
 

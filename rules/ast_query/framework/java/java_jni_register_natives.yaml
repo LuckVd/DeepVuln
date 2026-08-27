@@ -9,5 +9,5 @@ languages:
 queries:
   java: |
     ((method_invocation
-      (identifier) @func)
-     (#match? @func "registerNatives")))
+      name: (identifier) @func)
+     (#match? @func "^registerNatives$"))

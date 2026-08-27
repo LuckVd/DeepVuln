@@ -1,351 +1,84 @@
 # Current Goal
 
-> **状态**: ✅ 已完成并关闭（2026-08-25）— Phase 18 第一~七批全部提交推送；同日完成**全量体检修复四批**（A 类检测失效 / 部署三连 / 死代码清理约 8000 行 / B14·B16 纠偏），test_l3 **全绿 2079 passed / 0 failed**（基线从 2203p/18f 清零）。详见 `docs/ai/change-log.md` 2026-08-25 各条与 `docs/ai/audit-2026-08-25-findings.md`。**下一步建议（未立项）**: ① 建 py/go/java 检测基准出 P/R 数字（最高杠杆，旧基准 /tmp/vuln_test 已丢失需重建）② 清 web 测试层遗留 35f/31e（Project API 陈旧测试等，已逐组定性为零回归历史遗留）③ 容器端到端实战验证。
-> **目标**: Phase 18 — 精度链路接通与多语言可达性补齐（基于全量实现审查）
-> **Goal ID**: phase18-precision-link-reachability
-> **创建日期**: 2026-06-20（最近更新：2026-08-25 体检修复完成，goal 关闭）
+> **状态**: ✅ 已立项（2026-08-26）— Phase 18 已关闭；**benchmark 基础设施已建成 + 首轮 mini 基线已出数**；Phase 19 开工，按 P1→P3→P4→P2 修基线问题并迭代扩样本
 >
-> ⚠️ **以下为 Phase 18 执行期的历史记录，进度/基线数字以本文件顶部和 change-log 为准。**
->
-> **📊 进度快照（新会话先看这个）**：
-> - ✅ **第一批**（`4ee490b`）：P0 精度链路 / P1 Java call_graph 注册 / P4 语言收敛+CodeQL 类型
-> - ✅ **第二批**（`6b0f290`+`4b15224`）：三语言 py/go/java CPG 可达性全部接通
-> - ✅ **P6-eval**（`4409eb4`）：round_four severity 保底（防漏报）
-> - ✅ **第三批 P5 续扫完整性**（`a9ef21a`）：H2a pause 真停（revoke）+ H2b clone 防挂死（kill_after_timeout）+ task6 `_finalize_results` DB 去重 + task7 阶段命名统一收敛 ScanPhase（**修复 resume 全量重跑根因**）
-> - ✅ **第三批 P7 可靠性**（`a9ef21a`+`bc1db1f`）：C3 git timeout + C4 baseline fixed 加 scanned_files 覆盖判定 + C5 增量 relative import level 解析 + C7 finding_budget 截断前排序 + 删死代码（`_deduplicate_findings`/`calculate_finding_confidence`）
-> - ✅ **P8 测试真实性**（横穿，`a9ef21a`）：3 个 web 测试文件 fixture 修复（AsyncSessionLocal→get_session_local，setup ERROR→全绿）+ 删 4 CLIAdapter 死测试；第三批当时全 test_l3 **2200 passed / 23 既有失败（零回归，+10 新真实测试）**（注：第四批删 test_enhanced 后基线降为 2186，见顶部权威基线）
-> - ✅ **已 push** `origin/feat/static-evidence-grounding`（fca0c22..bc1db1f，本地=origin，工作区干净）
-> - ⏳ **P6 对抗接线 → 独立会话**（用户 2026-06-20 决定）：子项评估见下；**C6 引擎级 checkpoint / P3 可达性质量** 也待做
-> - ⚠️ **治本（P6-rootcause）已评估回退**：taint→None 正确但与 round_four_llm/codeql 测试架构冲突（8 回归），保底已解决核心，归后续重构测试架构时做
-> - 全 test_l3 始终 **23 既有失败、零回归**（既有失败：verification_gatekeeper×5/deduplicator-async/adjudication×3/ast_engine×3/detectors×2/pre_filter×3/semgrep×1/opencode_agent×1，与本 goal 无关）
->
-> **🧭 冷启动 TL;DR（2026-06-20）**：Phase 17 此前记录为"全部 done"，但 **2026-06-20 全量实现审查**（8 路并行审计，12 万行）发现**多个"声称完成但生产路径上未生效"的核心功能**：① 四轮审计实际**只跑 Round1**（Round2/3 漏调 `add_candidate`，连锁 skip Round3/4）；② 裁决结果映射**属性名错**，`scan_orchestrator.py:1377,1381` 读 `candidate.exploitability/confidence_score`（对象无此属性），导致 exploitability 全丢、**Web 端 confidence 恒为 0**；③ **D5 打分只统一一半**（`finding.confidence_score` 设了，但驱动排序的 `finding.confidence` 没被接管）；④ **CPG 可达性 JS/Java/Go 产 0 路径**（`call_graph/analyzer.py:55` 只注册了 Python builder）且嵌套 sink 恒判可达；⑤ **D3 续扫 resume 失效**（新旧双阶段命名对不上 + 实例状态未恢复 + 落库无去重）；⑥ **pause 假停**（不 revoke Celery）；⑦ **~2000 行对抗增强层是死代码**（enhanced/convergence/strategy_library/gatekeeper 未接线）。
->
-> 本 goal 按**用户 2026-06-20 确认的场景**重新定优先级：**内网单用户**（→ 安全组降级暂缓）、**语言收窄 py/go/java**（→ **放弃 C/C++**）、核心诉求是**检测流程完整 / 链路清晰 / 静态与 AI 真正结合 / 提升效果**。分批修复，第一批 P0+P1+P4 改动最小、杠杆最大。
+> **Goal ID**: phase19-benchmark-eval
+> **创建日期**: 2026-08-26
+> **上一 goal**: Phase 18 — 精度链路接通与多语言可达性补齐（✅ 2026-08-25 关闭）
+> **当前执行**: P1 — Semgrep `--config auto` 零 findings 排查（2026-08-26 开工）
 
 ---
 
-## 第一批实施记录（2026-06-20，P0+P1+P4 完成 ✅）
+## 📊 当前状态快照（新会话先看这个）
 
-TDD 推进，全 test_l3 **2189 passed / 24 既有失败（零回归）**，12 个新测试全绿（基线 2177→2189）。
+### 已完成（本次会话 2026-08-26，未 commit）
 
-| 项 | 改动 | 验证 |
-|---|---|---|
-| **P0-A1** ✅ | `round_two/round_three` 的 `execute` 开头把传入 candidates 逐个 `round_result.add_candidate(c)` 回填 | `TestRoundTwoThreeCandidatePropagation` 2 测试（修复前 `0 candidates`→红，修复后绿） |
-| **P0-A2** ✅ | 提取 `VulnerabilityCandidate.to_exploitability_verification_metadata()`（读 `finding.confidence_score`/`exploitability`，非不存在的 candidate 属性）；`scan_orchestrator` 映射调用它 | `TestCandidateExploitabilityMapping` 2 测试 |
-| **P0-A3** ✅ | `round_four._apply_verification_result` 同步 `finding.confidence=result.confidence` + `finding.exploitability=result.status.value`（D5 单一真相源贯彻，final_score 读到统一值） | `test_finding_confidence_and_exploitability_synced` |
-| **P1** ✅ | `call_graph/analyzer.py` 注册 `JavaCallGraphBuilder()`（已实现的 395 行类） | `TestJavaCallGraphBuilder` 2 测试；Java 进入 call graph（3 节点 1 HTTP entry，此前完全跳过） |
-| **P4-C1** ✅ | `ast_engine` supported_languages 收敛 py/js/ts/java/go；`_get_source_files` 返回 `(files, skipped)`；scan raw_output 记 `skipped_unsupported_files`+`supported_languages` | `TestLanguageScopingP4C1` 2 测试 |
-| **P4-C2** ✅ | `codeql/executor.py` `_create_taint_source/_sink` 签名 `ParsedDataflowPath`→`PathLocation`，去掉 `hasattr` 兜底 | `test_codeql_dataflow_executor_typing.py` 3 测试 |
+1. **state.yaml 对齐**: Phase 18 状态从 active/pending 改为 closed/completed
+2. **基准基础设施建成** `benchmarks/`:
+   - `fetch.sh`: 一键拉取第三方源到 `third_party/`（gitignore，27MB）——SecurityEval / go-test-bench / django-nv / OWASP BenchmarkJava(testcode 2740 文件 + 真值 CSV) / findsecbugs
+   - **mini 集** `mini/`: 每语言 3 例共 9 例（py: sqli/cmdi/eval; go: cmdi/sqli/ssrf; java: cmdi/sqli/crypto），vuln/safe 成对，`truth.json` 含 sink_comment 自检标记 + cwe_keywords 匹配词
+   - **OWASP 子集清单** `owasp_subset_manifest.json`: 分层抽 150 例（75 正/75 负，11 类全覆盖），seed=42 可复现
+   - **评测脚本** `eval/run_benchmark.py`: selfcheck（离线真值↔文件一致性）+ api（Web API 提交→轮询→拉 findings→P/R/F1）；另有 owasp-subset/owasp-full/securityeval/gotestbench/djangonv 目标
+   - `eval/make_owasp_subset.py`: 确定性分层抽样
+   - `eval/seed_llm_config.py`: 幂等把 ox-alpha-free 写入 DB llm_configs 表
+   - `README.md`: 结构/用法/指标口径
 
-**⚠️ P1 端到端发现（归 P2/P3，非 P1 范围）**：注册 JavaCallGraphBuilder 后 Java 文件进入 CallGraphAnalyzer 构建（此前完全跳过）。但 **CPG attack-path 端到端仍返回 0** —— 根因不是 call_graph edges（CPG 用自己的 AST 图，不依赖 CallGraphAnalyzer 的 edges），而是 `finder.py:58 "No entry points found in CPG"`：CPG 层找不到 Java 的入口节点（call_function→function_definition 连接/标记问题，类 P9-01 但针对 Java）。此外 `base.py:_create_callee_id` 用 `Unknown:` 前缀致 CallGraphAnalyzer edges=0（影响 find_callers/check_reachability，Python 同款）。两点均归入 **P2（Go builder + CPG 多语言 entry/callee 连接）**。
+3. **AST 规则修复（7 条编译失败清零）**:
+   - 6 条 S-expression 语法修复（django_extra_raw_sql / flask_render_string_template / java_jni_register_natives / go_context_without_deadline / **go_defer_close_file**（根因：go AST block 下有 statement_list 包裹层）/ python_subprocess_shell）
+   - `tree_sitter_manager.py`: TypeScript 加载回退——tree_sitter_typescript≥0.23 暴露 `language_typescript/language_tsx` 而非 `.language`
+   - 验证: 27/27 查询编译通过；ast/detector/rule 相关单测 246 passed
 
-**改动文件**：`round_two.py` / `round_three.py` / `round_four.py` / `rounds/models.py` / `scan_orchestrator.py` / `call_graph/analyzer.py` / `ast_engine.py` / `codeql/executor.py` + 测试（`test_rounds.py`/`test_call_graph.py`/`test_ast_engine.py` 追加 + 新建 `test_codeql_dataflow_executor_typing.py`）。**未 commit**（遵循不自动提交规则）。
+4. **LLM 调用追踪** `openai_client.py`: env `DEEPVULN_LLM_TRACE=<dir>` 开启 JSONL 落盘（完整 messages + 响应 + usage + 耗时）；不落 api_key
 
----
+5. **ox-alpha-free 接入**: seed_llm_config.py 幂等写入 DB → agent 扫描与可利用性验证两条链路均使用 opencode-go / ox-alpha-free（ctx 1M / maxTokens 131072 / base_url `https://opencode.ai/zen/go/v1`）；key 从 `~/.dsh/.credentials.yaml` refs 解析
 
-## 第二批实施记录（2026-06-20，P2-前置 + P2-Go 完成 ✅，三语言可达性接通）
+6. **首轮 mini 实测基线**（9 case 全跑完）:
+   | conf>= | TP | FP(safe) | FN | P | R | F1 |
+   |---|---|---|---|---|---|---|
+   | 0.0 | 8 | 26 | 1 | 0.235 | **0.889** | 0.372 |
+   | 0.5 | 8 | 11 | 1 | 0.421 | **0.889** | 0.571 |
+   | 0.7 | 7 | 6 | 2 | 0.538 | 0.778 | **0.636** |
 
-TDD + 端到端验证，全 test_l3 **2194 passed / 23 既有失败（零回归）**。三语言（py/go/java）CPG attack-path 全部端到端通（`reaches_sink=True`）——此前 JS/Java/Go 一律 0 paths。
+   总 token: **112,503**（~12.5K/case）; LLM trace 38 条在 `data/llm_trace/llm_trace.jsonl`
 
-| commit | 内容 |
-|---|---|
-| `6b0f290` P2-前置 | CPG entry/callee/sink 连通，Java 端到端通（0→2 paths）。三处通用修复：① `cpg/models.py merge_call_graph` 把 `CallNode.is_entry_point/entry_point_type` 写入 CPG call_function metadata（finder 靠真实 HTTP/RPC/main 入口而非脆弱的函数名 pattern）② `base.build_file_graph` 加边前 resolve callee_id 到实际 node（`_create_callee_id` 的 `Unknown:` 前缀致 calls 边全丢→0 edges）③ `finder._find_sinks` 用 `re.search`（pattern 是正则 alternation 如 `exec|getRuntime`，子串匹配永远 False→sinks 空）。顺手修了 `test_supports_language` 既有矛盾。 |
-| `4b15224` P2-Go | 新建 `go_builder.py`（func/method declaration + call expression[identifier/selector/chain] + entry 检测[main/init/http handler 签名]）+ `go_provider.py` + path_provider/analyzer 注册。Go 端到端通（0→1 path）。 |
+### ⚠️ 发现的问题（按优先级，下一步做）
 
-**⚠️ P3（嵌套 sink 可达性质量）评估后建议归第三批**：
-- "嵌套 sink 判不可达"本质需要**条件求值**（识别 `if False` 死分支），非 `identify_basic_blocks` 递归能解决——CFG 是结构可达（边可达），不做条件求值。
-- "`_verify_cfg_reachability` 兜底默认 True 改保守"有**回归风险**：刚接通的 py/go/java `reaches_sink=True` 部分依赖兜底 True，改保守会让它们变 False（漏报）。
-- P3 是精度改进（防误报方向），非功能阻断；建议与 P5/P7 在第三批一起深做（含条件求值设计）。
-
-**改动文件**：`cpg/models.py` / `call_graph/builders/base.py` / `path_finder/finder.py`（P2-前置）+ `go_builder.py`(新) / `go_provider.py`(新) / `path_provider.py` / `analyzer.py`（P2-Go）+ 测试。**第一批(`4ee490b`)与本批(`6b0f290`/`4b15224`)均已 commit**。
-
----
-
-## 第四批实施记录（2026-06-20，P6 低风险子项 完成 ✅，已提交并 push `4c293b1`）
-
-用户决定 P6 硬骨头（子项1 gatekeeper 接线 / 子项2 min_evidence_dimensions）留独立会话，本批先把低风险高确定性的子项3/4 清掉，并按"删花哨的、留有用的、把它接对"新增**子项5（真能力提升）**。全 test_l3 **2186 passed / 23 既有失败（零回归）**。
-
-| 子项 | 改动 | 验证 |
-|---|---|---|
-| **子项3** ✅ | `round_three.py:316` `LIKELY→ConfidenceLevel.HIGH` 改 `MEDIUM`（防"可能"与 CONFIRMED 同级误升 EXPLOITABLE；下游 `RoundResult.add_candidate` 把 LIKELY 候选从 high→medium 计数） | `test_likely_status_maps_to_medium_not_high`（修复前红/后绿）|
-| **子项4** ✅ | 删死机械 `enhanced_adversarial.py`(744)+`convergence.py`(411)=1155 行；**保留** `strategy_library.py`（真知识，干净叶子，仅依赖 stdlib+pydantic）。清理 `verification/__init__.py` 的 enhanced/convergence re-export（保留 strategy_library）。修 `verification_gatekeeper.py` 两处 docstring 去掉对已删文件指代。拆 `test_enhanced_adversarial.py`(45)→`test_strategy_library.py`(26，保留 strategy 测试，删 convergence/enhanced/evolution/learning 测试) | ruff F 零新增；干净导入 `AdversarialVerifier/StrategyLibrary/create_attacker_library`；无残留引用 |
-| **子项5** ✅（核心能力）| 把 `strategy_library` 真知识**按 finding vuln 类型**接进 `prompts/adversarial.py` 的 `get_attacker_user_prompt`/`get_defender_user_prompt`：attacker 注入相关绕过技巧+攻击链，defender 注入防御机制+trigger conditions+suggested defense。**生成时参考**（非增强版"生成后贴字符串"）。接地气表述（"assess whether applicable"/"verify presence"，不预设结论）。未知 vuln 类型不注入（不膨胀）| `test_adversarial_strategy_injection` 4 测试：SQLi attacker 含 comment/攻击链 + 接地气；XSS 类型感知；defender 含 parameterized + verify；未知类型无注入 |
-
-**关键判断（驱动子项4/5 设计）**：审查 enhanced 层（`_run_enhanced_debate`）发现它**核心推理复用基础版**（直接调 `base_verifier._run_round_1/arbiter.evaluate`），策略知识是"生成后追加字符串"（`_enhance_attacker_argument`），属**花哨不更强**。故删机械、留知识、把知识接进基础版生成 prompt 才是真增强。
-
-**改动文件**：`round_three.py` / `verification/__init__.py` / `verification_gatekeeper.py` / `prompts/adversarial.py`（子项3/4/5）+ 删 `enhanced_adversarial.py`/`convergence.py` + 测试（`test_rounds.py` 追加 / 新建 `test_strategy_library.py`(替 `test_enhanced_adversarial.py`) / 新建 `test_adversarial_strategy_injection.py`）。**未 commit**（遵循不自动提交）。
-
-**测试数学校验**：2200(基线) − 45(删 test_enhanced) + 26(新建 strategy) + 1(子项3) + 4(子项5) = **2186 passed**，既有失败 23 不变，零回归。
-
----
-
-## 第五批实施记录（2026-06-21，P7-C6 引擎级 checkpoint Tier1 完成 ✅，已提交并 push `7f6c242`）
-
-**核心价值**：长扫描在 `engine_execution` 阶段中途崩溃（尤其 CodeQL 跑完、并发引擎跑一半时），resume **跳过已完成的引擎**，不白跑昂贵的 CodeQL。
-
-**比预想低风险**：P5 已建好 `scan_results` 序列化/恢复机制（`_serialize_scan_results`/`_restore_scan_results`/`WebCheckpointSink.save` 已把 scan_results 塞进 resume_data）。C6 只补"mid-phase 按引擎存 + completed_engines 跟踪/恢复/跳过"。
-
-| 改动 | 说明 |
-|---|---|
-| `__init__` 加 `_completed_engines: set` | 跟踪 engine_execution 内已完成的引擎；fresh scan 重置，resume 恢复 |
-| `_serialize_resume_data()` 单一真相源 | 返回 `{scan_results, completed_engines}`。`WebCheckpointSink.save`(phase 末) 和 mid-phase 存档都走它——因 `save_checkpoint` **整体替换** resume_data 非合并，必须一次带全 |
-| `_save_engine_checkpoint(name)` mid-phase 存档 | 引擎完成即写 `engine_execution` 阶段 checkpoint（best-effort，失败只 log） |
-| `_restore_state_from_checkpoint` 恢复 completed_engines | 与已恢复 scan_results 取**交集**（防"标完成但无结果"） |
-| `_execute_engines` 跳过 + 逐引擎存档 | 跳过 `_completed_engines`；CodeQL 顺序逐引擎存档；并发批次 gather 后逐引擎存档（Tier1 保留 gather） |
-
-**Tier1 取舍**：CodeQL（顺序）逐引擎存档 → 抓住核心价值（CodeQL 跑完后崩溃不重跑）；并发引擎 gather 后统一处理时逐引擎存档——进程在批次内存活则全部存档，进程中途被杀则整批重跑（可接受，并发引擎比 CodeQL 便宜）。Tier2（as_completed 逐个存档）留后续。
-
-**验证**：新增 `TestEngineLevelCheckpoint` 4 测试（restore completed_engines / 交集防错 / 已完成引擎不重跑 / 逐引擎存档含 completed_engines）。全 test_l3 **2186 passed / 23 既有失败不变**（C6 改动在 web 不影响 test_l3）；test_web **+4 passed、12 failed/21 errors 全既有**（stash 对比确认零回归）；ruff F 改动文件 0 新增（scan_orchestrator.py 既有的 exclude_files@756/CodeQLEngine@954 与本批无关）。
-
-**改动文件**：`scan_orchestrator.py`（`__init__`/`_serialize_resume_data`/`_save_engine_checkpoint`/`_restore_state_from_checkpoint`/`_execute_engines`）+ `scan_pipeline_adapters.py`（`WebCheckpointSink.save` 改用单一序列化）+ 测试（`test_scan_resume_findings.py` 加 `TestEngineLevelCheckpoint` 4 测试 + 更新 1 个既有断言 resume_data 现含 completed_engines）。已提交并 push `7f6c242`。
-
----
-
-## 第六批实施记录（2026-06-21，P6 硬骨头 完成 ✅，已提交并 push `1e1ac51`）
-
-**核心修复**：证据门（evidence gate）此前看"引擎跑没跑"（`available`）而非"证据结论是否支持可利用"——又一道名义精度门没真正 guard（与 Phase 17 同类病灶）。本批重设计为读证据结论，并接通 gatekeeper。
-
-**子项2 证据门重设计**（`scoring/`）：
-- 新增 `_classify_evidence(dimensions)` 读各维度 `evidence` dict 结论：**confirming**（数据流级：CodeQL `has_source+has_sink` 无 sanitizer / taint `is_exploitable`）vs **supporting**（可达级：taint 可达未确认 / reachability 可达）。attack_surface 是 label，不参与。
-- `_derive_status` 重写（用户取向）：`score>=阈值` 时 **confirming>=1→EXPLOITABLE**；仅 supporting→**CONDITIONAL**（不直接 EXPLOITABLE）；都无→NEEDS_REVIEW。本机无 CodeQL 时 taint 真数据流仍能确认真漏洞。证据门只在 `score>=阈值` 起作用，中间区纯按 score 中点判 CONDITIONAL/UNLIKELY（避免低分误升）。
-- `MultiDimScore` 加 `confirming_evidence_count`/`supporting_evidence_count`；`MultiDimConfig` 删 `evidence_dimensions`/`min_evidence_dimensions`（旧"available 即证据"语义已错），换 `require_confirming_for_exploitable` 开关（False 退回旧行为）。
-
-**`dataflow_backed` 桥梁**（`round_four.py`）：`_verify_exploitability` 把 `confirming_count>=1` 落到 `finding.metadata["dataflow_backed"]`，让 gatekeeper 能区分"数据流背书的 EXPLOITABLE"与"LLM 覆盖的 EXPLOITABLE"。
-
-**子项1 gatekeeper 接线**（`verification_gatekeeper.py` + `scan_orchestrator.py`）：
-- Check4 放宽：`confidence>=0.85 + exploitable + _is_dataflow_backed`→CONFIRMED（不再强求 PoC metadata，因子项2 让标签可信）；新增 `_is_dataflow_backed`。
-- `scan_orchestrator:1580` 用 gatekeeper `should_verify_finding(f)->(bool,str)` 替换手写极简版，`reason` 用 gatekeeper 返回值（省 ~40% 对抗验证 LLM 调用）。
-
-**连带修复**（`core/final_score.py`）：`EXPLOITABILITY_SCORES` 补 `conditional=0.45`/`needs_review=0.35`（消除 NEEDS_REVIEW 被抹成 0.5=possible）。
-
-**验证**：新建 `test_multi_dim_gate.py` 8 测试；修 `test_verification_gatekeeper` 5 个既有失败（3 字符串PoC→结构化metadata、2 加 dataflow_backed）+ 新增 LLM 防绕过测试；`test_final_score` 加 conditional/needs_review 断言。全 test_l3 **2200 passed / 18 既有失败（零回归）**；ruff F 改动文件 0 新增；ast OK；scan_orchestrator 模块可加载。⚠️ `test_web` 因环境缺 `slowapi` 无法 collection（既有环境问题），web 接线端到端未跑、待有 slowapi 环境补验。
-
-**改动文件**：`scoring/models.py` + `scoring/multi_dim_scorer.py` + `rounds/round_four.py` + `verification/verification_gatekeeper.py` + `web/services/scan_orchestrator.py` + `core/final_score.py` + 3 测试文件。已提交并 push `1e1ac51`。
-
----
-
-## 第七批实施记录（2026-06-21，C6 Tier2 + P3 可达性增量 完成 ✅，未提交）
-
-**C6 Tier2（并发引擎逐引擎 checkpoint）**：`_execute_engines` 并发批次从 `asyncio.gather`（等全部）改为 `asyncio.wait(FIRST_COMPLETED)` 循环——每引擎完成即 `_save_engine_checkpoint`，并发批次中途被杀也能 resume 跳过已完成引擎（Tier1 是整批重跑）。`test_scan_resume_findings` 16 passed 确认存档/恢复/跳过语义不破坏。
-
-**P3 可达性质量增量**（用户选增量 scope；条件求值 `if False` 死分支 = XL，标后续独立立项）：
-- 根因：4 个 CFG builder 的 `identify_basic_blocks` 只遍历函数顶层，`_is_block_terminator` 把 if/for/while 当终止符 → 体内语句无 block → `_locate_block` None → `finder._verify_cfg_reachability` continue 视为可达（嵌套 sink 误判可达）。
-- 关键发现：`build_cfg_edges` 的 `_build_if/while/for/try/match edges` 用 `blocks[index+1]` 当分支目标——设计本假设"体紧接父 block"，递归 identify_basic_blocks 后歪打正着连对边，**无需重写 build_cfg_edges**。
-- 实施：`base.py` 加 `_collect_compound_body` + `_recurse_compound_body` 共享 helper（build_cfg 绑 `self._ast_graph`）；4 builder（py/java/js/go）identify_basic_blocks 终止符分支加递归 hook；`finder` `_locate_block` None 加可观测性 debug log（不改行为，零回归）。
-- 收益：嵌套 sink（if/for/while 体）进真实 CFG 可达性检查（消除"block 缺失 → continue 误判可达"）。**不解决 `if False` 死分支**（CFG 结构可达，需条件求值，标后续）。
-- 验证：新建 `test_cfg_recursion.py` 3 测试（if 体 sink 进 block / 无 ast_graph 兼容 / `_collect_compound_body` 取体）；全 test_l3 **2203 passed / 18 既有失败（零回归）**；ruff F 零新增；ast OK。
-
-**改动文件**：`scan_orchestrator.py`（C6 Tier2）+ `cfg/base.py` + `cfg/builders/{python,java,js,go}_cfg.py` + `path_finder/finder.py`（P3）+ 新建 `test_cfg_recursion.py`。**未提交**。
-
----
-
-## 需求背景
-
-2026-06-20 对全量代码做了 8 路并行实现审查。结论：**骨架完整、纯算法层扎实**（CFG 建图、evidence_calculator、semgrep 真集成、taint_tracker、威胁情报均为真实可用实现），但**精度核心多数未真正生效**。根因集中在三类：**(a) 重构/接通改了一半**（搬了字段、接了入口，调用点和下游没跟着改全）；**(b) 跨子系统协议没对齐**（新旧阶段命名、语言 builder 注册）；**(c) 端到端测试是 mock**（D3 Celery / E5 GLM / checkpoint 持久化 / CodeQL 全是 Mock/stub，所以这些断裂没被测出来）。
-
-> ⚠️ **诚实披露**：本 goal 的根因/定位来自并行代码审查，**绝大多数带 `file:line` 证据**；少数标 SUSPECT（如并发 `_borrowed` 记账、config 路径错配）需在 TDD 时坐实后再修。
-
----
-
-## 场景约束（用户 2026-06-20 确认，决定优先级）
-
-1. **内网单用户使用** → 安全组（IDOR / WS 认证 / 源路径白名单 / 弱口令 / 限速 / API key 明文 / CSV 注入 / git 注入 / JWT 失效）**整体降级为暂缓**；仅做轻量加固。待将来公网/多用户时再整体补多租户。
-2. **语言收窄到 Python / Go / Java**；**放弃 C/C++**（从地基起步的独立大工程，不立项）。
-3. **核心诉求**：检测流程完整、链路清晰、静态工具与 AI 真正结合、提升检测效果。
-
----
-
-## 语言支持现状矩阵（2026-06-20 核实）
-
-| 能力层 | Python | Java | Go |
+| # | 问题 | 影响 | 建议 |
 |---|---|---|---|
-| sinks/sources 注册 | ✅ | ✅ | ✅ |
-| CFG builder | ✅ | ✅ | ✅ |
-| AST 规则 | ✅ | ✅ | ✅ |
-| CPG provider 注册 | ✅ | ✅ | ❌ 注释成 TODO |
-| **call_graph builder** | ✅ | ⚠️ **已实现(395行)未注册** | ❌ 文件不存在 |
-| **可达性 attack-path 端到端** | ✅ 通 | ❌ 断(call_graph) | ❌ 多处断 |
+| **P1** | **Semgrep --config auto 产 0 findings** | 引擎级检出为空 | 排查 registry 拉取/规则包匹配 |
+| **P2** | **CPG 可达性全标 not_exploitable**（reachability=0.10）| exploitability 判定质量低 | Flask/Spring/net-http 入口未被 CPG 识别为外部入口——Phase 18 已知问题，mini 基准首次量化了影响 |
+| **P3** | safe 文件 FP 多（agent 产低置信度 suspicious 条目）| Precision 低 | 按 is_suspicious 标签过滤或提阈值 |
+| **P4** | java-cmdi 漏报（agent 未识别 Runtime.exec 为 cmd_injection）| Recall 缺口 | 补 prompt 规则或加 dangerous API 检测 |
 
-**关键事实**：`src/layers/l3_analysis/call_graph/builders/java_builder.py` 是**完整的 395 行实现**（方法/构造器/继承/接口/Spring 入口/调用解析全有），仅 `analyzer.py:55` 未注册（注释 "Java and Go builders will be added later"）→ **Java 可达性接通近乎免费**。Go 的 call_graph builder 文件不存在 + `GoCPGProvider` 注释成 TODO → Go 需新建 builder + provider（中等工程）。
-
----
-
-## 待办目标（按优先级 P0–P8，附提升建议）
-
-### P0 — 精度链路打通（A1+A2+A3）｜工作量 S｜对应：流程完整 + 链路清晰
-
-**根因/定位**：
-- A1：`rounds/round_two.py` / `round_three.py` 全文**从未调用 `round_result.add_candidate()`**，直接改传入 candidate 引用 → `termination.py:315` 见空 `next_round_candidates` 立即 NO_CANDIDATES 早停 → **Round3/4 永不执行**。
-- A2：`scan_orchestrator.py:1377,1381` 读 `candidate.exploitability` / `candidate.confidence_score`，但 `VulnerabilityCandidate`（`rounds/models.py:44`）**无此属性**（真实字段在 `candidate.finding.*`）→ exploitability 全丢、confidence 恒 0。
-- A3：`round_four.py:1428` 只设 `finding.confidence_score`，但 `final_score.py:310 calculate_finding_score` 仍读 `finding.confidence`(0-1)，D5 的"单一真相源"没贯彻。
-
-**修复步骤**：
-1. Round2/3 每个 phase 开头把传入 candidates 逐个 `round_result.add_candidate(c)` 回填（保持同引用以保留 confidence 更新）。
-2. `scan_orchestrator.py:1377,1381` 改读 `candidate.finding.exploitability` / `candidate.finding.confidence_score` / `candidate.confidence.value`。
-3. D5 后让 `round_four` 同步更新 `finding.confidence`（或让 `final_score` 直接用 `confidence_score/100`）。
-
-**验证**：Round2/3 回填单测 + 裁决 mapping 属性单测 + 断言 confidence 不再恒 0；全 test_l3 零回归。
-**预期效果**：四轮审计、裁决映射、打分统一三条链同时复活；前端置信度/可利用性正确。
-
-### P1 — Java 可达性接通（A4-Java）｜工作量 S｜对应：静态+AI 结合 + 覆盖 Java
-
-**根因/定位**：`call_graph/analyzer.py:53-58` `_register_builders` 只注册 `PythonCallGraphBuilder`；但 `java_builder.py` 已完整实现。
-**修复步骤**：`analyzer.py:55` builders 列表加入 `JavaCallGraphBuilder()`（import 已存在的类）；确认 `build_graph` 默认 patterns 含 `.java`（已含，line 295）。
-**验证**：Java 真源码 attack-path 端到端（可达/不可达）——不再恒空；入口（Spring `@GetMapping`/servlet/main）→ sink 能出路径。
-**预期效果**：Java 的入口→sink 可达性硬证据开始喂给裁决。
-
-### P2 — Go 可达性接通（A4-Go）｜工作量 M｜对应：覆盖 Go
-
-**根因/定位**：Go call_graph builder 文件不存在；`cpg/path_provider.py:50` `GoCPGProvider` 注释成 TODO。
-**修复步骤**：
-1. 新建 `call_graph/builders/go_builder.py`（仿 `java_builder.py`：func 声明/调用/入口 `net/http` handler、`main`、init 的提取）。
-2. 新建 `cpg/providers/go_provider.py`（仿 java_provider）+ `path_provider.py` 注册 `"go": GoCPGProvider()`。
-3. `analyzer.py` 注册 Go builder。
-**验证**：Go 真源码 attack-path 端到端；三主力语言可达性补齐。
-**预期效果**：Go 可达性链路通。
-
-### P3 — 可达性质量（A4 嵌套 sink + 兜底取向）｜工作量 M｜对应：提升效果
-
-**根因/定位**：
-- 4 个 CFG builder 的 `identify_basic_blocks` 只铺函数**顶层语句**，`if/for/while` 体内的 sink 定位不到 block → `_locate_block` 返回 None → `continue` 视为可达（`finder.py:273-274`）。
-- `_verify_cfg_reachability` 所有"找不到证据"的兜底**默认 True**（激进=放大误报），与保守立场相反。
-
-**修复步骤**：
-1. `identify_basic_blocks` 递归进入 `if/for/while/switch` 体内语句建 block（或让 `_locate_block` 落空时保守返回不可达/Unknown，而非 continue）。
-2. 兜底分支从默认 True 改为 Unknown/保守（与 taint_tracker 的 `is_reachable=False` 取向一致）。
-**验证**：`if False: eval(x)` 等条件守护死分支能判 False 的负样本测试；现有 Python 可达正样本不回归。
-**预期效果**：最常见的"分支/循环内 sink"可达性判准；不再倾向误报。
-
-### P4 — 语言声明收敛 + CodeQL 类型（C1+C2）｜工作量 S｜对应：链路清晰（不静默漏报）
-
-**根因/定位**：
-- C1：`ast_engine.py:39` `supported_languages` 声称 10 种，`rules/ast_query/` 实际只有 py/js/go/java；不支持的返回 0 findings 且 `success=True` → 静默漏报。
-- C2：`codeql/executor.py:332` 把 `PathLocation` 当 `ParsedDataflowPath` 传，靠 `hasattr` 兜底。
-
-**修复步骤**：
-1. `supported_languages` 收敛到 py/go/java（C/C++ 显式标"不支持"，返回 `skipped` 状态而非 success+0 findings，让下游可区分"没洞"与"没实现"）。
-2. 修 `_create_taint_source/_sink` 参数类型为 `PathLocation | None`。
-**验证**：不支持的语言不再 success+0；CodeQL executor 类型契约正确。
-**预期效果**：杜绝"扫了等于没扫"。
-
-### P5 — 续扫流程完整（A5+A6）｜工作量 M-L｜对应：流程完整
-
-**根因/定位**：
-- A5：`pipeline/phases.py` 新 10 阶段 `ScanPhase` 与 `models/scan.py:31` 旧 7 阶段 `PhaseName` 并存，resume 算出的阶段名对不上；实例状态（tech_stack/attack_surface_report_obj）只恢复 findings → 下游 `None` 崩；`_finalize_results`(orchestrator:1731) 落库无去重 → resume 重跑重复 findings。
-- A6：`scan_executor.py:486` pause 只改 DB 状态，不 revoke Celery → 双任务并发。
-
-**修复步骤**：
-1. 统一阶段命名：`scan_executor._create_initial_phases` / `PhaseManager.PHASE_ORDER` / `CheckpointService.get_resume_strategy.phase_order` / `progress_broadcaster` 全部改用 `ScanPhase`。
-2. resume 序列化恢复 tech_stack + attack_surface_report_obj（一并进 checkpoint resume_data）。
-3. `_finalize_results` 按 `(scan_id, rule_id, file, line)` upsert 去重。
-4. `pause_scan` 接 `revoke(terminate=True)`，`_execute_scan_async` 守卫 PAUSED 状态。
-**验证**：中断→resume 不重跑 engine_execution、不丢/重 findings；pause 真停。
-**预期效果**：断点续扫名实相符。
-
-### P6 — 对抗增强接线（A7 + 硬证据门 + LIKELY 映射）｜工作量 M｜对应：提升效果 + 静态+AI 结合
-
-**根因/定位**：
-- `verification_gatekeeper.py`（省 40% LLM + 硬证据守护）未接线，生产用 `adversarial_service.py:573` 手写极简版。
-- `scoring/models.py:154` `min_evidence_dimensions=1` 可被单维 reachability 软标签绕过 EXPLOITABLE 判定。
-- `round_three.py:309` 把 LIKELY(0.6-0.85) 映射为 HIGH，与 CONFIRMED 同级 → 可能误升 EXPLOITABLE。
-- `enhanced_adversarial.py`(744) / `convergence.py`(411) / `strategy_library.py`(771) 约 2000 行未接线死代码。
-
-**修复步骤**：
-1. 用 `VerificationGatekeeper` 替换 `adversarial_service.should_verify_finding` 手写版（并修其 FP 正则行锚定）。
-2. `min_evidence_dimensions` 提到 2，或把 reachability（非 source/sink 硬证据）移出 `evidence_dimensions`。
-3. 修 LIKELY→MEDIUM（而非 HIGH）。
-4. 决定 enhanced/convergence/strategy_library：接线 or 删除（消除误导性死代码）。
-**验证**：gatekeeper 接线后单测；硬证据门负样本（单维软证据不判 EXPLOITABLE）。
-**预期效果**：误报压制真生效、省 LLM、裁决更准。
-
-### P7 — 可靠性（C3-C7）｜工作量 M｜对应：流程完整 + 提升效果
-
-- **C3** `git_operations.py:122`：`clone_timeout` 传给 `clone_from`（防挂死 worker）。
-- **C4** `baseline_manager.py:428`：fixed 判定叠加"该文件本次是否被扫描覆盖"，否则误报已修复。
-- **C5** `dependency_graph.py:246`：修相对 import 路径拼接（防增量漏扫，含 java/go import）。
-- **C6** `scan_pipeline.py`：engine_execution 增加引擎级增量 checkpoint（中途崩溃可续）。
-- **C7** `finding_budget.py`：截断前按 final_score 降序排序（防随机丢弃高分）。
-- 顺带清理死代码：`_deduplicate_findings`(orchestrator:1814)、`calculate_finding_confidence`(confidence_scorer:317)。
-
-**验证**：各项配 TDD；git 超时/baseline 覆盖/import 拼接/budget 排序负样本。
-
-### P8 — 测试真实性（E，横穿全程）｜工作量 M｜对应：保证修复可验证
-
-**根因/定位**：D3 Celery（`test_pause_resume.py:13` `sys.modules[...]=Mock`）、E5 GLM（27 测试全用 stub）、checkpoint 持久化（`_save_checkpoint_file` mock 成 return True）、CodeQL（patch is_available）全是 mock；24 个"既有失败"中 8+ 是 async-当-sync 空转测试（`coroutine never awaited`），5 个 gatekeeper 是疑似真 bug。
-**修复步骤**：每修一处 P 就把它从 mock 升级为真实测试；删/修 8 个 async-当-sync 空转测试；复核 5 个 gatekeeper 行为不符（修实现或修测试）；修 `test_path_provider.py:36` 与 Java 注册的矛盾（"109 passed"实为 +1 failed）。
-**验证**：测试"绿"真正代表功能对。
-
-### P9（降级）— 安全组暂缓 + 轻量加固｜工作量 S（加固部分）
-
-**用户确认暂缓（单用户内网）**：IDOR / WS 无认证 / 源路径无白名单 / `/auth/seed` 未授权+弱口令 / 限速默认关 / API key 明文 / CSV 注入 / git 参数注入 / JWT 无失效。
-**仅做轻量加固**（不阻塞功能）：改默认口令为强随机；`get_db` 加 `except: rollback`；repository 不内部 commit（改 flush，调用方控事务）。
-**触发条件**：将来要公网/多用户时，整体补多租户（Scan/Finding 加 owner_id + 端点校验 + WS 认证 + 源路径白名单）。
-
----
-
-## 提升建议（用户问"还有什么要提升"，非阻塞、按需排期）
-
-1. **证据链可视化**（服务"链路清晰"）：修好 P0 后，每个 finding 在 API/报告层输出完整证据链——`哪个引擎发现 → 经历哪几轮 → 各维度分数(reachability/taint/codeql) → 为什么 confirmed/rejected`，便于人工核验。
-2. **source→sink 完整路径展示**：可达性修好后，把 `AttackPath`（入口→...→sink 调用链 + 分支条件）写进 finding evidence，而非只一个布尔 `reaches_sink`。
-3. **静态↔AI 双向闭环**：当前是单向（静态→AI 裁决）。可加"AI 反查静态引擎"——AI 对可疑点要求 CodeQL/taint 复核特定路径，迭代深化。
-4. **误报反馈通路**：单用户标记的 false positive 回写、用于调阈值/规则。
-5. **精度漏斗可观测性**：扫描中实时展示"每引擎产出 N → 预过滤剩 M → 多轮收敛 K → confirmed J"，让损失/误杀透明。
-
----
-
-## 实施顺序建议（分批，每批跑 test_l3 验证零回归）
-
-- **第一批（最高杠杆、改动最小）**：P0（精度链路）+ P1（Java 注册）+ P4（语言收敛）。工作量 S+S+S，一次性让"精度数据链路 + Java 可达性 + 语言诚实声明"到位。
-- **第二批**：P3（可达性质量）+ P2（Go 接通）——三语言可达性补齐并提质。
-- **第三批**：P5（续扫完整）+ P7（可靠性）+ P6（对抗接线）。
-- **横穿全程**：P8 测试真实性——每修一处即升级为真实测试。
-- **暂缓**：P9 安全组（待公网）、C/C++（不立项）。
-
----
-
-## 验证环境（每次会话复用）
+### 环境备忘
 
 ```bash
-cd /opt/pro/deepvuln
-export OPENAI_API_KEY="$ANTHROPIC_AUTH_TOKEN"
-export OPENAI_BASE_URL="https://open.bigmodel.cn/api/coding/paas/v4"
-# glm-4.5-air（快）；本机 1.9GB（无 CodeQL）；测试用 sqlite
+# 本机开发栈（无 docker；sqlite + redis + celery solo）
+redis-server --daemonize yes
+export DEEPVULN_DB_URL="sqlite+aiosqlite:////opt/pro/DeepVuln/data/deepvuln.db"
+export CELERY_BROKER_URL="redis://localhost:6379/0" CELERY_RESULT_BACKEND="redis://localhost:6379/0"
+export DEEPVULN_LLM_TRACE="/opt/pro/DeepVuln/data/llm_trace"
+export DEEPVULN_SECURITY_JWT_SECRET="<openssl rand hex 32>"  # 或读 /tmp/dv_jwt_secret
 
-# 全量回归
-python3 -m pytest tests/unit/test_l3 -q 2>&1 | tail -30   # 期望 2186 passed / 23 既有失败，关注失败数不增
-# 防回归
-python3 -c "import ast,pathlib;[ast.parse(f.read_text()) for f in pathlib.Path('src').rglob('*.py')];print('OK')"
-ruff check src/ --select F
+# web (uvicorn)
+.venv/bin/python -m uvicorn src.web.main:app --host 127.0.0.1 --port 8000
+
+# celery worker（--pool=solo 绕沙箱禁 /dev/shm；必须 -u ALL_PROXY 因 httpx 缺 socksio）
+.venv/bin/python -m celery -A src.web.tasks.scan_tasks worker -l info -Q scan --pool=solo
+# ↑ 启动前: unset ALL_PROXY all_proxy
+
+# benchmark
+DEEPVULN_URL=http://127.0.0.1:8000 DEEPVULN_USER=admin DEEPVULN_PASS=dvbench2026 \
+    .venv/bin/python benchmarks/eval/run_benchmark.py --target mini
 ```
 
-**基准测试项目** `/tmp/vuln_test/app.py`（Python eval/SQLi/cmd 注入三件套，沿用 Phase 17）；Java/Go 基准待 P1/P2 时各建一个最小可复现（Spring `@GetMapping`→`Runtime.exec` / `net/http` handler→`os/exec`）。
+⚠️ admin 密码已改为 dvbench2026（首次 seed 后改密）。DB 在 `data/deepvuln.db`。
 
 ---
 
-## 新 agent 接力指南（冷启动必读）
+## Phase 18 归档摘要（2026-06-20 ~ 08-25，已关闭）
 
-### 1. 先读这些建立上下文
-1. 本文件顶部 TL;DR + 各 P 项状态。
-2. 跨会话记忆：`/root/.claude/projects/-opt-pro-deepvuln/memory/`（含 `deepvuln-phase18-precision-fix.md`、`deepvuln-web-only-no-cli.md`）。
-3. `git log --oneline -8` + 分支 `feat/static-evidence-grounding`。
-4. **审查原始发现**见本 goal 各 P 项的"根因/定位"行号锚点；若要复核某 SUSPECT 项，先读对应 file:line。
+第一~七批全部完成并 push：P0 精度链路、P1+P2 三语言 py/go/java CPG 可达性端到端接通、P3 嵌套 sink 进真实 CFG、P4 语言收敛、P5 续扫完整、P6 证据门改读证据结论+gatekeeper 接线、P7 可靠性+C6 引擎级 checkpoint(Tier1/Tier2)、P8 测试真实性。同日(2026-08-25)完成全量体检修复四批。test_l3 全绿 **2079 passed / 0 failed**。详见 `change-log.md` 2026-08-25 各条。
 
-### 2. 关键约束（勿忘）
-- **web-only**（CLI 已移除，不再维护）。
-- **放弃 C/C++**；语言聚焦 py/go/java。
-- **安全组降级**（单用户内网），别在 Phase 18 里花精力修 IDOR/WS 除非用户改主意。
-- LLM 用 GLM Coding Plan 端点；本机无 CodeQL，引擎降级路径要保。
+> 以下为 Phase 18 执行期历史记录（供参考，进度以顶部为准）
 
-### 3. 当前进度 + 第三批起点
-**第一/二批 + P6-eval + 第三批 P5/P7 已完成并 push（`a9ef21a`/`bc1db1f`）**。剩 **P6（→独立会话）/ C6 引擎级 checkpoint / P3 可达性质量**：
-
-| 项 | 文件:锚点 | 动作 | 工作量 |
-|---|---|---|---|
-| **P3 可达性质量** | `cfg/builders/*_cfg.py identify_basic_blocks` + `path_finder/finder.py _verify_cfg_reachability` | ⚠️ 需**条件求值**（if False 死分支），非 basic_blocks 递归能解决；兜底改保守有回归风险（破坏刚接通的 reaches_sink=True）。深做前先设计 | M |
-| **C6 引擎级 checkpoint** | `src/web/services/scan_orchestrator.py:926`(`_execute_engines`) / `scan_pipeline` engine_execution | engine_execution 现**整阶段级** checkpoint（全引擎跑完才写）。改 per-engine：每引擎完成写 + resume 跳过已完成引擎。⚠️ `_execute_engines` 是并发（cpu_intensive+concurrent 两路 ThreadPoolExecutor），per-engine checkpoint 需处理并发同步 + resume 恢复 completed_engines。**会话末尾不宜仓促做** | M-L |
-| **P6 对抗接线**（→ 独立会话） | `verification_gatekeeper.py:54` / `scoring/models.py:154`(`min_evidence_dimensions`) / `round_three.py:315`(`LIKELY→HIGH`) / `adversarial_service.py:573`(手写版) / `scan_orchestrator.py:1522`(调用点) | **用户 2026-06-20 决定整体留独立会话**。子项评估（独立会话起点）：**子项3** round_three:315 `LIKELY→MEDIUM`（一行，低风险，防与 CONFIRMED 同级误升 EXPLOITABLE）；**子项4** 删 enhanced_adversarial/convergence/strategy_library 1926行（✅ 已确认只 `verification/__init__.py` re-export、无功能引用，可删 + 清 __init__）；**子项2** `min_evidence_dimensions` 1→2（⚠️ 精度/召回权衡，本机无 CodeQL→仅 taint+reachability 达2，改后单硬证据真漏洞可能漏报，需评估召回）；**子项1** VerificationGatekeeper 接线替换 adversarial_service:573 手写版（⚠️ `test_verification_gatekeeper` 有5个既有失败，接线前先修 gatekeeper 本身） | M |
-
-**开工第一步**：先跑回归确认基线 `python3 -m pytest tests/unit/test_l3 -q`（期望 **2186 passed / 23 既有失败**，2026-06-21 实跑确认）。P6 在独立会话做（子项评估见上表）；C6 Tier1 已完成（`7f6c242`），剩 C6 Tier2 / P3 可在本会话继续。
-
-> **上一目标**：Phase 17 — AI 与静态最优结合的深化（status: completed，commit `fca0c22`）。其"全部 done"的结论已被本次审查修正——多项功能实际未生效，正是本 Phase 18 要接通的。

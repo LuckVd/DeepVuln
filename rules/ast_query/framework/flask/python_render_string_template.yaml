@@ -9,7 +9,6 @@ languages:
 queries:
   python: |
     ((call
-      (attribute
-        (identifier) @obj)
-        (attribute) @method)
+      function: (attribute
+        attribute: (identifier) @method))
      (#match? @method "render_template_string"))

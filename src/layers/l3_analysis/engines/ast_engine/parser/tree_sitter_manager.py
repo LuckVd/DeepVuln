@@ -27,6 +27,13 @@ _LANGUAGE_MODULES = {
     "rust": "tree_sitter_rust",
 }
 
+# Multi-grammar packages expose per-grammar factory functions instead of a
+# single `.language` (e.g. tree_sitter_typescript >= 0.23 ships
+# language_typescript / language_tsx). Tried in order after `.language`.
+_LANGUAGE_ENTRYPOINTS = {
+    "typescript": ("language_typescript", "language_tsx"),
+}
+
 
 class TreeSitterManager:
     """
@@ -82,8 +89,23 @@ class TreeSitterManager:
             # Import the language module
             lang_module = __import__(module_name, fromlist=["language"])
 
-            # Create Language object (tree-sitter 0.25+ API)
-            self._languages[lang_key] = Language(lang_module.language())
+            # Create Language object (tree-sitter 0.25+ API).
+            # Resolve the grammar entry point: `.language` when present,
+            # otherwise per-grammar factories (e.g. tree_sitter_typescript).
+            init_fn = getattr(lang_module, "language", None)
+            if init_fn is None:
+                for attr in _LANGUAGE_ENTRYPOINTS.get(lang_key, ()):
+                    init_fn = getattr(lang_module, attr, None)
+                    if init_fn is not None:
+                        break
+            if init_fn is None:
+                self.logger.error(
+                    f"Language module {module_name} exposes no grammar "
+                    f"entry point (.language or known factory)"
+                )
+                return None
+
+            self._languages[lang_key] = Language(init_fn())
             self.logger.debug(f"Loaded tree-sitter language: {language}")
 
             return self._languages[lang_key]

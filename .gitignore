@@ -90,3 +90,8 @@ tests/llm_test_concurrency_5_long.py
 # Claude Code plugin (local)
 .claude/.claude-plugin/
 logs/
+
+# Benchmarks: third-party sources & scan outputs are re-fetchable via benchmarks/fetch.sh
+benchmarks/third_party/
+benchmarks/results/
+

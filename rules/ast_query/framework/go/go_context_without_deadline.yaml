@@ -10,4 +10,4 @@ queries:
   go: |
     ((call_expression
       function: (identifier) @func)
-     (#match? @func "^Background$|^TODO$")))
+     (#match? @func "^Background$|^TODO$"))

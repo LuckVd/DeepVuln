@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "description": "MINI 基准集：每语言 3 例（模式取自 SecurityEval / go-test-bench / OWASP BenchmarkJava 同型 taint 流），vuln/safe 成对。vuln 文件恰有一行含 sink_comment 标记；safe 文件不含任何 'SINK:' 注释。",
+  "path_root": "benchmarks/mini/",
+  "scan_unit": "case_dir（对 case 目录整体建一次扫描，按文件归属判定 TP/FP）",
+  "cases": [
+    {
+      "id": "py-sqli",
+      "language": "python",
+      "cwe": "CWE-89",
+      "category": "sqli",
+      "source_benchmark": "SecurityEval CWE-89 / django.nV 同型",
+      "dir": "python/sqli",
+      "vuln_file": "python/sqli/app_vuln.py",
+      "safe_file": "python/sqli/app_safe.py",
+      "sink_comment": "SINK: sql-injection (CWE-89)",
+      "cwe_keywords": ["sql", "sqli", "injection"]
+    },
+    {
+      "id": "py-cmdi",
+      "language": "python",
+      "cwe": "CWE-78",
+      "category": "cmdi",
+      "source_benchmark": "SecurityEval CWE-78 同型",
+      "dir": "python/cmdi",
+      "vuln_file": "python/cmdi/app_vuln.py",
+      "safe_file": "python/cmdi/app_safe.py",
+      "sink_comment": "SINK: command-injection (CWE-78)",
+      "cwe_keywords": ["command", "cmd", "rce", "os.system", "process"]
+    },
+    {
+      "id": "py-eval",
+      "language": "python",
+      "cwe": "CWE-95",
+      "category": "code-injection",
+      "source_benchmark": "SecurityEval CWE-95 同型",
+      "dir": "python/eval",
+      "vuln_file": "python/eval/app_vuln.py",
+      "safe_file": "python/eval/app_safe.py",
+      "sink_comment": "SINK: code-injection (CWE-95)",
+      "cwe_keywords": ["code injection", "code-injection", "eval", "dynamic", "rce"]
+    },
+    {
+      "id": "go-cmdi",
+      "language": "go",
+      "cwe": "CWE-78",
+      "category": "cmdi",
+      "source_benchmark": "Contrast-Security-OSS/go-test-bench 同型",
+      "dir": "go/cmdi",
+      "vuln_file": "go/cmdi/vuln/main.go",
+      "safe_file": "go/cmdi/safe/main.go",
+      "sink_comment": "SINK: command-injection (CWE-78)",
+      "cwe_keywords": ["command", "cmd", "rce", "exec"]
+    },
+    {
+      "id": "go-sqli",
+      "language": "go",
+      "cwe": "CWE-89",
+      "category": "sqli",
+      "source_benchmark": "go-test-bench 同型",
+      "dir": "go/sqli",
+      "vuln_file": "go/sqli/vuln/main.go",
+      "safe_file": "go/sqli/safe/main.go",
+      "sink_comment": "SINK: sql-injection (CWE-89)",
+      "cwe_keywords": ["sql", "sqli", "injection"]
+    },
+    {
+      "id": "go-ssrf",
+      "language": "go",
+      "cwe": "CWE-918",
+      "category": "ssrf",
+      "source_benchmark": "go-test-bench 同型",
+      "dir": "go/ssrf",
+      "vuln_file": "go/ssrf/vuln/main.go",
+      "safe_file": "go/ssrf/safe/main.go",
+      "sink_comment": "SINK: ssrf (CWE-918)",
+      "cwe_keywords": ["ssrf", "server-side request", "server side request", "outbound", "fetch"]
+    },
+    {
+      "id": "java-cmdi",
+      "language": "java",
+      "cwe": "CWE-78",
+      "category": "cmdi",
+      "source_benchmark": "OWASP BenchmarkJava cmdi 用例同型",
+      "dir": "java/cmdi",
+      "vuln_file": "java/cmdi/vuln/CmdExecServlet.java",
+      "safe_file": "java/cmdi/safe/CmdExecServlet.java",
+      "sink_comment": "SINK: command-injection (CWE-78)",
+      "cwe_keywords": ["command", "cmd", "rce", "runtime.exec", "processbuilder"]
+    },
+    {
+      "id": "java-sqli",
+      "language": "java",
+      "cwe": "CWE-89",
+      "category": "sqli",
+      "source_benchmark": "OWASP BenchmarkJava sqli 用例同型",
+      "dir": "java/sqli",
+      "vuln_file": "java/sqli/vuln/UserQueryServlet.java",
+      "safe_file": "java/sqli/safe/UserQueryServlet.java",
+      "sink_comment": "SINK: sql-injection (CWE-89)",
+      "cwe_keywords": ["sql", "sqli", "injection"]
+    },
+    {
+      "id": "java-crypto",
+      "language": "java",
+      "cwe": "CWE-327",
+      "category": "crypto",
+      "source_benchmark": "OWASP BenchmarkJava hash/crypto 用例同型",
+      "dir": "java/crypto",
+      "vuln_file": "java/crypto/vuln/HashServlet.java",
+      "safe_file": "java/crypto/safe/HashServlet.java",
+      "sink_comment": "SINK: weak-hash (CWE-327)",
+      "cwe_keywords": ["weak crypto", "weak hash", "md5", "sha1", "insecure hash", "broken crypto", "cryptographic"]
+    }
+  ]
+}

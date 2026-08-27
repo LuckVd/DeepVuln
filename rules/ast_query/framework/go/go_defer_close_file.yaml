@@ -10,7 +10,16 @@ queries:
   go: |
     ((for_statement
       body: (block
-        (expression_statement
-          (call_expression
-            function: (identifier) @func)
-            (#match? @func "^Close")))))
+        (statement_list
+          (defer_statement
+            (call_expression
+              function: (identifier) @func)))))
+     (#match? @func "^Close$"))
+    ((for_statement
+      body: (block
+        (statement_list
+          (defer_statement
+            (call_expression
+              function: (selector_expression
+                field: (field_identifier) @method))))))
+     (#match? @method "^Close$"))

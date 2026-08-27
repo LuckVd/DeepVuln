@@ -8,6 +8,7 @@ Supports:
 """
 
 import asyncio
+import json
 import os
 import random
 import time
@@ -43,6 +44,32 @@ def set_rate_limit_callback(callback) -> None:
     """
     global _on_rate_limit_callback
     _on_rate_limit_callback = callback
+
+
+# ---------------------------------------------------------------------------
+# LLM 调用追踪（可选）。设置环境变量 DEEPVULN_LLM_TRACE=<目录> 后，每次调用的
+# 完整请求/响应/usage 以 JSONL 追加落盘（<dir>/llm_trace.jsonl），用于 benchmark
+# 排查误报漏报与 token 审计。env 在每次调用时读取；任何 trace 失败不影响主流程。
+# 注意不落 api_key。
+# ---------------------------------------------------------------------------
+def _llm_trace_dir() -> str:
+    return (os.environ.get("DEEPVULN_LLM_TRACE") or "").strip()
+
+
+def _write_llm_trace(record: dict[str, Any]) -> None:
+    trace_dir = _llm_trace_dir()
+    if not trace_dir:
+        return
+    try:
+        from pathlib import Path
+
+        d = Path(trace_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        record.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+        with (d / "llm_trace.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        pass  # trace 永不打断主流程
 
 
 class OpenAIClient(LLMClient):
@@ -296,6 +323,11 @@ class OpenAIClient(LLMClient):
                         await asyncio.sleep(backoff * jitter)
                         continue
 
+                    _write_llm_trace({
+                        "event": "rate_limited",
+                        "model": self.model,
+                        "attempt": attempt,
+                    })
                     raise LLMRateLimitError(
                         "Rate limit exceeded",
                         retry_after=retry_seconds,
@@ -319,6 +351,14 @@ class OpenAIClient(LLMClient):
                             suggestion="Check API status or try again later.",
                         )
                         continue
+                    _write_llm_trace({
+                        "event": "http_error",
+                        "model": self.model,
+                        "base_url": self.base_url,
+                        "attempt": attempt,
+                        "status_code": response.status_code,
+                        "body": error_body[:2000],
+                    })
                     raise LLMError(
                         f"OpenAI API error (status {response.status_code}): {error_body}",
                         is_retryable=is_retryable,
@@ -328,6 +368,29 @@ class OpenAIClient(LLMClient):
 
                 # Parse response
                 data = response.json()
+
+                # LLM trace（可选，DEEPVULN_LLM_TRACE）
+                _choice = (data.get("choices") or [{}])[0]
+                _msg = _choice.get("message") or {}
+                _write_llm_trace({
+                    "event": "chat",
+                    "model": self.model,
+                    "base_url": self.base_url,
+                    "attempt": attempt,
+                    "duration_ms": round(latency * 1000),
+                    "request": {
+                        "messages": body.get("messages"),
+                        "max_tokens": body.get("max_tokens", self.max_tokens),
+                        "temperature": body.get("temperature", self.temperature),
+                        "json_mode": self.json_mode,
+                    },
+                    "response": {
+                        "content": _msg.get("content", ""),
+                        "reasoning_content": _msg.get("reasoning_content", ""),
+                        "finish_reason": _choice.get("finish_reason"),
+                        "usage": data.get("usage", {}),
+                    },
+                })
 
                 return self._parse_response(data, latency)
 

@@ -1,0 +1,1074 @@
+{
+  "version": 1,
+  "seed": 42,
+  "source_csv": "third_party/owasp-benchmark/expectedresults-1.2.csv",
+  "total_pool": 2740,
+  "selected": 150,
+  "pos_count": 75,
+  "neg_count": 75,
+  "category_dist": {
+    "hash": 13,
+    "cmdi": 14,
+    "securecookie": 4,
+    "trustbound": 6,
+    "sqli": 25,
+    "crypto": 14,
+    "weakrand": 26,
+    "pathtraver": 15,
+    "xpathi": 4,
+    "xss": 25,
+    "ldapi": 4
+  },
+  "cases": [
+    {
+      "test": "BenchmarkTest01577",
+      "file": "BenchmarkTest01577.java",
+      "real_vuln": true,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest02137",
+      "file": "BenchmarkTest02137.java",
+      "real_vuln": true,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest01062",
+      "file": "BenchmarkTest01062.java",
+      "real_vuln": false,
+      "category": "securecookie",
+      "cwe": 614
+    },
+    {
+      "test": "BenchmarkTest00994",
+      "file": "BenchmarkTest00994.java",
+      "real_vuln": true,
+      "category": "trustbound",
+      "cwe": 501
+    },
+    {
+      "test": "BenchmarkTest00998",
+      "file": "BenchmarkTest00998.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest02248",
+      "file": "BenchmarkTest02248.java",
+      "real_vuln": false,
+      "category": "securecookie",
+      "cwe": 614
+    },
+    {
+      "test": "BenchmarkTest01065",
+      "file": "BenchmarkTest01065.java",
+      "real_vuln": false,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest00053",
+      "file": "BenchmarkTest00053.java",
+      "real_vuln": true,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest00612",
+      "file": "BenchmarkTest00612.java",
+      "real_vuln": false,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest02177",
+      "file": "BenchmarkTest02177.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00195",
+      "file": "BenchmarkTest00195.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00399",
+      "file": "BenchmarkTest00399.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00958",
+      "file": "BenchmarkTest00958.java",
+      "real_vuln": false,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest01397",
+      "file": "BenchmarkTest01397.java",
+      "real_vuln": false,
+      "category": "xpathi",
+      "cwe": 643
+    },
+    {
+      "test": "BenchmarkTest00374",
+      "file": "BenchmarkTest00374.java",
+      "real_vuln": true,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest00410",
+      "file": "BenchmarkTest00410.java",
+      "real_vuln": false,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest01322",
+      "file": "BenchmarkTest01322.java",
+      "real_vuln": true,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest02319",
+      "file": "BenchmarkTest02319.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02039",
+      "file": "BenchmarkTest02039.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00934",
+      "file": "BenchmarkTest00934.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest02371",
+      "file": "BenchmarkTest02371.java",
+      "real_vuln": false,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest01585",
+      "file": "BenchmarkTest01585.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest01437",
+      "file": "BenchmarkTest01437.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest01947",
+      "file": "BenchmarkTest01947.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01263",
+      "file": "BenchmarkTest01263.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest01516",
+      "file": "BenchmarkTest01516.java",
+      "real_vuln": false,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest00099",
+      "file": "BenchmarkTest00099.java",
+      "real_vuln": false,
+      "category": "trustbound",
+      "cwe": 501
+    },
+    {
+      "test": "BenchmarkTest01943",
+      "file": "BenchmarkTest01943.java",
+      "real_vuln": false,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest01668",
+      "file": "BenchmarkTest01668.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02014",
+      "file": "BenchmarkTest02014.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01323",
+      "file": "BenchmarkTest01323.java",
+      "real_vuln": true,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest01213",
+      "file": "BenchmarkTest01213.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest01620",
+      "file": "BenchmarkTest01620.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00964",
+      "file": "BenchmarkTest00964.java",
+      "real_vuln": false,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest02705",
+      "file": "BenchmarkTest02705.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01374",
+      "file": "BenchmarkTest01374.java",
+      "real_vuln": true,
+      "category": "trustbound",
+      "cwe": 501
+    },
+    {
+      "test": "BenchmarkTest00010",
+      "file": "BenchmarkTest00010.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest02249",
+      "file": "BenchmarkTest02249.java",
+      "real_vuln": true,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest02592",
+      "file": "BenchmarkTest02592.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02072",
+      "file": "BenchmarkTest02072.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01279",
+      "file": "BenchmarkTest01279.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00853",
+      "file": "BenchmarkTest00853.java",
+      "real_vuln": true,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest00108",
+      "file": "BenchmarkTest00108.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00324",
+      "file": "BenchmarkTest00324.java",
+      "real_vuln": true,
+      "category": "trustbound",
+      "cwe": 501
+    },
+    {
+      "test": "BenchmarkTest02397",
+      "file": "BenchmarkTest02397.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest01587",
+      "file": "BenchmarkTest01587.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest01095",
+      "file": "BenchmarkTest01095.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00437",
+      "file": "BenchmarkTest00437.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00947",
+      "file": "BenchmarkTest00947.java",
+      "real_vuln": true,
+      "category": "ldapi",
+      "cwe": 90
+    },
+    {
+      "test": "BenchmarkTest02550",
+      "file": "BenchmarkTest02550.java",
+      "real_vuln": true,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest01334",
+      "file": "BenchmarkTest01334.java",
+      "real_vuln": true,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest00796",
+      "file": "BenchmarkTest00796.java",
+      "real_vuln": true,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest00222",
+      "file": "BenchmarkTest00222.java",
+      "real_vuln": true,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest01073",
+      "file": "BenchmarkTest01073.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01725",
+      "file": "BenchmarkTest01725.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest02210",
+      "file": "BenchmarkTest02210.java",
+      "real_vuln": false,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest02718",
+      "file": "BenchmarkTest02718.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01234",
+      "file": "BenchmarkTest01234.java",
+      "real_vuln": true,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest00059",
+      "file": "BenchmarkTest00059.java",
+      "real_vuln": false,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest01691",
+      "file": "BenchmarkTest01691.java",
+      "real_vuln": true,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest00880",
+      "file": "BenchmarkTest00880.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02468",
+      "file": "BenchmarkTest02468.java",
+      "real_vuln": false,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest00766",
+      "file": "BenchmarkTest00766.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00626",
+      "file": "BenchmarkTest00626.java",
+      "real_vuln": false,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest02045",
+      "file": "BenchmarkTest02045.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest00322",
+      "file": "BenchmarkTest00322.java",
+      "real_vuln": false,
+      "category": "trustbound",
+      "cwe": 501
+    },
+    {
+      "test": "BenchmarkTest01154",
+      "file": "BenchmarkTest01154.java",
+      "real_vuln": false,
+      "category": "ldapi",
+      "cwe": 90
+    },
+    {
+      "test": "BenchmarkTest01223",
+      "file": "BenchmarkTest01223.java",
+      "real_vuln": true,
+      "category": "xpathi",
+      "cwe": 643
+    },
+    {
+      "test": "BenchmarkTest00627",
+      "file": "BenchmarkTest00627.java",
+      "real_vuln": true,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest02738",
+      "file": "BenchmarkTest02738.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00393",
+      "file": "BenchmarkTest00393.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest01996",
+      "file": "BenchmarkTest01996.java",
+      "real_vuln": true,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest00792",
+      "file": "BenchmarkTest00792.java",
+      "real_vuln": false,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest01910",
+      "file": "BenchmarkTest01910.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00063",
+      "file": "BenchmarkTest00063.java",
+      "real_vuln": false,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest02241",
+      "file": "BenchmarkTest02241.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest00746",
+      "file": "BenchmarkTest00746.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00668",
+      "file": "BenchmarkTest00668.java",
+      "real_vuln": true,
+      "category": "trustbound",
+      "cwe": 501
+    },
+    {
+      "test": "BenchmarkTest01555",
+      "file": "BenchmarkTest01555.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00471",
+      "file": "BenchmarkTest00471.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02552",
+      "file": "BenchmarkTest02552.java",
+      "real_vuln": false,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest00235",
+      "file": "BenchmarkTest00235.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00494",
+      "file": "BenchmarkTest00494.java",
+      "real_vuln": false,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest01568",
+      "file": "BenchmarkTest01568.java",
+      "real_vuln": true,
+      "category": "ldapi",
+      "cwe": 90
+    },
+    {
+      "test": "BenchmarkTest00570",
+      "file": "BenchmarkTest00570.java",
+      "real_vuln": false,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest01268",
+      "file": "BenchmarkTest01268.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02690",
+      "file": "BenchmarkTest02690.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest00026",
+      "file": "BenchmarkTest00026.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest02681",
+      "file": "BenchmarkTest02681.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02075",
+      "file": "BenchmarkTest02075.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00913",
+      "file": "BenchmarkTest00913.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01583",
+      "file": "BenchmarkTest01583.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest00345",
+      "file": "BenchmarkTest00345.java",
+      "real_vuln": false,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest01651",
+      "file": "BenchmarkTest01651.java",
+      "real_vuln": true,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest00518",
+      "file": "BenchmarkTest00518.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00241",
+      "file": "BenchmarkTest00241.java",
+      "real_vuln": true,
+      "category": "securecookie",
+      "cwe": 614
+    },
+    {
+      "test": "BenchmarkTest01221",
+      "file": "BenchmarkTest01221.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest01707",
+      "file": "BenchmarkTest01707.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01745",
+      "file": "BenchmarkTest01745.java",
+      "real_vuln": false,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest02007",
+      "file": "BenchmarkTest02007.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00863",
+      "file": "BenchmarkTest00863.java",
+      "real_vuln": false,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest01000",
+      "file": "BenchmarkTest01000.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest01349",
+      "file": "BenchmarkTest01349.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest00873",
+      "file": "BenchmarkTest00873.java",
+      "real_vuln": false,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest02452",
+      "file": "BenchmarkTest02452.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest02288",
+      "file": "BenchmarkTest02288.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00551",
+      "file": "BenchmarkTest00551.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest00917",
+      "file": "BenchmarkTest00917.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00781",
+      "file": "BenchmarkTest00781.java",
+      "real_vuln": true,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest02382",
+      "file": "BenchmarkTest02382.java",
+      "real_vuln": false,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest02571",
+      "file": "BenchmarkTest02571.java",
+      "real_vuln": false,
+      "category": "ldapi",
+      "cwe": 90
+    },
+    {
+      "test": "BenchmarkTest02466",
+      "file": "BenchmarkTest02466.java",
+      "real_vuln": true,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest02598",
+      "file": "BenchmarkTest02598.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02556",
+      "file": "BenchmarkTest02556.java",
+      "real_vuln": true,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest00240",
+      "file": "BenchmarkTest00240.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00168",
+      "file": "BenchmarkTest00168.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00726",
+      "file": "BenchmarkTest00726.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest01039",
+      "file": "BenchmarkTest01039.java",
+      "real_vuln": false,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest00821",
+      "file": "BenchmarkTest00821.java",
+      "real_vuln": true,
+      "category": "securecookie",
+      "cwe": 614
+    },
+    {
+      "test": "BenchmarkTest01441",
+      "file": "BenchmarkTest01441.java",
+      "real_vuln": true,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest00774",
+      "file": "BenchmarkTest00774.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00707",
+      "file": "BenchmarkTest00707.java",
+      "real_vuln": false,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest01319",
+      "file": "BenchmarkTest01319.java",
+      "real_vuln": false,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest02716",
+      "file": "BenchmarkTest02716.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01502",
+      "file": "BenchmarkTest01502.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01867",
+      "file": "BenchmarkTest01867.java",
+      "real_vuln": false,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest01051",
+      "file": "BenchmarkTest01051.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02559",
+      "file": "BenchmarkTest02559.java",
+      "real_vuln": true,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest00533",
+      "file": "BenchmarkTest00533.java",
+      "real_vuln": true,
+      "category": "hash",
+      "cwe": 328
+    },
+    {
+      "test": "BenchmarkTest01854",
+      "file": "BenchmarkTest01854.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest02100",
+      "file": "BenchmarkTest02100.java",
+      "real_vuln": true,
+      "category": "xpathi",
+      "cwe": 643
+    },
+    {
+      "test": "BenchmarkTest01191",
+      "file": "BenchmarkTest01191.java",
+      "real_vuln": true,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest01729",
+      "file": "BenchmarkTest01729.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest00119",
+      "file": "BenchmarkTest00119.java",
+      "real_vuln": true,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest02197",
+      "file": "BenchmarkTest02197.java",
+      "real_vuln": true,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest00067",
+      "file": "BenchmarkTest00067.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest00013",
+      "file": "BenchmarkTest00013.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest00115",
+      "file": "BenchmarkTest00115.java",
+      "real_vuln": true,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest01021",
+      "file": "BenchmarkTest01021.java",
+      "real_vuln": false,
+      "category": "crypto",
+      "cwe": 327
+    },
+    {
+      "test": "BenchmarkTest01001",
+      "file": "BenchmarkTest01001.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest02127",
+      "file": "BenchmarkTest02127.java",
+      "real_vuln": true,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest02504",
+      "file": "BenchmarkTest02504.java",
+      "real_vuln": true,
+      "category": "weakrand",
+      "cwe": 330
+    },
+    {
+      "test": "BenchmarkTest02200",
+      "file": "BenchmarkTest02200.java",
+      "real_vuln": false,
+      "category": "pathtraver",
+      "cwe": 22
+    },
+    {
+      "test": "BenchmarkTest02370",
+      "file": "BenchmarkTest02370.java",
+      "real_vuln": false,
+      "category": "xpathi",
+      "cwe": 643
+    },
+    {
+      "test": "BenchmarkTest00114",
+      "file": "BenchmarkTest00114.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest02313",
+      "file": "BenchmarkTest02313.java",
+      "real_vuln": false,
+      "category": "xss",
+      "cwe": 79
+    },
+    {
+      "test": "BenchmarkTest00511",
+      "file": "BenchmarkTest00511.java",
+      "real_vuln": false,
+      "category": "sqli",
+      "cwe": 89
+    },
+    {
+      "test": "BenchmarkTest02714",
+      "file": "BenchmarkTest02714.java",
+      "real_vuln": false,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest00303",
+      "file": "BenchmarkTest00303.java",
+      "real_vuln": true,
+      "category": "cmdi",
+      "cwe": 78
+    },
+    {
+      "test": "BenchmarkTest00173",
+      "file": "BenchmarkTest00173.java",
+      "real_vuln": true,
+      "category": "cmdi",
+      "cwe": 78
+    }
+  ]
+}

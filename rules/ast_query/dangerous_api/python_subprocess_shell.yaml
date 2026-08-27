@@ -9,13 +9,13 @@ languages:
 queries:
   python: |
     ((call
-      (attribute
+      function: (attribute
         object: (identifier) @obj
-        attribute: (identifier) @attr))
-      (argument_list
+        attribute: (identifier) @attr)
+      arguments: (argument_list
         (keyword_argument
           name: (identifier) @kw
           value: (true) @val)))
-     (#match? @obj "subprocess")
-     (#match? @attr "^(call|run|Popen)$")
+     (#match? @obj "^subprocess$")
+     (#match? @attr "^(call|run|Popen|check_output)$")
      (#eq? @kw "shell"))
