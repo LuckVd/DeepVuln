@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""把 DSH 的 opencode-go / ox-alpha-free 模型配置为 DeepVuln 的 LLM 后端。
+"""把 DSH 的 opencode-go / deepseek-v4-flash 模型配置为 DeepVuln 的 LLM 后端。
 
 背景：DeepVuln 的 LLM 客户端只从数据库 `llm_configs` 表构建
 （scan_tasks → LLMConfigService.get_agent_scan_config / adversarial_service
 → get_verification_config），没有环境变量兜底。本脚本幂等 upsert 一行
-`provider=custom, model=ox-alpha-free, base_url=https://opencode.ai/zen/go/v1`
+`provider=custom, model=deepseek-v4-flash, base_url=https://opencode.ai/zen/go/v1`
 的配置（config_type=both，agent 扫描与可利用性/对抗验证共用）。
+
+模型名注意：早期基线用的 `ox-alpha-free` 已在该网关下线（实测 401 "Model
+ox-alpha-free is not supported"），现默认 `deepseek-v4-flash`（与 DSH
+settings.yaml 的 agent-default-model 一致，实测 200 OK）。如需换模型改
+TARGET_MODEL 即可，脚本是幂等 upsert。
 
 API key 来源（按优先级）：
   1. 环境变量 OPENCODE_GO_API_KEY
@@ -34,8 +39,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 TARGET_BASE_URL = "https://opencode.ai/zen/go/v1"
-TARGET_MODEL = "ox-alpha-free"
-CONFIG_NAME = "opencode-go / ox-alpha-free (DSH)"
+TARGET_MODEL = "deepseek-v4-flash"
+CONFIG_NAME = "opencode-go / deepseek-v4-flash (DSH)"
 # 来自 dsh pi-ai providers/data/opencode-go.json 的模型元数据
 CONTEXT_SIZE = 1_000_000
 MAX_TOKENS = 131_072
@@ -127,7 +132,7 @@ async def main() -> int:
                 print(f"[FAIL] {label}: 取不到配置")
                 return 1
             print(f"[ok] {label} -> {cfg.name} ({cfg.provider}/{cfg.model})")
-    print("[done] DeepVuln 将使用 opencode-go / ox-alpha-free 作为 LLM 后端")
+    print("[done] DeepVuln 将使用 opencode-go / deepseek-v4-flash 作为 LLM 后端")
     return 0
 
 

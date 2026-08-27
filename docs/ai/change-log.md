@@ -1,5 +1,16 @@
 # Change Log
 
+## 2026-08-27
+
+### P4 修复 — java-cmdi 漏报根因定位与 LLM 模型迁移（ox-alpha-free → deepseek-v4-flash）✅
+
+- **根因 1（run1 的 FN 直接原因）**: trace 显示 java-cmdi vuln 的 agent 调用（17:23:21）遇 provider 503 "Endpoint is unavailable"，两次重试后放弃 → 该文件 0 findings → FN=1。不是 prompt/规则缺陷，是上游瞬时故障。
+- **根因 2（当前复现的阻断）**: 直扫复现时发现 `ox-alpha-free` 已被 opencode.ai/zen/go 网关下线——实测 401 `"Model ox-alpha-free is not supported"`；同端点 `deepseek-v4-flash`（DSH settings.yaml 的 agent-default-model）实测 200 OK。
+- **另发现（环境）**: 未 `-u ALL_PROXY` 时 agent 引擎的 httpx 调用因 `ALL_PROXY=socks5h` + 缺 `socksio` 直接 ImportError（worker 启动要求已在 change-log 记录，引擎层未内化）。
+- **修复** `benchmarks/eval/seed_llm_config.py`: TARGET_MODEL `ox-alpha-free` → `deepseek-v4-flash`（CONFIG_NAME 同步）；重跑 seed 幂等更新 DB llm_configs id=1，agent_scan + verification 两条消费链路验证通过。
+- **验证**: agent 直扫 `benchmarks/mini/java/cmdi/vuln` → `command_injection` confidence 1.0（"命令注入漏洞 - Runtime.exec拼接用户输入"）；叠加 P1 后 semgrep 的 `tainted-cmd-from-http-request`，java-cmdi 双引擎覆盖。
+- **Commit**: 未提交（遵循不自动提交规则）
+
 ## 2026-08-26
 
 ### P3 修复 — agent `is_suspicious` 低置信条目抽离为审查队列（FP 主源切除）✅

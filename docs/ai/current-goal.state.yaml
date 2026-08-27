@@ -54,6 +54,8 @@ open_issues:
     issue: "java-cmdi FN（agent 未识别 Runtime.exec 为 cmd_injection）"
     impact: "Recall 缺口"
     next: "补 prompt 规则或加 dangerous API 检测"
+    status: "resolved 2026-08-27"
+    resolution: "双根因：①run1 该文件 agent 调用遇 provider 503（上游瞬时故障）；②ox-alpha-free 模型名下线（401）→ 迁移 deepseek-v4-flash 后 agent 检出 command_injection conf=1.0；semgrep 另出 tainted-cmd-from-http-request"
 
 environment_notes:
   db: "sqlite+aiosqlite:///data/deepvuln.db"
@@ -61,7 +63,7 @@ environment_notes:
   celery: "--pool=solo (沙箱禁 /dev/shm); 启动前 unset ALL_PROXY (httpx 缺 socksio)"
   web: ".venv/bin/python -m uvicorn src.web.main:app --port 8000"
   auth: "admin / dvbench2026 (首次 seed 后已改密)"
-  llm: "ox-alpha-free via opencode-go (DB llm_configs 表, key 在 ~/.dsh/.credentials.yaml)"
+  llm: "deepseek-v4-flash via opencode-go (DB llm_configs 表, key 在 ~/.dsh/.credentials.yaml; 2026-08-27 从 ox-alpha-free 迁移——该名已下线 401)"
 
 constraints:
   - "web-only（CLI 已移除）"
