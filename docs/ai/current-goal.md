@@ -5,7 +5,7 @@
 > **Goal ID**: phase19-benchmark-eval
 > **创建日期**: 2026-08-26
 > **上一 goal**: Phase 18 — 精度链路接通与多语言可达性补齐（✅ 2026-08-25 关闭）
-> **当前执行**: P1 ✅ + P3 ✅ 已修复（Semgrep 零 findings 根因：HOME 不可写+相对路径双解析；suspicious 条目抽离审查队列，DB 模拟 Precision 0.16→0.333 零 TP 损失）→ 下一步 P4（java-cmdi 补检）
+> **当前执行**: P1/P3/P4 已修复 ✅，**第二轮 mini 基线已出**（Recall 1.0 / safe 零 FP / conf≥0.8 F1 0.692）→ 剩 P2（CPG 入口识别，最重）；后续可扩 owasp-subset 150 例
 
 ---
 
@@ -32,14 +32,14 @@
 
 5. **LLM 模型接入与迁移**: seed_llm_config.py 幂等写入 DB → agent 扫描与可利用性验证两条链路均使用 opencode-go / **deepseek-v4-flash**（ctx 1M / maxTokens 131072 / base_url `https://opencode.ai/zen/go/v1`）；**2026-08-27 迁移**：原 `ox-alpha-free` 已在该网关下线（实测 401 "Model ox-alpha-free is not supported"），default 模型改名 deepseek-v4-flash（与 DSH settings.yaml 一致）；key 从 `~/.dsh/.credentials.yaml` refs 解析
 
-6. **首轮 mini 实测基线**（9 case 全跑完）:
-   | conf>= | TP | FP(safe) | FN | P | R | F1 |
+6. **第二轮 mini 实测基线**（9 case 全跑完，P1+P3+P4 修复后 + deepseek-v4-flash）:
+   | conf>= | TP | FP | FN | P | R | F1 |
    |---|---|---|---|---|---|---|
-   | 0.0 | 8 | 26 | 1 | 0.235 | **0.889** | 0.372 |
-   | 0.5 | 8 | 11 | 1 | 0.421 | **0.889** | 0.571 |
-   | 0.7 | 7 | 6 | 2 | 0.538 | 0.778 | **0.636** |
+   | 0.0 | 9 | 21 | 0 | 0.300 | **1.000** | 0.462 |
+   | 0.7 | 9 | 15 | 0 | 0.375 | **1.000** | 0.545 |
+   | 0.8 | 9 | 8 | 0 | 0.529 | **1.000** | 0.692 |
 
-   总 token: **112,503**（~12.5K/case）; LLM trace 38 条在 `data/llm_trace/llm_trace.jsonl`
+   总 token: **135,273**（27 次 LLM 调用，0 失败）；对比首轮（conf>=0 口径）：TP 8→9（FN 清零，含 java-cmdi）、safe 文件 FP 26→0（P3）、R 0.889→**1.0**、P 0.235→0.300、F1 0.372→0.462。残余 21 个 FP 全是 **vuln 文件上的其他类型误报**（agent 跨类型高置信 + semgrep 通用规则），safe 文件零 FP。report: `benchmarks/results/run3_mini/report.json`
 
 ### ⚠️ 发现的问题（按优先级，下一步做）
 

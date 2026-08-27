@@ -32,6 +32,21 @@ first_baseline:
     conf_0.5: {tp: 8, fp: 11, fn: 1, precision: 0.421, recall: 0.889, f1: 0.571}
     conf_0.7: {tp: 7, fp: 6, fn: 2, precision: 0.538, recall: 0.778, f1: 0.636}
   trace_file: "data/llm_trace/llm_trace.jsonl (38 条)"
+  notes: "P1-P4 修复前基线：semgrep 静默空；suspicious FP 26 条未切除；java-cmdi FN=1"
+
+second_baseline:
+  date: "2026-08-27"
+  model: "deepseek-v4-flash (opencode-go)"
+  scenario: "P1+P3+P4 修复后全链路（semgrep 恢复 / suspicious 切除 / java-cmdi 恢复 / 模型迁移）"
+  total_tokens: 135273
+  llm_calls: 27
+  http_errors: 0
+  results:
+    conf_0.0: {tp: 9, fp: 21, fn: 0, precision: 0.300, recall: 1.000, f1: 0.462}
+    conf_0.7: {tp: 9, fp: 15, fn: 0, precision: 0.375, recall: 1.000, f1: 0.545}
+    conf_0.8: {tp: 9, fp: 8, fn: 0, precision: 0.529, recall: 1.000, f1: 0.692}
+  report: "benchmarks/results/run3_mini/report.json"
+  notes: "作图受限时 conf>=0 口径对比首轮：TP 8→9(FN 清零,含 java-cmdi)、safe-FP 26→0(P3)、R 0.889→1.0、P 0.235→0.30、F1 0.372→0.462；残余 21 FP 全是 vuln 文件上其他类型误报(agent 跨类型 + semgrep 通用规则)"
 
 open_issues:
   - id: "P1"

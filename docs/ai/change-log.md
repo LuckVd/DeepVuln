@@ -2,6 +2,22 @@
 
 ## 2026-08-27
 
+### 第二轮 mini 实测基线 — P1+P3+P4 修复后全链路（Recall 100%，safe 零 FP）✅
+
+- **环境**: 重启 celery worker + uvicorn 加载新代码；LLM = deepseek-v4-flash（迁移后）；9 case 全跑
+- **结果**（`benchmarks/results/run3_mini/report.json`）:
+  | conf>= | TP | FP | FN | P | R | F1 |
+  |---|---|---|---|---|---|---|
+  | 0.0 | 9 | 21 | 0 | 0.300 | **1.000** | 0.462 |
+  | 0.7 | 9 | 15 | 0 | 0.375 | **1.000** | 0.545 |
+  | 0.8 | 9 | 8 | 0 | 0.529 | **1.000** | 0.692 |
+- **对比首轮（同 conf>=0 口径）**: TP 8→9（FN 清零，java-cmdi 恢复）、safe-FP 26→0（P3 生效）、R 0.889→1.0、P 0.235→0.300、F1 0.372→0.462
+- **Token**: 135,273（27 次 chat、0 http_error、平均 5K/次）——低于首轮 38 次（含 6 次失败重试）且无浪费
+- **残余 21 FP 全部是 vuln 文件上的其他类型误报**（agent 跨类型高置信 + semgrep 通用规则如 use-tls/no-direct-write）；safe 文件零 FP；conf>=0.8 时 P=0.529/F1=0.692 → 下一次优化方向：类型校准/阈值策略或 semgrep 规则裁剪
+- **Commit**: 未提交（遵循不自动提交规则）
+
+## 2026-08-27
+
 ### P4 修复 — java-cmdi 漏报根因定位与 LLM 模型迁移（ox-alpha-free → deepseek-v4-flash）✅
 
 - **根因 1（run1 的 FN 直接原因）**: trace 显示 java-cmdi vuln 的 agent 调用（17:23:21）遇 provider 503 "Endpoint is unavailable"，两次重试后放弃 → 该文件 0 findings → FN=1。不是 prompt/规则缺陷，是上游瞬时故障。
