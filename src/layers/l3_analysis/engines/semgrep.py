@@ -12,6 +12,8 @@ Enhanced with:
 """
 
 import json
+import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -143,6 +145,24 @@ class SemgrepEngine(BaseEngine):
         resolved = self.resolve_binary_path(self.semgrep_path)
         return resolved or self.semgrep_path
 
+    @staticmethod
+    def _spawn_env() -> dict[str, str]:
+        """Build a subprocess env that guarantees semgrep can start.
+
+        Semgrep opens ``~/.semgrep/semgrep.log`` at startup and crashes with
+        PermissionError before emitting any JSON when the home directory is
+        not writable (e.g. sandboxed roots with HOME=/root). That makes every
+        scan silently return zero findings (P1). Redirect the log file to a
+        per-process writable temp file unless the caller already configured
+        ``SEMGREP_LOG_FILE`` explicitly.
+        """
+        env = os.environ.copy()
+        if "SEMGREP_LOG_FILE" not in env:
+            log_dir = Path(tempfile.gettempdir()) / "deepvuln-semgrep"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            env["SEMGREP_LOG_FILE"] = str(log_dir / f"semgrep-{os.getpid()}.log")
+        return env
+
     async def get_version(self) -> str | None:
         """
         Get the Semgrep version.
@@ -154,7 +174,8 @@ class SemgrepEngine(BaseEngine):
             return None
         try:
             _, stdout, _ = await self.run_command(
-                [self._resolved_semgrep_path(), "--version"]
+                [self._resolved_semgrep_path(), "--version"],
+                env=self._spawn_env(),
             )
             return stdout.strip()
         except Exception:
@@ -203,6 +224,13 @@ class SemgrepEngine(BaseEngine):
         """
         # Validate source path
         self.validate_source_path(source_path)
+
+        # Resolve to an absolute path: the target is passed to semgrep while
+        # run_command sets cwd=source_path. A relative source_path would then
+        # be re-resolved against itself (e.g. "proj/xx" inside cwd "proj/xx")
+        # and semgrep would report "Invalid scanning root" — an error that
+        # _parse_results silently ignores, yielding zero findings again.
+        source_path = source_path.resolve()
 
         # Apply rule gating if enabled and tech_stack available
         gating_result = None
@@ -346,6 +374,7 @@ class SemgrepEngine(BaseEngine):
             returncode, stdout, stderr = await self.run_command(
                 cmd,
                 cwd=source_path,
+                env=self._spawn_env(),
             )
 
             # Parse JSON output

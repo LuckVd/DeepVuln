@@ -2,6 +2,18 @@
 
 ## 2026-08-26
 
+### P1 修复 — Semgrep `--config auto` 零 findings 根因定位（HOME 不可写 + 相对路径双解析）✅
+
+- **根因 1（主因）**: `SemgrepEngine` 以 `env=None` 继承父进程环境跑 semgrep；semgrep 启动时打开 `~/.semgrep/semgrep.log`（`env.py:157` 可用 `SEMGREP_LOG_FILE` 重定向）。沙箱/root 环境 `HOME=/root` 不可写 → `PermissionError` 在产 JSON 前崩溃 → `json.loads` 失败 → 引擎静默 success=False，findings=0（benchmark 首轮 semgrep 全空）。实测复现：`HOME=/root` 跑 `--config auto` 直接崩；`HOME=/tmp/fakehome` 同命令出 5 条。
+- **根因 2（隐患）**: `scan()` 把相对 `source_path` 同时传给 command target 和 `run_command(cwd=source_path)` → semgrep 在 cwd 内二次解析 target → "Invalid scanning root"，而 `_parse_results` 只读 `results` 不看 `errors` → 又一个静默 0 findings 路径（web 栈传绝对路径未触发，防御性修复）。
+- **修复** `src/layers/l3_analysis/engines/semgrep.py`:
+  - 新增 `_spawn_env()`：未显式设置 `SEMGREP_LOG_FILE` 时注入 `<tmpdir>/deepvuln-semgrep/semgrep-<pid>.log`（父目录 mkdir）；`get_version()` 与 `scan()` 的 `run_command` 均传该 env
+  - `scan()` 开头 `source_path = source_path.resolve()`，杜绝相对路径双解析
+- **验证**:
+  - 新增 4 项测试：3 项 env 注入行为（注入/尊重显式配置/可写）+ 1 项相对路径 resolve 回归；`test_semgrep_engine` + `test_semgrep_integration` **44 passed**
+  - 真实引擎 `HOME=/root` 全链路扫 mini：python/sqli 5 条、go/sqli 6 条（含 tainted-sql-string）、java/cmdi 2 条（含 tainted-cmd-from-http-request——顺带补上 P4 关心的 java-cmdi 检出面）
+- **Commit**: 未提交（遵循不自动提交规则）
+
 ### 可观测性 — LLM 调用追踪（opt-in JSONL）+ 首轮 mini 基线 ✅
 
 - **背景**: benchmark 实跑排查误报/漏报需要"模型当时看到什么、答了什么"；现有 token 聚合（scan.token_usage → `/token-usage` 端点）与会话存档（agent-conversation / adversarial-debate / events）都不含逐次原始报文

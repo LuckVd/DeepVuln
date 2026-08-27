@@ -6,11 +6,10 @@ Tests cover:
 - Scan command building
 - Result parsing
 - Finding conversion
+- Subprocess env hardening (SEMGREP_LOG_FILE redirect, P1)
 """
 
-import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -66,6 +65,37 @@ class TestSemgrepEngine:
         assert "python" in OFFICIAL_RULE_SETS
 
 
+class TestSemgrepSpawnEnv:
+    """Test subprocess env hardening (P1: HOME-unwritable crash)."""
+
+    def test_spawn_env_injects_log_file(self, monkeypatch):
+        """SEMGREP_LOG_FILE is injected when not set by the caller."""
+        monkeypatch.delenv("SEMGREP_LOG_FILE", raising=False)
+        env = SemgrepEngine._spawn_env()
+
+        log_file = env.get("SEMGREP_LOG_FILE")
+        assert log_file is not None
+        # The file must live in an existing, writable directory.
+        assert Path(log_file).is_absolute()
+        parent = Path(log_file).parent
+        assert parent.is_dir()
+
+    def test_spawn_env_respects_explicit_config(self, monkeypatch):
+        """A caller-provided SEMGREP_LOG_FILE is never overridden."""
+        monkeypatch.setenv("SEMGREP_LOG_FILE", "/custom/path/semgrep.log")
+        env = SemgrepEngine._spawn_env()
+        assert env["SEMGREP_LOG_FILE"] == "/custom/path/semgrep.log"
+
+    def test_spawn_env_log_file_is_writable(self, monkeypatch):
+        """The injected log path is creatable (the P1 failure mode)."""
+        monkeypatch.delenv("SEMGREP_LOG_FILE", raising=False)
+        env = SemgrepEngine._spawn_env()
+        log_path = Path(env["SEMGREP_LOG_FILE"])
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("probe")
+        assert log_path.read_text() == "probe"
+
+
 class TestSemgrepScanCommand:
     """Test Semgrep scan command building."""
 
@@ -89,6 +119,36 @@ class TestSemgrepScanCommand:
         assert "--json" in cmd
         assert "--quiet" in cmd
         assert "--metrics=off" in cmd
+
+    @pytest.mark.asyncio
+    async def test_scan_resolves_relative_source_path(self, tmp_path, monkeypatch):
+        """A relative source_path is resolved before building the command.
+
+        Regression for the P1 follow-up: scan() previously passed a relative
+        source_path straight into the command while run_command set
+        cwd=source_path, so semgrep re-resolved the target against itself and
+        reported "Invalid scanning root" — which _parse_results silently
+        ignores, yielding zero findings.
+        """
+        engine = SemgrepEngine()
+        (tmp_path / "app.py").write_text("x = 1")
+
+        # chdir to the parent so the bare name is a valid relative path.
+        monkeypatch.chdir(tmp_path.parent)
+        rel = tmp_path.name
+
+        calls = {}
+
+        async def fake_run_command(cmd, cwd=None, env=None):
+            calls["cmd"] = cmd
+            calls["cwd"] = cwd
+            return 0, '{"results": [], "errors": []}', ""
+
+        monkeypatch.setattr(engine, "run_command", fake_run_command)
+        await engine.scan(Path(rel), use_auto_config=True)
+
+        assert calls["cmd"][-1] == str(tmp_path.resolve())
+        assert calls["cwd"] == tmp_path.resolve()
 
     @pytest.mark.asyncio
     async def test_build_command_with_auto_config(self, tmp_path):

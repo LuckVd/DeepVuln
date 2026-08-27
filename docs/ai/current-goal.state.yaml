@@ -38,6 +38,8 @@ open_issues:
     issue: "Semgrep --config auto 产 0 findings"
     impact: "引擎级检出为空"
     next: "排查 registry 拉取/规则包匹配"
+    status: "resolved 2026-08-26"
+    resolution: "HOME 不可写致 semgrep 启动崩溃 → _spawn_env 注入 SEMGREP_LOG_FILE；相对 source_path 双解析 → resolve；HOME=/root 下 mini 三语言全检出"
   - id: "P2"
     issue: "CPG 可达性全标 not_exploitable (reachability=0.10)"
     impact: "exploitability 判定质量低；Flask/Spring/net-http 入口未被 CPG 识别"

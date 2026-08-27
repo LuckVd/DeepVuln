@@ -12,11 +12,8 @@ import pytest
 from src.layers.l3_analysis import (
     SemgrepEngine,
     SeverityLevel,
-    SmartScanner,
     create_smart_scanner,
 )
-from src.layers.l3_analysis.models import FindingType
-
 
 # Sample vulnerable code for testing
 VULNERABLE_PYTHON = '''
@@ -142,6 +139,36 @@ class TestSemgrepEngineIntegration:
             # Should complete successfully even with no files
             assert result.success is True
             assert result.total_findings == 0
+
+    @pytest.mark.asyncio
+    async def test_scan_with_home_unwritable(self, engine, temp_project, monkeypatch):
+        """Scan must work when the home dir is unwritable (P1 regression).
+
+        Semgrep opens ``~/.semgrep/semgrep.log`` at startup; with HOME
+        pointing at an unwritable directory it used to crash with
+        PermissionError before emitting JSON, silently yielding zero
+        findings. The engine now redirects SEMGREP_LOG_FILE to a writable
+        temp path, so the scan must succeed and still detect the
+        SQL-injection / command-injection sinks in the sample project.
+        """
+        unwritable_home = Path(tempfile.gettempdir()) / "p1-unwritable-home"
+        unwritable_home.mkdir(exist_ok=True)
+        unwritable_home.chmod(0o500)
+        try:
+            monkeypatch.setenv("HOME", str(unwritable_home))
+            monkeypatch.delenv("SEMGREP_LOG_FILE", raising=False)
+
+            result = await engine.scan(
+                source_path=temp_project,
+                use_auto_config=True,
+            )
+
+            assert result.success is True, result.error_message
+            assert result.total_findings > 0
+            # The vulnerable sample contains a real SQL injection sink.
+            assert any("sql" in f.rule_id.lower() for f in result.findings)
+        finally:
+            unwritable_home.chmod(0o700)
 
 
 class TestSmartScannerIntegration:

@@ -5,7 +5,7 @@
 > **Goal ID**: phase19-benchmark-eval
 > **创建日期**: 2026-08-26
 > **上一 goal**: Phase 18 — 精度链路接通与多语言可达性补齐（✅ 2026-08-25 关闭）
-> **当前执行**: P1 — Semgrep `--config auto` 零 findings 排查（2026-08-26 开工）
+> **当前执行**: P1 — Semgrep `--config auto` 零 findings 修复完成 ✅（根因：HOME 不可写致启动崩溃 + 相对路径双解析；引擎注入 SEMGREP_LOG_FILE + resolve；`HOME=/root` 下 mini 三语言均检出）→ 下一步 P3（FP 治理）
 
 ---
 
@@ -45,10 +45,10 @@
 
 | # | 问题 | 影响 | 建议 |
 |---|---|---|---|
-| **P1** | **Semgrep --config auto 产 0 findings** | 引擎级检出为空 | 排查 registry 拉取/规则包匹配 |
+| ~~P1~~ | ~~Semgrep --config auto 产 0 findings~~ | ~~引擎级检出为空~~ | ✅ **已修复 2026-08-26**：HOME 不可写致 semgrep 启动崩溃（引擎注入 SEMGREP_LOG_FILE）+ 相对路径双解析（resolve）；`HOME=/root` 下 python/go/java mini 均检出，4 项新测试 |
 | **P2** | **CPG 可达性全标 not_exploitable**（reachability=0.10）| exploitability 判定质量低 | Flask/Spring/net-http 入口未被 CPG 识别为外部入口——Phase 18 已知问题，mini 基准首次量化了影响 |
-| **P3** | safe 文件 FP 多（agent 产低置信度 suspicious 条目）| Precision 低 | 按 is_suspicious 标签过滤或提阈值 |
-| **P4** | java-cmdi 漏报（agent 未识别 Runtime.exec 为 cmd_injection）| Recall 缺口 | 补 prompt 规则或加 dangerous API 检测 |
+| **P3** | **safe 文件 FP 多**（agent 产低置信度 suspicious 条目）| Precision 低 | 按 is_suspicious 标签过滤或提阈值 |
+| **P4** | **java-cmdi 漏报**（agent 未识别 Runtime.exec 为 cmd_injection）| Recall 缺口 | 补 prompt 规则或加 dangerous API 检测（semgrep 已检出 tainted-cmd-from-http-request，可作跨引擎印证） |
 
 ### 环境备忘
 
