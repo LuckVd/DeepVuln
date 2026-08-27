@@ -48,6 +48,8 @@ open_issues:
     issue: "safe 文件 FP 多（agent 低置信度 suspicious 条目）"
     impact: "Precision 低 (0.235→0.421 at conf>=0.5)"
     next: "按 is_suspicious 标签过滤或提阈值"
+    status: "resolved 2026-08-26"
+    resolution: "adjudication 前抽离 is_suspicious 条目至审查队列（_split_review_queue + ScanConfig.include_suspicious_findings 逃生阀）；run1 DB 模拟 P 0.160→0.333 / F1 0.271→0.485，零 TP 损失"
   - id: "P4"
     issue: "java-cmdi FN（agent 未识别 Runtime.exec 为 cmd_injection）"
     impact: "Recall 缺口"

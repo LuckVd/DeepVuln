@@ -155,6 +155,15 @@ class ScanConfig(BaseModel):
         description="Maximum files for agent to analyze"
     )
 
+    # P3: agent low-confidence `suspicious_code` entries are pulled out of the
+    # reportable set by default (they were the bulk of false positives in the
+    # first mini baseline: near-guaranteed FP, confidence 0.1-0.5). Set True
+    # to keep them in the final findings as before.
+    include_suspicious_findings: bool = Field(
+        default=False,
+        description="Report agent 'suspicious' low-confidence entries as findings (default: review queue only)",
+    )
+
     # LLM model
     model: str = Field(
         default="deepseek-chat",

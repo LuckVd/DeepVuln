@@ -2,6 +2,16 @@
 
 ## 2026-08-26
 
+### P3 修复 — agent `is_suspicious` 低置信条目抽离为审查队列（FP 主源切除）✅
+
+- **根因**: agent 引擎把 LLM 响应中 `suspicious_code` 段（模型自己也拿不准的"待审查"条目）转成 `Finding`（`metadata.is_suspicious=True`、confidence ≤ 0.5、severity LOW），随后进入多轮裁决却只停在 `conditional`，最终落库为正式 findings。DB 实测 run1 落库 53 条 findings 中 **28 条（53%）是 suspicious_***，全 conditional、无一条贡献 TP；26 个 FP 中绝大多数即此类。
+- **修复** `src/web/services/scan_orchestrator.py` + `src/web/models/schemas.py`:
+  - `_run_adjudication` 聚合处新增 `_split_review_queue()`：默认把 `is_suspicious` 条目从待裁决/落库集合抽离，存入 `self._suspicious_review_queue`（dict 化，供人工审查），不进最终 findings
+  - `ScanConfig` 新增逃生阀 `include_suspicious_findings: bool=False`——True 时恢复旧行为（全进报告）
+- **量化**（run1 DB 落库数据模拟，P1 前快照）: 过滤前 TP=8/FP=42/P=0.160/F1=0.271 → 过滤后 TP=8/FP=16/**P=0.333/F1=0.485**；**被过滤条目贡献 0 TP**（Precision +108%，F1 +79%，Recall 不变 0.889）
+- **验证**: 新增 3 项测试（划分逻辑/逃生阀/裁决链路不含 suspicious）——test_final_score_wiring 5 passed；test_web 基线 34F/31E 零回归（194 passed）
+- **Commit**: 未提交（遵循不自动提交规则）
+
 ### P1 修复 — Semgrep `--config auto` 零 findings 根因定位（HOME 不可写 + 相对路径双解析）✅
 
 - **根因 1（主因）**: `SemgrepEngine` 以 `env=None` 继承父进程环境跑 semgrep；semgrep 启动时打开 `~/.semgrep/semgrep.log`（`env.py:157` 可用 `SEMGREP_LOG_FILE` 重定向）。沙箱/root 环境 `HOME=/root` 不可写 → `PermissionError` 在产 JSON 前崩溃 → `json.loads` 失败 → 引擎静默 success=False，findings=0（benchmark 首轮 semgrep 全空）。实测复现：`HOME=/root` 跑 `--config auto` 直接崩；`HOME=/tmp/fakehome` 同命令出 5 条。

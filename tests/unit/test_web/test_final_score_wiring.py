@@ -114,3 +114,79 @@ class TestFinalScoreWiredIntoAdjudication:
         removed_ids = {f.id for f in result.removed}
         assert kept_ids == {"high-dup"}
         assert removed_ids == {"low-dup"}
+
+
+class TestSuspiciousReviewQueue:
+    """P3: agent is_suspicious entries must not pollute the report."""
+
+    def _agent_result(self, *findings) -> ScanResult:
+        return ScanResult(
+            source_path="/tmp", engine="agent", findings=list(findings)
+        )
+
+    def test_split_review_queue_partitions(self):
+        """is_suspicious findings go to review; everything else stays main."""
+        orch = _orch()
+        normal = _finding(id="normal")
+        suspicious = _finding(
+            id="susp", rule_id="suspicious_sql_injection", confidence=0.2,
+            metadata={"is_suspicious": True},
+        )
+        main, review = orch._split_review_queue([normal, suspicious])
+        assert main == [normal]
+        assert review == [suspicious]
+
+    def test_split_review_queue_opt_in_keeps_all(self):
+        """include_suspicious_findings=True disables the pull-out."""
+        orch = ScanOrchestrator(
+            scan_id=1,
+            source_path="/tmp",
+            scan_config={"include_suspicious_findings": True},
+            progress_callback=MagicMock(),
+        )
+        suspicious = _finding(
+            id="susp", metadata={"is_suspicious": True},
+        )
+        main, review = orch._split_review_queue([suspicious])
+        assert main == [suspicious]
+        assert review == []
+
+    @pytest.mark.asyncio
+    async def test_adjudication_excludes_suspicious_from_report(self):
+        """Suspicious entries survive in the agent metadata review queue only."""
+        orch = _orch()
+        orch.progress_callback = _async_progress()
+        orch.scan_results = {
+            "semgrep": ScanResult(
+                source_path="/tmp", engine="semgrep",
+                findings=[_finding(id="real", rule_id="sql-injection")],
+                total_findings=1,
+            ),
+            "agent": self._agent_result(
+                _finding(
+                    id="susp-1",
+                    rule_id="suspicious_cross_site_scripting",
+                    confidence=0.3,
+                    metadata={"is_suspicious": True},
+                ),
+                _finding(
+                    id="hard-1",
+                    rule_id="cmd-injection",
+                    confidence=0.85,
+                    metadata={},
+                ),
+            ),
+        }
+
+        await orch._run_adjudication()
+
+        reported_ids = {
+            f.id for r in orch.scan_results.values() for f in r.findings
+        }
+        assert "real" in reported_ids
+        assert "hard-1" in reported_ids
+        assert "susp-1" not in reported_ids
+
+        queue = orch._suspicious_review_queue
+        assert len(queue) == 1
+        assert queue[0]["id"] == "susp-1"

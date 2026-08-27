@@ -118,6 +118,9 @@ class ScanOrchestrator:
         # incremental checkpoint / resume-skip. Reset on fresh scan; restored
         # (intersected with restored results) on resume.
         self._completed_engines: set[str] = set()
+        # P3: agent is_suspicious entries pulled out of the reportable set,
+        # kept here (as dicts) for manual review instead of being persisted.
+        self._suspicious_review_queue: list[dict] = []
         self.adjudication_summary: Optional[Dict[str, Any]] = None
 
         # Statistics
@@ -1457,6 +1460,34 @@ class ScanOrchestrator:
         )
         return verified
 
+    def _split_review_queue(
+        self, findings: list[Finding]
+    ) -> tuple[list[Finding], list[Finding]]:
+        """Partition findings into reportable main set and review-only queue (P3).
+
+        Agent low-confidence ``suspicious_code`` entries are marked
+        ``metadata["is_suspicious"]=True`` and sneak into the final report as
+        near-guaranteed false positives: the first mini baseline showed 26 FP
+        mostly from such entries (confidence 0.1–0.5, adjudicated to
+        ``conditional``). Unless ``include_suspicious_findings`` is enabled in
+        the scan config, they are pulled out of adjudication and kept in the
+        agent engine's metadata for manual review instead of being reported.
+
+        Returns:
+            (main_findings, review_findings). ``main_findings`` is empty when
+            every finding is review-only.
+        """
+        if self.config.get("include_suspicious_findings", False):
+            return findings, []
+        main: list[Finding] = []
+        review: list[Finding] = []
+        for finding in findings:
+            if finding.metadata and finding.metadata.get("is_suspicious"):
+                review.append(finding)
+            else:
+                main.append(finding)
+        return main, review
+
     async def _run_adjudication(self) -> dict[str, int]:
         """Run deduplication and adjudication on findings (P14-03).
 
@@ -1469,6 +1500,18 @@ class ScanOrchestrator:
         all_findings: list[Finding] = []
         for engine_name, scan_result in self.scan_results.items():
             all_findings.extend(scan_result.findings)
+
+        # P3: keep agent low-confidence suspicious entries out of the
+        # reportable set (kept in self._suspicious_review_queue for review).
+        main_findings, review_findings = self._split_review_queue(all_findings)
+        if review_findings:
+            self._suspicious_review_queue = [f.to_dict() for f in review_findings]
+            logger.info(
+                f"P3: moved {len(review_findings)} is_suspicious entries "
+                f"to review queue (config include_suspicious_findings="
+                f"{self.config.get('include_suspicious_findings', False)})"
+            )
+        all_findings = main_findings
 
         if not all_findings:
             logger.info("No findings to adjudicate")
