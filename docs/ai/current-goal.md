@@ -1,47 +1,46 @@
 # Current Goal
 
-> **状态**: ✅ 已立项（2026-08-26）— Phase 18 已关闭；**benchmark 基础设施已建成 + 首轮 mini 基线已出数**；Phase 19 开工，按 P1→P3→P4→P2 修基线问题并迭代扩样本
+> **状态**: ✅ 已立项（2026-08-26）— Phase 19 执行中；**P1–P4 开放问题全部修复关闭 + P19 噪声裁剪 + 第二轮 mini 基线（Recall 100% / safe 零 FP）**
 >
 > **Goal ID**: phase19-benchmark-eval
 > **创建日期**: 2026-08-26
 > **上一 goal**: Phase 18 — 精度链路接通与多语言可达性补齐（✅ 2026-08-25 关闭）
-> **当前执行**: P1/P3/P4 已修复 ✅，**第二轮 mini 基线已出**（Recall 1.0 / safe 零 FP / conf≥0.8 F1 0.692）→ 剩 P2（CPG 入口识别，最重）；后续可扩 owasp-subset 150 例
+> **当前执行**: P1/P3/P4 ✅ + P2 ✅（入口层+ sink 层，三语言攻击路径全通）+ P19 ✅（semgrep 噪声规则剔除）→ **下一步：重启服务跑第三轮 mini 基线，验证全修复联合收益，然后扩 owasp-subset 150 例**
 
 ---
 
 ## 📊 当前状态快照（新会话先看这个）
 
-### 已完成（本次会话 2026-08-26，未 commit）
+### 已完成（截至 2026-08-28，全部已 commit）
 
-1. **state.yaml 对齐**: Phase 18 状态从 active/pending 改为 closed/completed
-2. **基准基础设施建成** `benchmarks/`:
-   - `fetch.sh`: 一键拉取第三方源到 `third_party/`（gitignore，27MB）——SecurityEval / go-test-bench / django-nv / OWASP BenchmarkJava(testcode 2740 文件 + 真值 CSV) / findsecbugs
-   - **mini 集** `mini/`: 每语言 3 例共 9 例（py: sqli/cmdi/eval; go: cmdi/sqli/ssrf; java: cmdi/sqli/crypto），vuln/safe 成对，`truth.json` 含 sink_comment 自检标记 + cwe_keywords 匹配词
-   - **OWASP 子集清单** `owasp_subset_manifest.json`: 分层抽 150 例（75 正/75 负，11 类全覆盖），seed=42 可复现
-   - **评测脚本** `eval/run_benchmark.py`: selfcheck（离线真值↔文件一致性）+ api（Web API 提交→轮询→拉 findings→P/R/F1）；另有 owasp-subset/owasp-full/securityeval/gotestbench/djangonv 目标
-   - `eval/make_owasp_subset.py`: 确定性分层抽样
-   - `eval/seed_llm_config.py`: 幂等把 ox-alpha-free 写入 DB llm_configs 表
-   - `README.md`: 结构/用法/指标口径
+**提交主线**（本会话 8/26–8/28，9 个 commit）:
+- `af95bb6` 基建 + Phase 19 立项（benchmarks/ 全套、AST 规则 7 条修复、LLM trace、deepseek-v4-flash 接入）
+- `695707c` **P1**：semgrep 零 findings（HOME 不可写 → SEMGREP_LOG_FILE 注入 + 相对路径 resolve）
+- `cfa807b` **P3**：agent is_suspicious 条目抽离审查队列（include_suspicious_findings 逃生阀）
+- `d6fe649` **P4**：java-cmdi 根因（provider 503 + 模型下线）→ deepseek-v4-flash 迁移
+- `d0df699` 第二轮 mini 基线落档
+- `d987d4e` **P19**：semgrep 噪声规则剔除（use-tls / no-direct-write）
+- `9237732` **P2 入口层**：tree-sitter 字节/字符错位（4 处）+ Java Servlet 识别
+- `c8f72ee` **P2 收尾**：sink 白名单补 Java 调用类型 + 语言专属 sink pattern
 
-3. **AST 规则修复（7 条编译失败清零）**:
-   - 6 条 S-expression 语法修复（django_extra_raw_sql / flask_render_string_template / java_jni_register_natives / go_context_without_deadline / **go_defer_close_file**（根因：go AST block 下有 statement_list 包裹层）/ python_subprocess_shell）
-   - `tree_sitter_manager.py`: TypeScript 加载回退——tree_sitter_typescript≥0.23 暴露 `language_typescript/language_tsx` 而非 `.language`
-   - 验证: 27/27 查询编译通过；ast/detector/rule 相关单测 246 passed
+**要点**:
 
-4. **LLM 调用追踪** `openai_client.py`: env `DEEPVULN_LLM_TRACE=<dir>` 开启 JSONL 落盘（完整 messages + 响应 + usage + 耗时）；不落 api_key
-
-5. **LLM 模型接入与迁移**: seed_llm_config.py 幂等写入 DB → agent 扫描与可利用性验证两条链路均使用 opencode-go / **deepseek-v4-flash**（ctx 1M / maxTokens 131072 / base_url `https://opencode.ai/zen/go/v1`）；**2026-08-27 迁移**：原 `ox-alpha-free` 已在该网关下线（实测 401 "Model ox-alpha-free is not supported"），default 模型改名 deepseek-v4-flash（与 DSH settings.yaml 一致）；key 从 `~/.dsh/.credentials.yaml` refs 解析
-
-6. **第二轮 mini 实测基线**（9 case 全跑完，P1+P3+P4 修复后 + deepseek-v4-flash）:
+1. **基准基础设施** `benchmarks/`: fetch.sh 五大第三方源 / mini 9 case（vuln-safe 成对）/ OWASP 子集 150 例（seed=42）/ run_benchmark.py（selfcheck + api）
+2. **AST 规则**: 7 条编译失败清零（6 条 S-expression + TS 语言加载回退），27/27 编译通过
+3. **LLM trace**: `DEEPVULN_LLM_TRACE` JSONL 落盘（不落 api_key）
+4. **LLM 模型**: opencode-go / **deepseek-v4-flash**（2026-08-27 从 ox-alpha-free 迁移——该名已下线 401）
+5. **第二轮 mini 基线**（9 case 全跑完，P1+P3+P4 后 + deepseek-v4-flash）:
    | conf>= | TP | FP | FN | P | R | F1 |
    |---|---|---|---|---|---|---|
    | 0.0 | 9 | 21 | 0 | 0.300 | **1.000** | 0.462 |
    | 0.7 | 9 | 15 | 0 | 0.375 | **1.000** | 0.545 |
    | 0.8 | 9 | 8 | 0 | 0.529 | **1.000** | 0.692 |
 
-   总 token: **135,273**（27 次 LLM 调用，0 失败）；对比首轮（conf>=0 口径）：TP 8→9（FN 清零，含 java-cmdi）、safe 文件 FP 26→0（P3）、R 0.889→**1.0**、P 0.235→0.300、F1 0.372→0.462。残余 21 个 FP 全是 **vuln 文件上的其他类型误报**（agent 跨类型高置信 + semgrep 通用规则），safe 文件零 FP。report: `benchmarks/results/run3_mini/report.json`
+   总 token: **135,273**（27 次 LLM 调用，0 失败）；对比首轮（conf>=0）：TP 8→9（FN 清零）、safe-FP 26→0（P3）、R 0.889→1.0、P 0.235→0.300、F1 0.372→0.462。残余 FP 21 全为 vuln 文件上其他类型（agent 跨类型 + semgrep 通用规则——后者已被 P19 剔除）。
+6. **P19 噪声裁剪**: semgrep `use-tls`/`no-direct-write-to-responsewriter` 默认剔除（run3 的 10/21 FP、零 TP）；引擎级验证 go-ssrf 8→2、go-sqli 7→2、go-cmdi 4→1。预期第三轮 FP 21→11、F1 0.46→~0.62。
+7. **P2 全链路（入口 + sink 两层）**: 三语言攻击路径全通——java `doGet→exec`、py `ping_host→system`、go `cmdiVulnHandler/ssrfVulnHandler/sqliVulnHandler→sink`（此前全 0，exploitability 全 not_exploitable）。
 
-### ⚠️ 发现的问题（按优先级，下一步做）
+### 开放问题状态（P1–P4 全部关闭）
 
 | # | 问题 | 影响 | 建议 |
 |---|---|---|---|
@@ -49,6 +48,16 @@
 | ~~P2~~ | ~~CPG 可达性全标 not_exploitable~~ | ~~exploitability 判定质量低~~ | ✅ **已修复 2026-08-28**：①入口层（UTF-8 字节错位 + Servlet 识别）；②sink 层（finder 白名单补 Java method_invocation）+ 语言专属 sink pattern（go 补 SSRF/SQL）；三语言攻击路径全通；剩余扩展项：更多 sink 词表可随基准扩 |
 | ~~P3~~ | ~~safe 文件 FP 多（agent 产低置信度 suspicious 条目）~~ | ~~Precision 低~~ | ✅ **已修复 2026-08-26**：suspicious 条目抽离为审查队列（默认不进报告，`include_suspicious_findings` 逃生阀可恢复）；DB 模拟 Precision 0.160→0.333、F1 0.271→0.485，零 TP 损失 |
 | ~~P4~~ | ~~java-cmdi 漏报（agent 未识别 Runtime.exec 为 cmd_injection）~~ | ~~Recall 缺口~~ | ✅ **已修复 2026-08-27**：根因①run1 时该文件 agent 调用遇 provider 503 → FN；②`ox-alpha-free` 模型名已下线（401）→ 改用 deepseek-v4-flash 后 agent 检出 command_injection conf=1.0；semgrep（P1 后）另检出 tainted-cmd-from-http-request，双引擎覆盖 |
+
+### 后续工作（按优先级）
+
+| # | 项 | 说明 |
+|---|---|---|
+| N1 | **第三轮 mini 基线** | 重启服务加载全部新代码后重跑 run3 版数字，量化 P19 噪声裁剪（FP 21→11）+ P2 全链路（exploitability 不再是全 not_exploitable）联合收益 |
+| N2 | **扩样本 owasp-subset** | 150 例（75正/75负、11 类）跑通后验证泛化；token 预估 1.5M–2M |
+| N3 | **残余 FP 类型校准** | 第二轮 FP 21 中 agent 跨类型高置信误报（如 ssrf 文件报 cmdi）；可做 finding 与调用点/入口类型的绑定过滤 |
+| N4 | **sink 词表扩展** | CPG 语言专属 pattern 当前覆盖 exec/http/sql/template；随 owasp 11 类（crypto/deserialization 等）扩词表 |
+| N5 | **worker checkpoint 修复** | 本轮实际链路中 checkpoint_service 报 "Database not initialized"（沙箱 HOME 环境问题，不影响主流程结果） |
 
 ### 环境备忘
 

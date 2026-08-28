@@ -1,11 +1,12 @@
 # Project Summary
 
-Status: Phase 19 筹备（检测基准与 P/R 评测体系）- web-only（CLI 已移除，仅 Web 接口）
+Status: Phase 19 执行中（检测基准与 P/R 评测体系，P1–P4 开放问题全关）- web-only（CLI 已移除，仅 Web 接口）
 
 ## Recent Maintenance Notes
 
-- **2026-08-26**: benchmark 基础设施建成（benchmarks/ 目录：mini 集 9 case / OWASP 子集 150 例 / 评测脚本 / seed 脚本）；AST 规则修复 7 条编译失败清零；ox-alpha-free 接入 DB llm_configs；LLM 调用追踪 DEEPVULN_LLM_TRACE。**首轮 mini 基线：Recall=88.9% (8/9), Precision=0.235~0.538, 总 token 112,503**。开放问题：P1 Semgrep 空 / P2 CPG 入口未识别 / P3 safe 文件 FP 多 / P4 java-cmdi 漏报。详见 `docs/ai/current-goal.md` 与 `change-log.md` 2026-08-26 各条。
-- Phase 18（进行中→已关闭 2026-08-25）：精度链路接通 + 三语言可达性补齐 + 全量体检修复，test_l3 全绿 2079/0。
+- **2026-08-28**: **P1–P4 全部修复 + P19 增量收官**（9 个 commit：af95bb6→c8f72ee）：P1 semgrep 零 findings（HOME 不可写+相对路径双根因）/ P3 suspicious FP 切除 / P4 java-cmdi + LLM 模型迁移 deepseek-v4-flash / P2 CPG 可达性三层（UTF-8 字节错位、Servlet 识别、sink 白名单+语言专属 pattern）——三语言攻击路径全通；P19 semgrep 噪声规则剔除（run3 10/21 FP 零 TP）。**第二轮 mini 基线：TP=9/R=1.0/safe FP=0，conf≥0 F1 0.462、conf≥0.8 F1 0.692，token 135,273**。下一步：第三轮基线（重启服务量化 P19+P2 联合收益）→ owasp-subset 150 例。详见 `docs/ai/current-goal.md` 与 `change-log.md`。
+- **2026-08-26/27**: benchmark 基建落地；AST 规则 7 条清零；首轮 mini 基线（R 0.889/P 0.235/F1 0.372）；P1/P3/P4 修复。
+- Phase 18（已关闭 2026-08-25）：精度链路接通 + 三语言可达性补齐 + 全量体检修复，test_l3 全绿 2079/0。
 
 ## Purpose
 

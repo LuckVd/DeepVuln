@@ -93,11 +93,16 @@ constraints:
   - "本机无 CodeQL/docker，引擎降级路径必须保"
 
 implementation_steps:
-  - "P1 Semgrep --config auto 零 findings：排查 registry 拉取/规则包匹配，恢复引擎检出"
-  - "P3 FP 治理：按 is_suspicious 标签过滤或提阈值，提升 Precision"
-  - "P4 java-cmdi FN：补 prompt 规则或 dangerous API 检测，提升 Recall"
-  - "P2 CPG 入口识别：Flask/Spring/net-http 入口接入 CPG 可达性（最重，可单独成战）"
-  - "迭代回测：每修一项重跑 mini 基线，再扩 OWASP 子集（150 例）→ 全量四大基准"
+  - "P1 Semgrep 零 findings：HOME 不可写→SEMGREP_LOG_FILE 注入 + 相对路径 resolve ✅ 695707c"
+  - "P3 FP 治理：is_suspicious 抽离审查队列（include_suspicious_findings 逃生阀）✅ cfa807b"
+  - "P4 java-cmdi + LLM 模型迁移 deepseek-v4-flash（ox-alpha-free 下线 401）✅ d6fe649"
+  - "P19 semgrep 噪声规则剔除（use-tls/no-direct-write，run3 10/21 FP）✅ d987d4e"
+  - "P2 CPG 可达性：入口层（UTF-8 错位+Servlet）✅ 9237732 + sink 层（白名单+语言专属 pattern）✅ c8f72ee"
+  - "N1 第三轮 mini 基线（重启服务后重跑，验证全修复联合收益；预期 FP 21→11、F1 0.46→~0.62、exploitability 部分可达）"
+  - "N2 扩 OWASP 子集 150 例"
+  - "N3 残余 FP 类型校准（agent 跨类型高置信误报）"
+  - "N4 sink 词表随 owasp 11 类扩展"
+  - "N5 worker checkpoint 'Database not initialized'（沙箱 env，不影响主流程）"
 
 sync_status: "not_synced"
-last_check_at: "2026-08-26"
+last_check_at: "2026-08-28"
