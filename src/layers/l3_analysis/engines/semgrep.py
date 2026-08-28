@@ -207,6 +207,7 @@ class SemgrepEngine(BaseEngine):
         use_finding_budget: bool = True,
         use_file_filtering: bool = True,
         use_ast_validation: bool = True,
+        extra_disabled_rule_ids: list[str] | None = None,
         **options,
     ) -> ScanResult:
         """
@@ -227,6 +228,10 @@ class SemgrepEngine(BaseEngine):
             use_finding_budget: Whether to apply finding budget limits (default: True).
             use_file_filtering: Whether to apply file filtering (default: True).
             use_ast_validation: Whether to validate rules for AST matching (default: True).
+            extra_disabled_rule_ids: Extra rule-id keywords to exclude (merged into
+                the gating exclusion list). This is the single convergence point
+                for the P-A2 applicability gate — the gate never maintains a
+                second gating mechanism, it only appends here.
             **options: Additional options.
 
         Returns:
@@ -285,6 +290,19 @@ class SemgrepEngine(BaseEngine):
                 )
             except Exception as e:
                 self.logger.warning(f"Rule gating failed, continuing without: {e}")
+
+        # P-A2 applicability gate convergence point: merge the gate's
+        # not-applicable rule keywords into the exclusion list (extend, never
+        # replace — the gating assignment above overwrites the noise list and
+        # relies on the post-parse noise filter for those).
+        if extra_disabled_rule_ids:
+            excluded_rule_ids.extend(
+                kw for kw in extra_disabled_rule_ids if kw not in excluded_rule_ids
+            )
+            self.logger.info(
+                f"Applicability gate: merged {len(extra_disabled_rule_ids)} "
+                f"extra disabled rule keyword(s)"
+            )
 
         # Apply file filtering if enabled
         filtering_result = None

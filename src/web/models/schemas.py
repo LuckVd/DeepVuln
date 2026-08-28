@@ -164,6 +164,41 @@ class ScanConfig(BaseModel):
         description="Report agent 'suspicious' low-confidence entries as findings (default: review queue only)",
     )
 
+    # Phase 20 P-A1: attack-surface taskification — the L1 attack surface is
+    # grouped into ≤ max_tasks risk-semantic audit tasks executed by the agent
+    # engine as an isolated, checkpointable task pool. Projects without entry
+    # points automatically fall back to the historical flat scan.
+    task_split: bool = Field(
+        default=True,
+        description="Enable attack-surface taskified agent audit (P-A1, auto-fallback when no entry points)",
+    )
+    task_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description="Maximum audit tasks running concurrently in the agent task pool",
+    )
+    max_tasks: int = Field(
+        default=8,
+        ge=2,
+        le=16,
+        description="Maximum number of audit tasks the planner may produce",
+    )
+
+    # Phase 20 P-A2: applicability gate — vulnerability classes without their
+    # prerequisite surface (no auth mechanism, no HTTP, no crypto API probed…)
+    # are cut from agent focus, merged into semgrep's rule exclusions, and
+    # their findings routed to the review queue. Fail-open: uncertain classes
+    # stay applicable.
+    applicability_gate: bool = Field(
+        default=True,
+        description="Enable per-vulnerability-class applicability gating (P-A2, fail-open)",
+    )
+    include_gated_findings: bool = Field(
+        default=False,
+        description="Report findings of gate-not-applicable classes as findings (default: review queue only)",
+    )
+
     # LLM model
     model: str = Field(
         default="deepseek-chat",

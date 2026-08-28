@@ -1,11 +1,34 @@
 # Current Goal
 
-> **状态**: ✅ 已立项（2026-08-26）— Phase 19 执行中；**P1–P4 全部修复关闭 + P19 噪声裁剪 + 第三轮 mini 基线落档（FP 21→10 / F1 0.46→0.643 / Recall 100%）+ N5 checkpoint 修复**
+> **状态**: ✅ 已立项（2026-08-26）— Phase 19 完成 + **Phase 20 完成（2026-08-28）：P-A1 攻击面任务化 + P-A2 Gate 适用性门控 + 任务级 checkpoint 续扫端到端验证通过；P-A3/P-A4 决议不做**
 >
-> **Goal ID**: phase19-benchmark-eval
+> **Goal ID**: phase19-benchmark-eval（Phase 20 作为同 goal 延伸执行）
 > **创建日期**: 2026-08-26
 > **上一 goal**: Phase 18 — 精度链路接通与多语言可达性补齐（✅ 2026-08-25 关闭）
-> **当前执行**: P1/P3/P4 ✅ + P2 ✅（入口层生效；sink/taint 维度留 N6）+ P19 ✅ + **N1 第三轮基线 ✅（run4）** + **N5 ✅（worker init_db）** → **下一步：N2 扩 owasp-subset 150 例（75/75，11 类）验证泛化**
+> **当前执行**: Phase 19（run4 基线 FP 21→10 / F1 0.643 / R 1.0）✅ + Phase 20（P-A1/P-A2 落地 + 续扫链路修复）✅ → **下一步：N2 扩 owasp-subset 150 例验证泛化 + run5 mini 基准回归（进行中）**
+
+---
+
+## 🆕 Phase 20 — P-A1/P-A2（2026-08-28 完成）
+
+**背景**: Codebuddy Security 对比文档（`benchmark-vs-codebuddy.md`）产出 4 个借鉴项；用户决议只做 P-A1（攻击面任务化）/ P-A2（适用性门控），P-A3（进程隔离复核）由现有 attacker/defender/arbiter + VerificationGatekeeper 覆盖不做，P-A4（自动补丁）不排期。
+
+**交付**:
+1. `ApplicabilityGate`（`src/core/applicability_gate.py`）——攻击面/技术栈/轻量探针三类确定性信号，12 个漏洞类逐一判定；fail-open（数据缺失→不确定→放行）；与 semgrep RuleGating 在 `extra_disabled_rule_ids` 汇合；gate 压制 finding 进 P3 式审查队列（`include_gated_findings` 逃生阀）
+2. `TaskPlanner`（`task_planner.py`）——入口点按模块聚成 ≤8 个风险语义任务（`<模块>-<风险动词>`），gate 裁剪 focus；零入口点/覆盖率<30% 兜底回扁平路径（mini 行为不变）
+3. Agent 任务池——per-task `vulnerability_focus` 聚焦、单任务失败隔离、`metadata["task_id"]` 打标、`on_task_complete` 回调、任务级 checkpoint 续扫（跳过已完成任务 + 并入部分结果）
+4. 顺带修复 2 个**既有** resume bug（engines 空跑 / source_path str 崩溃）+ 1 个漏传（semgrep 分支 attack_surface）
+
+**验证**:
+- 多模块合成靶场（3×Flask 模块）live 扫描：3 任务 → 恰好 3 个正确类型/位置/severity 的 findings，零跨类型 FP；gate 正确裁剪 crypto_misuse/deserialization
+- **任务级续扫端到端**：中途 SIGKILL → resume → 计划确定性重建 → 已完成任务跳过（16s/4.4K tokens vs 全跑 ~50s/12K）→ 3 findings 无重复
+- 单测 +82 全绿（gate/planner/任务池/checkpoint）；`tests/unit` 全量对比干净基线无回归
+- **run5 mini 基准**：TP=9 FP=11(safe:0) FN=0 → P=0.45 R=1.0 F1=0.621；token 105,960（-2.9%）；vs run4（FP=10）新增 1 条 java-sqli 上 agent xss FP —— 根因=HTTP 面默认全动词展开进 focus，servlet 场景诱导；**列为 N7（focus 证据门槛），暂不实施**
+
+**下一步（优先级序）**:
+1. **N7** focus 证据门槛——xss 等展示类动词仅在直接信号命中时进入任务 focus（注意勿误伤真实检出）
+2. **N2** 扩 owasp-subset 150 例（75/75，11 类）验证 P-A1/P-A2 泛化性
+3. **N6** CPG get_attack_paths ↔ taint 维度打通（sink 层仍 0.00）
 
 ---
 

@@ -112,6 +112,11 @@ DeepVuln 把"检出质量"纳入闭环：三轮基线 Recall 100%、safe 零 FP�
 
 ## 三、互相可借鉴清单（供路线图排期）
 
+> **排期决议（2026-08-28，Phase 20 已落地）**：
+> - **P-A1 / P-A2** → 已实施（`task_planner.py` + `applicability_gate.py` + agent 任务池 + 任务级 checkpoint），详见 `docs/ai/change-log.md` 当日条目与 `docs/ai/current-goal.md` Phase 20 段。
+> - **P-A3 → 决议不做**：现有 attacker/defender/arbiter 三角色辩论（论证结构更深）+ VerificationGatekeeper（准入门控，省 ~40% 对抗验证调用）已覆盖"独立复核"的核心收益；进程隔离属于工程加固，边际收益不抵改造成本。
+> - **P-A4 → 不排期**：自动补丁 Diff 流水线暂不做，保留 `remediation` 建议字段现状。
+
 ### DeepVuln ← Codebuddy（借鉴项，编号 P-A1 ~ P-A4）
 
 | # | 借鉴项 | 说人话 | 对应现状短板 |

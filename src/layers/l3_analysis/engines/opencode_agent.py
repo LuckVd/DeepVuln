@@ -271,6 +271,11 @@ class OpenCodeAgent(BaseEngine):
         vulnerability_focus: list[str] | None = None,
         severity_filter: list[SeverityLevel] | None = None,
         context: dict[str, Any] | None = None,
+        task_plan: dict[str, Any] | None = None,
+        resume_completed_tasks: list[str] | None = None,
+        resume_findings: list[dict[str, Any]] | None = None,
+        on_task_complete: Any | None = None,
+        task_concurrency: int = 2,
         **options,
     ) -> ScanResult:
         """
@@ -283,6 +288,18 @@ class OpenCodeAgent(BaseEngine):
             vulnerability_focus: Vulnerability types to focus on.
             severity_filter: Only return findings at these severity levels.
             context: Additional context (framework, previous findings, etc.).
+            task_plan: P-A1 serialized TaskPlan. When non-empty, the engine
+                executes the plan as an isolated task pool (per-task focus,
+                failure isolation, per-task completion callback) instead of
+                the flat size-sorted file list. Empty/invalid plans fall back
+                to the historical flat path.
+            resume_completed_tasks: Task ids already completed in a prior
+                (interrupted) run — skipped on resume.
+            resume_findings: Serialized findings from those completed tasks,
+                merged into this result (checkpoint idempotency).
+            on_task_complete: Async callable ``(task_id, findings_payloads)``
+                invoked after each task completes (task-level checkpointing).
+            task_concurrency: Max tasks running concurrently in the pool.
             **options: Additional options.
 
         Returns:
@@ -327,6 +344,24 @@ class OpenCodeAgent(BaseEngine):
             # Reset per-scan runtime stats
             self._files_failed = 0
             self._files_processed = 0
+
+            # P-A1: attack-surface taskified execution when a non-empty plan
+            # was supplied (an explicit ``files`` override always wins, since
+            # it means the caller already decided the analysis surface).
+            plan = self._parse_task_plan(task_plan)
+            if plan is not None and not plan.is_empty and not files:
+                return await self._scan_with_tasks(
+                    result=result,
+                    source_path=source_path,
+                    language=language,
+                    plan=plan,
+                    context=context or {},
+                    severity_filter=severity_filter,
+                    resume_completed_tasks=resume_completed_tasks or [],
+                    resume_findings=resume_findings or [],
+                    on_task_complete=on_task_complete,
+                    task_concurrency=task_concurrency,
+                )
 
             # Find files to analyze
             if files:
@@ -396,6 +431,172 @@ class OpenCodeAgent(BaseEngine):
                 success=False,
                 error_message=f"Scan failed: {e}",
             )
+
+    # ------------------------------------------------------------------
+    # P-A1: attack-surface task pool execution
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_task_plan(task_plan: dict[str, Any] | None) -> Any | None:
+        """Deserialize a TaskPlan; anything invalid falls back to flat scan."""
+        if not task_plan:
+            return None
+        try:
+            from src.core.models.audit_task import TaskPlan
+
+            return TaskPlan.model_validate(task_plan)
+        except Exception as e:
+            _ast_cache_logger.warning(f"Invalid task_plan, falling back to flat scan: {e}")
+            return None
+
+    async def _scan_with_tasks(
+        self,
+        result: ScanResult,
+        source_path: Path,
+        language: str | None,
+        plan: Any,
+        context: dict[str, Any],
+        severity_filter: list[SeverityLevel] | None,
+        resume_completed_tasks: list[str],
+        resume_findings: list[dict[str, Any]],
+        on_task_complete: Any | None,
+        task_concurrency: int,
+    ) -> ScanResult:
+        """Execute the plan as a bounded task pool.
+
+        - Per-task focus: each task audits its own file set with its own
+          ``vulnerability_focus`` (gate-filtered by the planner).
+        - Failure isolation: one failed task is logged and marked ``failed``;
+          the remaining tasks (and the sweep) still run.
+        - Task-level checkpointing: ``on_task_complete`` fires after every
+          task so the orchestrator can persist mid-engine progress.
+        - Bounded volume: the unassigned sweep only consumes the leftover
+          ``max_files`` budget, so total files never exceed the flat path.
+        """
+        all_findings: list[Finding] = []
+
+        # Merge partial findings from checkpointed completed tasks (idempotent
+        # resume — completed tasks themselves are skipped below).
+        restored = 0
+        for raw in resume_findings or []:
+            try:
+                all_findings.append(Finding.model_validate(raw))
+                restored += 1
+            except Exception:
+                continue
+
+        completed = set(resume_completed_tasks or [])
+        pending = [t for t in plan.tasks if t.task_id not in completed]
+        semaphore = asyncio.Semaphore(max(1, task_concurrency))
+        task_stats: list[dict[str, Any]] = []
+
+        async def _run_one(task: Any) -> None:
+            async with semaphore:
+                task_files = [source_path / f for f in task.files]
+                task_context = dict(context)
+                task_context["audit_task"] = task.describe()
+                findings = await self._analyze_files(
+                    files=task_files,
+                    source_path=source_path,
+                    language=language,
+                    vulnerability_focus=task.vulnerability_focus or None,
+                    context=task_context,
+                )
+                for finding in findings:
+                    finding.metadata.setdefault("task_id", task.task_id)
+                task.status = "completed"
+                task_stats.append(
+                    {
+                        "task_id": task.task_id,
+                        "name": task.name,
+                        "status": "completed",
+                        "files": len(task.files),
+                        "findings": len(findings),
+                    }
+                )
+                all_findings.extend(findings)
+                if on_task_complete is not None:
+                    try:
+                        await on_task_complete(
+                            task.task_id,
+                            [f.model_dump(mode="json") for f in findings],
+                        )
+                    except Exception as e:  # noqa: BLE001 — checkpoint is best-effort
+                        self.logger.warning(
+                            f"on_task_complete failed for {task.task_id} "
+                            f"(continuing): {e}"
+                        )
+
+        async def _run_one_safe(task: Any) -> None:
+            try:
+                await _run_one(task)
+            except Exception as e:  # noqa: BLE001 — failure isolation
+                task.status = "failed"
+                self._files_failed += len(task.files)
+                task_stats.append(
+                    {
+                        "task_id": task.task_id,
+                        "name": task.name,
+                        "status": "failed",
+                        "files": len(task.files),
+                        "findings": 0,
+                        "error": str(e),
+                    }
+                )
+                self.logger.warning(f"Task {task.task_id} failed (isolated): {e}")
+
+        if pending:
+            await asyncio.gather(*[_run_one_safe(t) for t in pending])
+
+        # Unassigned sweep: leftover budget only, generic focus.
+        files_in_tasks = sum(s["files"] for s in task_stats if s["status"] == "completed")
+        sweep_budget = max(0, self.max_files - files_in_tasks)
+        sweep_files = [source_path / f for f in plan.unassigned_files][:sweep_budget]
+        if sweep_files:
+            sweep_findings = await self._analyze_files(
+                files=sweep_files,
+                source_path=source_path,
+                language=language,
+                vulnerability_focus=None,
+                context=context,
+            )
+            for finding in sweep_findings:
+                finding.metadata.setdefault("task_id", "unassigned-sweep")
+            all_findings.extend(sweep_findings)
+
+        if severity_filter:
+            all_findings = [f for f in all_findings if f.severity in severity_filter]
+
+        for finding in all_findings:
+            result.add_finding(finding)
+
+        analyzed_paths = [f for t in plan.tasks if t.status == "completed" for f in t.files]
+        analyzed_paths += [str(f.relative_to(source_path)) for f in sweep_files]
+
+        return self.finalize_scan_result(
+            result,
+            success=True,
+            raw_output={
+                "files_analyzed": max(0, self._files_processed - self._files_failed),
+                "total_files": files_in_tasks + len(sweep_files),
+                "files_processed": self._files_processed,
+                "files_failed": self._files_failed,
+                "total_tokens": self._total_tokens,
+                "provider": str(self.llm.provider),
+                "model": self.llm.model,
+                "analyzed_file_paths": analyzed_paths,
+                "task_summary": {
+                    "tasks_total": len(plan.tasks),
+                    "tasks_completed": sum(1 for s in task_stats if s["status"] == "completed"),
+                    "tasks_failed": sum(1 for s in task_stats if s["status"] == "failed"),
+                    "tasks_skipped_resumed": len(completed & {t.task_id for t in plan.tasks}),
+                    "findings_restored_from_checkpoint": restored,
+                    "sweep_files": len(sweep_files),
+                    "tasks": task_stats,
+                },
+                "plan_meta": plan.planner_meta,
+            },
+        )
 
     def _should_skip_file(self, file_path: Path, source_path: Path) -> bool:
         """Check if a file should be skipped based on its relative path.

@@ -192,9 +192,16 @@ class TestWebCheckpointSinkSave:
         # Original summary key intact; resume_data added alongside.
         assert captured["data"]["findings"] == 5
         # P7-C6: resume_data now carries scan_results + completed_engines.
+        # Phase 20 P-A1: plus task-granular agent progress keys.
+        # Phase 20 resume fix: plus L1 products (tech_stack/attack_surface)
+        # so gate + deterministic task plan rebuild identically on resume.
         assert captured["data"]["resume_data"] == {
             "scan_results": [],
             "completed_engines": [],
+            "completed_agent_tasks": [],
+            "partial_agent_findings": [],
+            "tech_stack": {},
+            "attack_surface_report": None,
         }
 
 

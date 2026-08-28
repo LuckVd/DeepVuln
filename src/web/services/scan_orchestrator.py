@@ -121,6 +121,17 @@ class ScanOrchestrator:
         # P3: agent is_suspicious entries pulled out of the reportable set,
         # kept here (as dicts) for manual review instead of being persisted.
         self._suspicious_review_queue: list[dict] = []
+        # Phase 20 P-A2: gate-not-applicable findings pulled out of the
+        # reportable set (same review-queue pattern as P3 suspicious).
+        self._gated_review_queue: list[dict] = []
+        # Phase 20 P-A2: per-class applicability verdicts (evaluated lazily
+        # once per scan in _build_engine_options).
+        self.gate_report: Any = None
+        # Phase 20 P-A1: task-level checkpoint state for the agent engine —
+        # completed task ids + their serialized findings, persisted in
+        # resume_data after every task (mid-engine checkpoint).
+        self._completed_agent_tasks: list[str] = []
+        self._partial_agent_findings: list[dict] = []
         self.adjudication_summary: Optional[Dict[str, Any]] = None
 
         # Statistics
@@ -185,6 +196,16 @@ class ScanOrchestrator:
                         details[name]["files_analyzed"] = result.raw_output.get("files_analyzed", 0)
                         details[name]["agent_total_files"] = result.raw_output.get("total_files", 0)
                         details[name]["analyzed_file_paths"] = result.raw_output.get("analyzed_file_paths", [])
+                        # Phase 20 P-A1 transparency: task pool statistics.
+                        if result.raw_output.get("task_summary"):
+                            details[name]["task_summary"] = result.raw_output["task_summary"]
+            # Phase 20 P-A2 transparency: per-class applicability verdicts.
+            gate = self.gate_report
+            if gate is not None:
+                details["applicability_gate"] = {
+                    "gated_classes": gate.gated_classes(),
+                    "decisions": [d.to_dict() for d in gate.decisions],
+                }
             ctx.extra["per_engine_details"] = details
 
         async def _exploit(_ctx: ScanContext, _pl: ScanPipeline) -> None:
@@ -337,6 +358,13 @@ class ScanOrchestrator:
                     )
         except Exception as e:
             logger.warning(f"Checkpoint load failed for scan {self.scan_id}: {e}")
+
+        # Phase 20 resume fix: on a resumed scan _prepare_source is skipped,
+        # so source_path would stay the raw constructor str and engines would
+        # crash on Path operations (e.g. source_path.exists()). Normalize it
+        # once, before any phase runs.
+        if self.source_path is not None and not isinstance(self.source_path, Path):
+            self.source_path = Path(str(self.source_path))
 
         # Set scan configuration for progress callback
         # This enables dynamic weight calculation for optional phases
@@ -588,6 +616,22 @@ class ScanOrchestrator:
         return {
             "scan_results": self._serialize_scan_results(),
             "completed_engines": sorted(self._completed_engines),
+            # Phase 20 P-A1: task-granular agent progress (optional keys —
+            # checkpoints written before this feature simply lack them).
+            "completed_agent_tasks": list(self._completed_agent_tasks),
+            "partial_agent_findings": list(self._partial_agent_findings),
+            # Phase 20 resume fix: L1 products needed to rebuild the gate and
+            # the deterministic task plan on a resumed orchestrator (the L1
+            # phase itself is skipped on resume, leaving these unset).
+            "tech_stack": {
+                k: v for k, v in (self.tech_stack or {}).items()
+                if k != "_full_stack"
+            },
+            "attack_surface_report": (
+                self.attack_surface_report_obj.model_dump(mode="json")
+                if self.attack_surface_report_obj is not None
+                else None
+            ),
         }
 
     async def _save_engine_checkpoint(self, engine_name: str) -> None:
@@ -622,6 +666,37 @@ class ScanOrchestrator:
             if isinstance(completed, list):
                 restored_engines = set(self.scan_results.keys())
                 self._completed_engines = set(completed) & restored_engines
+            # Phase 20 P-A1: task-granular agent progress. Optional keys —
+            # older checkpoints without them restore as empty (no migration).
+            agent_tasks = resume_data.get("completed_agent_tasks") or []
+            partial_findings = resume_data.get("partial_agent_findings") or []
+            if "agent" not in self._completed_engines:
+                if isinstance(agent_tasks, list):
+                    self._completed_agent_tasks = [str(t) for t in agent_tasks]
+                if isinstance(partial_findings, list):
+                    self._partial_agent_findings = list(partial_findings)
+                if self._completed_agent_tasks:
+                    logger.info(
+                        f"checkpoint: restored {len(self._completed_agent_tasks)} "
+                        f"completed agent task(s), "
+                        f"{len(self._partial_agent_findings)} partial finding(s)"
+                    )
+            # Phase 20 resume fix: restore L1 products so the applicability
+            # gate and the deterministic task plan rebuild identically.
+            restored_ts = resume_data.get("tech_stack")
+            if isinstance(restored_ts, dict) and restored_ts and not self.tech_stack:
+                self.tech_stack = dict(restored_ts)
+            restored_as = resume_data.get("attack_surface_report")
+            if (
+                isinstance(restored_as, dict)
+                and self.attack_surface_report_obj is None
+            ):
+                try:
+                    self.attack_surface_report_obj = AttackSurfaceReport.model_validate(
+                        restored_as
+                    )
+                except Exception as exc:
+                    logger.warning(f"checkpoint: attack surface restore failed: {exc}")
         except Exception as exc:
             logger.warning(f"checkpoint: state restore failed: {exc}")
 
@@ -992,7 +1067,20 @@ class ScanOrchestrator:
         ``FIRST_COMPLETED`` so each engine is checkpointed the moment it
         finishes — a crash mid-batch then only re-runs the still-pending
         engines, not the whole batch (Tier1 gathered first).
+
+        Phase 20 resume fix: on a resume from engine_execution the
+        ENGINE_SELECTION phase is skipped, leaving ``engines`` empty — the
+        phase would previously complete as a no-op (0 findings, 0 tokens).
+        Re-select engines so the pending set (and P-A1 task-level resume
+        inside the agent engine) can actually run.
         """
+        if not engines:
+            engines = await self._select_engines()
+            if engines:
+                logger.info(
+                    f"Scan {self.scan_id}: engine_execution re-selected engines "
+                    f"{list(engines)} (resume path)"
+                )
         # P7-C6: skip engines already completed on a prior (interrupted) run.
         # Their results were restored into scan_results from the checkpoint.
         pending = {
@@ -1106,6 +1194,104 @@ class ScanOrchestrator:
 
         return result
 
+    def _evaluate_applicability_gate(self) -> Any:
+        """Evaluate the P-A2 applicability gate (once per scan, lazily).
+
+        Fail-open by construction: any error leaves ``gate_report`` as None
+        and every consumer treats None as "no gating".
+        """
+        if self.gate_report is not None:
+            return self.gate_report
+        if not self.config.get("applicability_gate", True):
+            return None
+        try:
+            from src.core.applicability_gate import evaluate_applicability
+
+            self.gate_report = evaluate_applicability(
+                tech_stack=self.tech_stack,
+                attack_surface=self.attack_surface_report_obj,
+                source_path=Path(str(self.source_path)),
+            )
+            gated = self.gate_report.gated_classes()
+            if gated:
+                logger.info(
+                    f"Scan {self.scan_id}: applicability gate gated classes: {gated}"
+                )
+            return self.gate_report
+        except Exception as e:
+            logger.warning(
+                f"Scan {self.scan_id}: applicability gate failed (fail-open): {e}"
+            )
+            return None
+
+    def _build_task_plan(self) -> Optional[Dict[str, Any]]:
+        """Build the P-A1 task plan from the gate + attack surface.
+
+        Returns None whenever taskification should not run (gate disabled,
+        planner error, empty plan) — the agent engine then keeps its flat
+        behaviour, which also keeps the mini benchmark byte-identical.
+        """
+        if self.attack_surface_report_obj is None:
+            return None
+        try:
+            from src.layers.l1_intelligence.attack_surface.task_planner import (
+                TaskPlanner,
+            )
+
+            gate = self._evaluate_applicability_gate()
+            planner = TaskPlanner(
+                attack_surface=self.attack_surface_report_obj,
+                gate_report=gate,
+                tech_stack=self.tech_stack,
+                max_tasks=int(self.config.get("max_tasks", 8)),
+            )
+            plan = planner.plan(Path(str(self.source_path)))
+            if plan.is_empty:
+                return None
+            return plan.model_dump(mode="json")
+        except Exception as e:
+            logger.warning(
+                f"Scan {self.scan_id}: task planning failed (flat fallback): {e}"
+            )
+            return None
+
+    async def _on_agent_task_complete(
+        self, task_id: str, findings_payloads: list[dict]
+    ) -> None:
+        """Task-level checkpoint callback (P7-C6 granularity, inside agent).
+
+        Records the task as completed and snapshots resume_data so a crash
+        mid-agent-phase resumes with the finished tasks skipped and their
+        findings intact ("失败也推进检查点", the Codebuddy lesson).
+        """
+        if task_id not in self._completed_agent_tasks:
+            self._completed_agent_tasks.append(task_id)
+        self._partial_agent_findings.extend(findings_payloads or [])
+        try:
+            # Same payload contract as _save_engine_checkpoint: the
+            # resume_data snapshot must ride along, otherwise the checkpoint
+            # is written with an empty resume_data and resume loses the
+            # completed tasks, their findings, and the L1 products.
+            await self._save_checkpoint_phase(
+                "engine_execution",
+                {
+                    "task_progress": {
+                        "completed_tasks": len(self._completed_agent_tasks),
+                        "last_completed": task_id,
+                    },
+                    "resume_data": self._serialize_resume_data(),
+                },
+            )
+            logger.info(
+                f"Scan {self.scan_id}: task checkpoint saved "
+                f"({len(self._completed_agent_tasks)} tasks done, "
+                f"{len(self._partial_agent_findings)} partial findings)"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Scan {self.scan_id}: task checkpoint save failed (continuing): {e}"
+            )
+
     async def _build_engine_options(
         self, name: str, engine: BaseEngine
     ) -> Dict[str, Any]:
@@ -1122,6 +1308,18 @@ class ScanOrchestrator:
             # nothing — the Web main path returned 0 findings because this was
             # missing (the CLI path worked only because it set rule sets itself).
             options["use_auto_config"] = True
+            # Phase 20 fix: the Web path never passed the attack surface, so
+            # RuleGatingEngine silently ran fail-open without surface info.
+            if self.attack_surface_report_obj is not None:
+                options["attack_surface"] = self.attack_surface_report_obj
+
+            # P-A2 convergence point: gate-not-applicable rule keywords merge
+            # into the existing RuleGating exclusion list (extend, not replace).
+            gate = self._evaluate_applicability_gate()
+            if gate is not None:
+                keywords = gate.disabled_rule_keywords()
+                if keywords:
+                    options["extra_disabled_rule_ids"] = keywords
 
             # Framework-aware rule selection
             frameworks = self.tech_stack.get("frameworks", [])
@@ -1187,6 +1385,24 @@ class ScanOrchestrator:
             frameworks = self.tech_stack.get("frameworks", [])
             if frameworks:
                 options["detected_frameworks"] = frameworks
+
+            # Phase 20 P-A1: attack-surface taskified audit. Only when the
+            # gate + planner produce a non-empty plan; otherwise the engine's
+            # flat path runs exactly as before (auto-fallback).
+            if self.config.get("task_split", True):
+                plan = self._build_task_plan()
+                if plan is not None and plan.get("tasks"):
+                    options["task_plan"] = plan
+                    options["resume_completed_tasks"] = list(self._completed_agent_tasks)
+                    options["resume_findings"] = list(self._partial_agent_findings)
+                    options["on_task_complete"] = self._on_agent_task_complete
+                    options["task_concurrency"] = int(
+                        self.config.get("task_concurrency", 2)
+                    )
+                    logger.info(
+                        f"Scan {self.scan_id}: agent task plan active "
+                        f"({len(plan['tasks'])} tasks)"
+                    )
 
         elif name == "ast":
             # AST engine benefits from knowing the primary language
@@ -1473,20 +1689,51 @@ class ScanOrchestrator:
         the scan config, they are pulled out of adjudication and kept in the
         agent engine's metadata for manual review instead of being reported.
 
+        Phase 20 P-A2: findings whose vulnerability class the applicability
+        gate marked not-applicable (``metadata["gate_suppressed"]`` set by
+        ``_apply_gate_suppression``) are pulled out the same way, with their
+        own escape hatch (``include_gated_findings``).
+
         Returns:
             (main_findings, review_findings). ``main_findings`` is empty when
             every finding is review-only.
         """
-        if self.config.get("include_suspicious_findings", False):
-            return findings, []
         main: list[Finding] = []
         review: list[Finding] = []
+        include_suspicious = self.config.get("include_suspicious_findings", False)
+        include_gated = self.config.get("include_gated_findings", False)
         for finding in findings:
-            if finding.metadata and finding.metadata.get("is_suspicious"):
+            metadata = finding.metadata or {}
+            if metadata.get("is_suspicious") and not include_suspicious:
+                review.append(finding)
+            elif metadata.get("gate_suppressed") and not include_gated:
                 review.append(finding)
             else:
                 main.append(finding)
         return main, review
+
+    def _apply_gate_suppression(self, findings: list[Finding]) -> None:
+        """Mark P-A2 gate-not-applicable findings in place (pre-partition).
+
+        Only classes with explicit high-confidence negative evidence are
+        suppressed; the matched class + reason land in ``metadata`` so the
+        suppression is auditable rather than silent.
+        """
+        gate = self.gate_report
+        if gate is None:
+            return
+        gated_classes = gate.gated_classes()
+        if not gated_classes:
+            return
+        from src.core.applicability_gate import finding_matches_gated_class
+
+        for finding in findings:
+            match = finding_matches_gated_class(finding.rule_id, gated_classes)
+            if match:
+                finding.metadata["gate_suppressed"] = (
+                    f"applicability gate: class '{match}' not applicable"
+                )
+                finding.metadata["gate_class"] = match
 
     async def _run_adjudication(self) -> dict[str, int]:
         """Run deduplication and adjudication on findings (P14-03).
@@ -1501,16 +1748,32 @@ class ScanOrchestrator:
         for engine_name, scan_result in self.scan_results.items():
             all_findings.extend(scan_result.findings)
 
+        # Phase 20 P-A2: mark gate-not-applicable findings before partition.
+        # This runs lazily once more here so suppression also works when
+        # _build_engine_options never ran (e.g. resume skipped engines).
+        self._evaluate_applicability_gate()
+        self._apply_gate_suppression(all_findings)
+
         # P3: keep agent low-confidence suspicious entries out of the
         # reportable set (kept in self._suspicious_review_queue for review).
         main_findings, review_findings = self._split_review_queue(all_findings)
         if review_findings:
-            self._suspicious_review_queue = [f.to_dict() for f in review_findings]
-            logger.info(
-                f"P3: moved {len(review_findings)} is_suspicious entries "
-                f"to review queue (config include_suspicious_findings="
-                f"{self.config.get('include_suspicious_findings', False)})"
-            )
+            suspicious = [f for f in review_findings if (f.metadata or {}).get("is_suspicious")]
+            gated = [f for f in review_findings if (f.metadata or {}).get("gate_suppressed")]
+            self._suspicious_review_queue = [f.to_dict() for f in suspicious]
+            self._gated_review_queue = [f.to_dict() for f in gated]
+            if suspicious:
+                logger.info(
+                    f"P3: moved {len(suspicious)} is_suspicious entries "
+                    f"to review queue (config include_suspicious_findings="
+                    f"{self.config.get('include_suspicious_findings', False)})"
+                )
+            if gated:
+                logger.info(
+                    f"P-A2: moved {len(gated)} gate-not-applicable findings "
+                    f"to review queue (config include_gated_findings="
+                    f"{self.config.get('include_gated_findings', False)})"
+                )
         all_findings = main_findings
 
         if not all_findings:

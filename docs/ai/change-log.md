@@ -2,6 +2,29 @@
 
 ## 2026-08-28
 
+### Phase 20 — P-A1 攻击面任务化 + P-A2 Gate 适用性门控（Codebuddy 借鉴落地）✅
+
+- **范围决议**: 只做 P-A1/P-A2；P-A3（进程隔离复核）决议**不做**——现有 attacker/defender/arbiter 三角色辩论 + VerificationGatekeeper 已覆盖；P-A4（自动补丁 Diff）不排期
+- **新增** `src/core/models/audit_task.py`: RiskVerb / AuditTask / TaskPlan（与 Finding.rule_id 同一套漏洞分类学）
+- **新增** `src/core/applicability_gate.py`: ApplicabilityGate —— 三类确定性信号（攻击面 + 技术栈 + ≤500 文件轻量探针）逐漏洞类判定适用性；**fail-open**（confidence<0.7 或攻击面数据缺失 → 不确定即放行）；`CLASS_RULE_KEYWORDS` 是与 semgrep 规则门控的唯一汇合点；`finding_matches_gated_class` 按 rule_id 归类 finding
+- **新增** `src/layers/l1_intelligence/attack_surface/task_planner.py`: TaskPlanner —— 入口点按模块（1–2 级目录）聚成 ≤max_tasks 个风险语义任务（`<模块>-<风险动词>`）；gate 裁剪 focus；**三重兜底**（零入口点/无文件/覆盖率<30% → 空 plan 走扁平路径，mini 行为不变）；**绝对路径归一化**（检测器 entry.file 为绝对路径的回归修复）
+- **改造** `opencode_agent.py`: 任务池执行（semaphore 默认 2）+ 单任务 try/except 失败隔离 + per-task `vulnerability_focus`（复用既有 prompt 聚焦管线）+ finding `metadata["task_id"]` 打标 + `on_task_complete` 回调 + resume（跳过已完成任务、并入部分结果，幂等）+ unassigned sweep 受全局 max_files 总闸
+- **改造** `scan_orchestrator.py`: gate/plan 构建接线；**任务级 checkpoint**（`on_task_complete` → resume_data 快照：completed_agent_tasks + partial_agent_findings + tech_stack + attack_surface_report）；gate 压制并入 P3 式审查队列（`include_gated_findings` 逃生阀）；gate_summary/task_summary 进 per_engine_details
+- **配置** `ScanConfig`: `task_split=True` / `task_concurrency=2` / `max_tasks=8` / `applicability_gate=True` / `include_gated_findings=False`
+- **顺带修复（含 2 个既有 bug）**:
+  1. Web 路径 `_build_engine_options` semgrep 分支漏传 `attack_surface` —— RuleGating 一直 fail-open 空转
+  2. **resume 后引擎空跑**（既有）: engine_selection 被跳过 → `ctx.extra["engines"]` 为空 → engine_execution 零执行。修复 `_execute_engines` 空字典时重新 `_select_engines`
+  3. **resume 后 source_path 保持 str**（既有）: `_prepare_source` 被跳过 → `engine.scan(str)` 崩 `'str' object has no attribute 'exists'`。修复 execute_scan 恢复路径统一 `Path()` 归一化
+- **任务级续扫端到端验证**（多模块合成靶场 3×Flask 模块）: 中途 SIGKILL worker → resume → 任务计划确定性重建 → 已完成任务跳过（只跑剩余任务，16s/4.4K tokens vs 全跑 ~50s/12K）→ 3 findings 无重复（2 个从 checkpoint 恢复 + 1 个续扫检出）
+- **测试**: 新增 4 组单测共 82 个（gate / planner / agent 任务池 / 编排器 checkpoint，含 resume_data 契约更新）；`tests/unit` 全量对比干净基线逐项一致（剩余失败均为既有环境问题），无回归
+- **第四轮 mini 基线（run5，P-A1/P-A2 生效后）**: `benchmarks/results/run5_mini/report.json`，conf>=0 口径 **TP=9 FP=11(safe:0) FN=0 P=0.45 R=1.000 F1=0.621**；三语言 recall 均 1.0；token **105,960**（9 例，vs run4 109.2K，**-2.9%**）
+  - FP 构成: agent 5（py-eval sql+cmdi / go-ssrf cmdi+sql / java-sqli **xss**）+ semgrep 5 + ast 1；py-eval 4 条与 go-ssrf 6 条与 run4 完全同构
+  - **新增 1 条 FP（vs run4 记录口径 FP=10）**: java-sqli case 上 agent 报 `cross_site_scripting` —— 根因：任务聚焦把 xss 加入 servlet 模块 focus（HTTP 面默认全动词展开），servlet 天然带 HTML 输出诱导 agent 配合焦点报告。**列为 N7**: focus 证据门槛（xss 仅在 xss 信号命中时进入 focus），暂不实施——静态探针难以区分"有 HTML 输出"与"用户输入拼进 HTML"，有误伤真实 xss 检出的风险
+  - 口径备注: 盘上 `run4_mini/report.json`（14:08 重聚合版）与 change-log 记录的 run4 数字（FP=10）不一致（盘上 FP=14、engine 字段缺失），对比时以 change-log 记录为准
+- **Commit**: 见当次提交
+
+## 2026-08-28
+
 ### 方案对标文档 — Codebuddy Security vs DeepVuln ✅
 
 - **背景**: 用户提供腾讯 Codebuddy Security 逆向调研报告（2026-08-06 webf1 实测：威胁建模切 5 模块任务 → 三引擎并行 → 独立进程对抗审查 → 交叉验证 → 自动补丁，~610K token/次），要求与本项目对比

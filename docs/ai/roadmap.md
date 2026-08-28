@@ -2001,6 +2001,8 @@ incremental_stats: Optional[JSON]       # 增量扫描统计
 |Phase 16|Web 前端重构|赛博朋克风格 UI + 自建组件库 + 国际化 + 流式交互|done|2026-04|
 |Phase 17|LLM 配置管理|多配置支持 + UI 管理|done|2026-04|
 |Phase 18|配置系统迁移|移除 config.local.toml，配置迁移到数据库|done|2026-04-11|c87a0c6|
+|Phase 19|检测基准与评测|mini 基准（9 case）+ P/R/F1 报告 + 跨 run 对比 + checkpoint worker 修复|done|2026-08-28|
+|Phase 20|攻击面任务化 + Gate 门控|P-A1 任务池切分 + P-A2 适用性门控 + 任务级 checkpoint 续扫（P-A3/P-A4 决议不做）|done|2026-08-28|
 
 ---
 
@@ -2094,3 +2096,5 @@ incremental_stats: Optional[JSON]       # 增量扫描统计
 |Phase 16|Web 前端重构|赛博朋克风格 UI + 自建组件库 + 国际化 + 流式交互|done|2026-04|
 |Phase 17|LLM 配置管理|多配置支持 + UI 管理|done|2026-04|
 |Phase 18|配置系统迁移|移除 config.local.toml，配置迁移到数据库|done|2026-04-11|c87a0c6|
+|Phase 19|检测基准与评测|mini 基准（9 case）+ P/R/F1 报告 + 跨 run 对比 + checkpoint worker 修复|done|2026-08-28|
+|Phase 20|攻击面任务化 + Gate 门控|P-A1 任务池切分 + P-A2 适用性门控 + 任务级 checkpoint 续扫（P-A3/P-A4 决议不做）|done|2026-08-28|
