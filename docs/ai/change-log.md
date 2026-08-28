@@ -2,6 +2,16 @@
 
 ## 2026-08-28
 
+### 方案对标文档 — Codebuddy Security vs DeepVuln ✅
+
+- **背景**: 用户提供腾讯 Codebuddy Security 逆向调研报告（2026-08-06 webf1 实测：威胁建模切 5 模块任务 → 三引擎并行 → 独立进程对抗审查 → 交叉验证 → 自动补丁，~610K token/次），要求与本项目对比
+- **产出**: `docs/ai/benchmark-vs-codebuddy.md` —— 八维对比（编排/AI 组织/对抗审查/裁决/检查点/成本/失败处理/评测）+ 互相借鉴清单 + 结论
+- **核心结论**: ① Codebuddy = 攻击面切片成任务池（并行/隔离/续跑）；DeepVuln = 四轮多角色状态机；② Codebuddy 用置信度+进程隔离复核信任 AI，DeepVuln 用证据门硬门槛+三角色辩论；③ 基准闭环（P/R/F1）为 DeepVuln 独有优势
+- **新借鉴项（供排期）**: P-A1 攻击面任务化切分 / P-A2 Gate 适用性门控 / P-A3 独立进程对抗复核 / P-A4 自动补丁 Diff 阶段
+- **Commit**: 见当次提交
+
+## 2026-08-28
+
 ### 第三轮 mini 基线（run4）— P19+P2 联合验证 + N5 checkpoint 修复 ✅
 
 - **环境**: 重启 uvicorn + celery worker 加载全部新代码（P1/P2/P3/P4/P19 + deepseek-v4-flash）；9 case 全跑（scan 31-41）
