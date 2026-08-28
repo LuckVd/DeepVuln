@@ -52,6 +52,19 @@ noise_rule_cut:
   date: "2026-08-28"
   description: "semgrep NOISE_RULE_SUBSTRINGS 剔除 use-tls/no-direct-write（run3 21 FP 中 10 个、零 TP）；go-ssrf 8→2 / go-sqli 7→2 / go-cmdi 4→1；预期 P 0.30→0.45、F1 0.462→~0.62"
 
+third_baseline:
+  date: "2026-08-28"
+  scenario: "重启 uvicorn+celery 加载全部新代码（P1/P2/P3/P4/P19 + deepseek-v4-flash），run4 9 case 全跑"
+  results:
+    conf_0.0: {tp: 9, fp: 10, fn: 0, precision: 0.474, recall: 1.000, f1: 0.643}
+  report: "benchmarks/results/run4_mini/report.json"
+  tokens: "9 例主线扫描 tokens_used 合计 ≈109.2K；30 次 LLM 调用、0 错误（另 2 例重复扫描 ~28K 已取消）"
+  vs_second_baseline: "FP 21→10（超预期 11）、P 0.300→0.474、F1 0.462→0.643（超预期 ~0.62）；R 恒 1.0、safe 零 FP"
+  p19_effect: "semgrep FP 15→5（use-tls/no-direct-write 10 条全灭）"
+  p2_effect: "入口层量化生效：semgrep finding is_entry_point=true/HTTP_SAME_FILE、reachability 维度 1.00；sink 层未达预期：taint 0.00 → exploitability 仍全 not_exploitable（转 N6）"
+  residual_fp: "10 = agent 4（跨类型 sql_injection×2/command_injection×2）+ semgrep 5（tainted-url-host×2/tainted-sql-string×2/dangerous-exec×1）+ ast_engine 1（dangerous_os_system），全为 vuln 文件其他类型误报"
+  incident: "benchmark 双进程并发导致重复 case 扫描（scan 32/34）——已保留单进程、cancel 34，不影响报告口径"
+
 open_issues:
   - id: "P1"
     issue: "Semgrep --config auto 产 0 findings"
@@ -98,11 +111,12 @@ implementation_steps:
   - "P4 java-cmdi + LLM 模型迁移 deepseek-v4-flash（ox-alpha-free 下线 401）✅ d6fe649"
   - "P19 semgrep 噪声规则剔除（use-tls/no-direct-write，run3 10/21 FP）✅ d987d4e"
   - "P2 CPG 可达性：入口层（UTF-8 错位+Servlet）✅ 9237732 + sink 层（白名单+语言专属 pattern）✅ c8f72ee"
-  - "N1 第三轮 mini 基线（重启服务后重跑，验证全修复联合收益；预期 FP 21→11、F1 0.46→~0.62、exploitability 部分可达）"
+  - "N1 第三轮 mini 基线 ✅ run4：FP 21→10、F1 0.643（超预期 ~0.62）、R 1.0；P19/P2 入口层量化生效；P2 sink/taint 维度未生效（转 N6）"
+  - "N5 worker checkpoint init_db 修复 ✅（_execute_scan_async 幂等初始化共享 session 工厂；冒烟扫描 0 报错）"
   - "N2 扩 OWASP 子集 150 例"
-  - "N3 残余 FP 类型校准（agent 跨类型高置信误报）"
+  - "N3 残余 FP 类型校准（agent 跨类型高置信误报 4 条 + semgrep 通用规则残留 5 条）"
   - "N4 sink 词表随 owasp 11 类扩展"
-  - "N5 worker checkpoint 'Database not initialized'（沙箱 env，不影响主流程）"
+  - "N6 CPG 攻击路径接入 exploitability taint 维度（get_attack_paths ↔ trace_from_sink 打通；当前 taint 0.00 → rating 全 not_exploitable）"
 
 sync_status: "not_synced"
 last_check_at: "2026-08-28"

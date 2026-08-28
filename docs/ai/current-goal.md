@@ -1,11 +1,11 @@
 # Current Goal
 
-> **状态**: ✅ 已立项（2026-08-26）— Phase 19 执行中；**P1–P4 开放问题全部修复关闭 + P19 噪声裁剪 + 第二轮 mini 基线（Recall 100% / safe 零 FP）**
+> **状态**: ✅ 已立项（2026-08-26）— Phase 19 执行中；**P1–P4 全部修复关闭 + P19 噪声裁剪 + 第三轮 mini 基线落档（FP 21→10 / F1 0.46→0.643 / Recall 100%）+ N5 checkpoint 修复**
 >
 > **Goal ID**: phase19-benchmark-eval
 > **创建日期**: 2026-08-26
 > **上一 goal**: Phase 18 — 精度链路接通与多语言可达性补齐（✅ 2026-08-25 关闭）
-> **当前执行**: P1/P3/P4 ✅ + P2 ✅（入口层+ sink 层，三语言攻击路径全通）+ P19 ✅（semgrep 噪声规则剔除）→ **下一步：重启服务跑第三轮 mini 基线，验证全修复联合收益，然后扩 owasp-subset 150 例**
+> **当前执行**: P1/P3/P4 ✅ + P2 ✅（入口层生效；sink/taint 维度留 N6）+ P19 ✅ + **N1 第三轮基线 ✅（run4）** + **N5 ✅（worker init_db）** → **下一步：N2 扩 owasp-subset 150 例（75/75，11 类）验证泛化**
 
 ---
 
@@ -39,6 +39,13 @@
    总 token: **135,273**（27 次 LLM 调用，0 失败）；对比首轮（conf>=0）：TP 8→9（FN 清零）、safe-FP 26→0（P3）、R 0.889→1.0、P 0.235→0.300、F1 0.372→0.462。残余 FP 21 全为 vuln 文件上其他类型（agent 跨类型 + semgrep 通用规则——后者已被 P19 剔除）。
 6. **P19 噪声裁剪**: semgrep `use-tls`/`no-direct-write-to-responsewriter` 默认剔除（run3 的 10/21 FP、零 TP）；引擎级验证 go-ssrf 8→2、go-sqli 7→2、go-cmdi 4→1。预期第三轮 FP 21→11、F1 0.46→~0.62。
 7. **P2 全链路（入口 + sink 两层）**: 三语言攻击路径全通——java `doGet→exec`、py `ping_host→system`、go `cmdiVulnHandler/ssrfVulnHandler/sqliVulnHandler→sink`（此前全 0，exploitability 全 not_exploitable）。
+8. **第三轮 mini 基线**（run4，9 case 全跑完，重启加载全部新代码 P1/P2/P3/P4/P19 + deepseek-v4-flash）:
+   | conf>= | TP | FP | FN | P | R | F1 |
+   |---|---|---|---|---|---|---|
+   | 0.0 | 9 | 10 | 0 | 0.474 | **1.000** | **0.643** |
+
+   对比第二轮（run3，同 conf>=0 口径）：FP 21→**10**（超出预期 11）、P 0.300→0.474（+58%）、F1 0.462→0.643（超出预期 ~0.62）；R 恒 1.0、safe 零 FP 保持。**P19 量化生效**（semgrep FP 15→5，use-tls/no-direct-write 10 条全灭）；**P2 入口层量化生效**（semgrep finding 出现 `is_entry_point=true/HTTP_SAME_FILE`、reachability 维度 1.00，此前 0.10/无）；**P2 sink 层未达预期** → exploitability 仍全 not_exploitable（taint 维度 0.00，trace_from_sink 未连通三语言攻击路径）→ 新增 N6。Token：9 例主线 ≈109.2K（30 次 LLM 调用，0 错误；另 2 例重复扫描 ~28K 已取消）。残余 10 FP：agent 4（跨类型 sql_injection×2/command_injection×2）+ semgrep 5（tainted-url-host×2/tainted-sql-string×2/dangerous-exec×1）+ ast 1 —— 全为 vuln 文件其他类型误报（N3 方向）。
+9. **N5 checkpoint 修复**: worker 进程从未 `init_db()` → `checkpoint_service.get_session_local()` 抛 "Database not initialized"。修复 `src/web/tasks/scan_tasks.py`：`_execute_scan_async` 内 try `get_session_local()` except RuntimeError → `await init_db(db_settings.url)`（幂等）。验证：冒烟扫描（scan 42）全程 0 checkpoint 报错，日志出现 "Cleaned checkpoint for scan 42"。
 
 ### 开放问题状态（P1–P4 全部关闭）
 
@@ -53,11 +60,12 @@
 
 | # | 项 | 说明 |
 |---|---|---|
-| N1 | **第三轮 mini 基线** | 重启服务加载全部新代码后重跑 run3 版数字，量化 P19 噪声裁剪（FP 21→11）+ P2 全链路（exploitability 不再是全 not_exploitable）联合收益 |
+| ~~N1~~ | ~~第三轮 mini 基线~~ | ✅ **已跑（run4）2026-08-28**：FP 21→10（超预期 11）、F1 0.462→0.643（超预期 ~0.62）、R 恒 1.0、safe 零 FP。P19 生效（semgrep FP 15→5）；P2 入口层生效（reachability 1.00/HTTP_SAME_FILE）；**P2 sink 层未达预期**（taint 0.00，exploitability 仍全 not_exploitable）→ 转 N6 |
 | N2 | **扩样本 owasp-subset** | 150 例（75正/75负、11 类）跑通后验证泛化；token 预估 1.5M–2M |
-| N3 | **残余 FP 类型校准** | 第二轮 FP 21 中 agent 跨类型高置信误报（如 ssrf 文件报 cmdi）；可做 finding 与调用点/入口类型的绑定过滤 |
+| N3 | **残余 FP 类型校准** | run4 的 10 FP 中 agent 跨类型占 4（ssrf 文件报 cmdi 等）；semgrep 残留 5 条通用规则（tainted-url-host 等）；可做 finding 与调用点/入口类型的绑定过滤 |
 | N4 | **sink 词表扩展** | CPG 语言专属 pattern 当前覆盖 exec/http/sql/template；随 owasp 11 类（crypto/deserialization 等）扩词表 |
-| N5 | **worker checkpoint 修复** | 本轮实际链路中 checkpoint_service 报 "Database not initialized"（沙箱 HOME 环境问题，不影响主流程结果） |
+| ~~N5~~ | ~~worker checkpoint 修复~~ | ✅ **已修复 2026-08-28**：worker 缺 init_db() → `_execute_scan_async` 内幂等初始化共享 session 工厂；冒烟扫描 0 报错 |
+| N6 | **CPG 攻击路径接入 exploitability taint 维度** | 新增（run4 暴露）：P2 的 CPG `get_attack_paths`（三语言攻击路径全通）与评分 taint 维度（`_taint_tracker.trace_from_sink`，call_graph 数据流）未打通——入口层量化生效（reachability 1.00）但 taint 0.00 → rating 仍 not_exploitable。目标：把 CPG 路径/taint 证据接到 `TaintTrackingScorer` 或让 trace_from_sink 复用语言专属 sink pattern |
 
 ### 环境备忘
 

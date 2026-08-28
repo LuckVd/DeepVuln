@@ -2,6 +2,23 @@
 
 ## 2026-08-28
 
+### 第三轮 mini 基线（run4）— P19+P2 联合验证 + N5 checkpoint 修复 ✅
+
+- **环境**: 重启 uvicorn + celery worker 加载全部新代码（P1/P2/P3/P4/P19 + deepseek-v4-flash）；9 case 全跑（scan 31-41）
+- **结果**（`benchmarks/results/run4_mini/report.json`，conf>=0 口径）: **TP=9 FP=10 FN=0 P=0.474 R=1.000 F1=0.643**（三语言 recall 均 1.0）
+- **对比第二轮（run3）**: FP 21→**10**（超预期 11）、P 0.300→0.474（+58%）、F1 0.462→**0.643**（超预期 ~0.62）；R 恒 1.0、safe 零 FP 保持
+  - **P19 量化生效**: semgrep FP 15→5——use-tls/no-direct-write 10 条噪声全灭
+  - **P2 入口层量化生效**: semgrep finding 出现 `is_entry_point=true / entry_point_type=HTTP_SAME_FILE`、reachability 维度 1.00（此前 0.10/无）
+  - **P2 sink 层未达预期**: taint 维度仍 0.00（`_taint_tracker.trace_from_sink` 未连通 doGet→exec 等三语言攻击路径）→ exploitability rating 仍全 not_exploitable → **新增 N6**（CPG get_attack_paths ↔ taint 维度打通）
+- **残余 10 FP 全是 vuln 文件其他类型误报**: agent 4（跨类型 sql_injection×2 / command_injection×2）+ semgrep 5（tainted-url-host×2 / tainted-sql-string×2 / dangerous-exec-command×1）+ ast_engine 1（dangerous_os_system）——N3 方向
+- **Token**: 9 例主线 ≈109.2K（DB tokens_used 合计）；30 次 LLM 调用、0 错误
+- **事故记录**: benchmark 曾并发双进程（重复 case 扫描 scan 32/34，浪费 ~28K token）——保留单进程、API cancel 34，报告口径不受影响
+- **N5 修复** `src/web/tasks/scan_tasks.py`: worker 进程从未 `init_db()` → `checkpoint_service.get_session_local()` 抛 "Database not initialized"（不是沙箱 HOME 问题，是共享 session 工厂未在 worker 初始化）。修复：`_execute_scan_async` 内 try `get_session_local()` except RuntimeError → `await init_db(db_settings.url)`（幂等）。验证：冒烟扫描（scan 42，35.6s）全程 **0 checkpoint 报错**，日志出现 "Cleaned checkpoint for scan 42"
+- **新增** `benchmarks/eval/compare_runs.py`: 跨 run 对比分析（P/R/F1 + FP 构成 engine/rule + CPG/exploitability 统计）
+- **Commit**: 见当次提交
+
+## 2026-08-28
+
 ### P2 收尾 — CPG 攻击路径三语言全通：sink 白名单补 Java 调用类型 + 语言专属 sink pattern ✅
 
 - **缺口 1（java 0 路径）**: `_find_sinks` 的 ast_type 白名单只有 `("call_expression","call")`（python/js 风格），**Java 的 `method_invocation`（Runtime.getRuntime().exec(...)）与 `object_creation_expression`（new ProcessBuilder(...)）被排除** → Java 的 exec 调用永远成不了 sink → BFS 无路可走。修复：`path_finder/finder.py` 白名单扩为 `_CALL_AST_TYPES = {call_expression, call, method_invocation, object_creation_expression}`。
