@@ -30,9 +30,12 @@ class JavaCPGProvider(BaseCPGProvider):
     def get_paths(
         self,
         source_path: Path,
-        sink_pattern: str = "exec|eval|Runtime|ProcessBuilder|ScriptEngine",
+        sink_pattern: str | None = None,
     ) -> list[AttackPath]:
         self.logger.debug(f"Building CPG for Java source: {source_path}")
+
+        if sink_pattern is None:
+            sink_pattern = "exec|eval|Runtime|ProcessBuilder|ScriptEngine"
 
         cpg = self._build_cpg(source_path, self.FILE_PATTERNS)
 

@@ -9,14 +9,14 @@ from pathlib import Path
 
 from src.core.logger.logger import get_logger
 from src.layers.l3_analysis.engines.ast_engine.cpg.base import LanguageCPGProvider
-from src.layers.l3_analysis.engines.ast_engine.cpg.providers.js_provider import (
-    JSCPGProvider,
-)
 from src.layers.l3_analysis.engines.ast_engine.cpg.providers.go_provider import (
     GoCPGProvider,
 )
 from src.layers.l3_analysis.engines.ast_engine.cpg.providers.java_provider import (
     JavaCPGProvider,
+)
+from src.layers.l3_analysis.engines.ast_engine.cpg.providers.js_provider import (
+    JSCPGProvider,
 )
 from src.layers.l3_analysis.engines.ast_engine.cpg.providers.python_provider import (
     PythonCPGProvider,
@@ -55,14 +55,18 @@ class CPGPathProvider:
     def get_attack_paths(
         self,
         source_path: Path,
-        sink_pattern: str = "eval|exec|system",
+        sink_pattern: str | None = None,
     ) -> list[AttackPath]:
         """
         Get attack paths from entry points to dangerous sinks.
 
         Args:
             source_path: Path to the source file or directory
-            sink_pattern: Regex pattern matching dangerous function names
+            sink_pattern: Regex pattern matching dangerous function names.
+                ``None`` (default) lets each language provider use its own
+                language-appropriate sink pattern (P19: a hard-coded unified
+                Python-only pattern used to obscure Java/Go sinks, e.g. Go's
+                http.Client SSRF sinks were invisible).
 
         Returns:
             List of AttackPath objects, sorted by confidence (highest first).

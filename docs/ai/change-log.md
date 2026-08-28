@@ -2,6 +2,15 @@
 
 ## 2026-08-28
 
+### P2 收尾 — CPG 攻击路径三语言全通：sink 白名单补 Java 调用类型 + 语言专属 sink pattern ✅
+
+- **缺口 1（java 0 路径）**: `_find_sinks` 的 ast_type 白名单只有 `("call_expression","call")`（python/js 风格），**Java 的 `method_invocation`（Runtime.getRuntime().exec(...)）与 `object_creation_expression`（new ProcessBuilder(...)）被排除** → Java 的 exec 调用永远成不了 sink → BFS 无路可走。修复：`path_finder/finder.py` 白名单扩为 `_CALL_AST_TYPES = {call_expression, call, method_invocation, object_creation_expression}`。
+- **缺口 2（go 全灭 + ssrf 0）**: ① `opencode_agent.py:582` 硬编码 Python 风格统一 pattern（`eval|exec|system|subprocess|os\.system|popen`）盖掉了各语言 provider 的专属默认——go 的 `http.Get/Client.Do`（SSRF）根本不在其内；② path_provider 默认值同样覆盖。修复：`get_attack_paths(sink_pattern=None)` → 各 provider 用**语言专属默认**（python/js 保留 `eval|exec|system`；java `exec|eval|Runtime|ProcessBuilder|ScriptEngine`；go 扩为 `exec|Command|Open|ReadFile|Template|HTML|gob|http\.Get|http\.Post|http\.NewRequest|\.Do\(|Client|db\.Query|QueryRow|\.Exec\(|\.Prepare\(`，sql 锚定 `db.` 防 `url.Query()` 假阳性）；agent 不再传统一 pattern。
+- **验证（真实引擎）**: java/cmdi `doGet→exec`、py/cmdi `ping_host→system`、go/cmdi、go/ssrf、go/sqli 全部出攻击路径（此前全 0）；新增 2 端到端测试（go ssrf http sink + go sql sink 防 url.Query 假阳性）；path_finder 37 + 相关回归 **223 passed / 4 skipped**；lint 干净（finder 2 处既有提示未动）。
+- **Commit**: 未提交（遵循不自动提交规则）
+
+## 2026-08-28
+
 ### P2 根因修复 — entry points 全灭的元凶：tree-sitter 字节/字符索引错位 + Java 缺 Servlet 识别 ✅（入口层修复）
 
 - **根因（惊悚但简单）**: 4 处 `_get_text` 用 `content[node.start_byte:node.end_byte]` 切字符串——`start_byte/end_byte` 是**字节**偏移，`content` 是 **str**（字符索引）。源码注释里只要出现一个多字节字符（如 em dash `—`），其后**所有**节点的文本就整体错位：方法名提取成 `'e\n    protecte'`、`'tp.Request) {\n\t'` 这类碎片 → `_check_entry_point` 永远匹配不上 → **攻击面与 call graph 双双 0 entry points → exploitability 全 not_exploitable**。go/java/py 三语言 mini 文件头部注释全含 `—`，全中招。

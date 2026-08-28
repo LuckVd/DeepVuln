@@ -32,7 +32,7 @@ class PythonCPGProvider(BaseCPGProvider):
     def get_paths(
         self,
         source_path: Path,
-        sink_pattern: str = "eval|exec|system",
+        sink_pattern: str | None = None,
     ) -> list[AttackPath]:
         """
         Get attack paths for Python source.
@@ -44,6 +44,9 @@ class PythonCPGProvider(BaseCPGProvider):
         Returns:
             List of AttackPath objects
         """
+        if sink_pattern is None:
+            sink_pattern = "eval|exec|system"
+
         self.logger.debug(f"Building CPG for Python source: {source_path}")
 
         # 1. Build CPG

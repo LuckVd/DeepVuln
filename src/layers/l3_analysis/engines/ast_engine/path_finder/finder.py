@@ -17,6 +17,13 @@ from src.layers.l3_analysis.engines.ast_engine.path_finder.models import (
     PathType,
 )
 
+# AST node types that represent a function call across supported languages:
+# python/js -> call_expression/call, java -> method_invocation /
+# object_creation_expression. (_find_sinks only inspects these.)
+_CALL_AST_TYPES = frozenset(
+    {"call_expression", "call", "method_invocation", "object_creation_expression"}
+)
+
 
 class AttackPathFinder(PathFinder):
     """
@@ -129,7 +136,13 @@ class AttackPathFinder(PathFinder):
         for node_id, node in cpg.nodes.items():
             # Check AST node for dangerous function calls
             if node.node_type == "ast_statement":
-                if node.ast_type in ("call_expression", "call"):
+                # P19/P2: the white-list must cover every language's call AST
+                # node type — python/js use call_expression/call, but Java
+                # emits method_invocation (Runtime.getRuntime().exec(...)) and
+                # object_creation_expression (new ProcessBuilder(...)); those
+                # were excluded, so Java sinks were invisible and attack-path
+                # analysis silently returned 0 paths.
+                if node.ast_type in _CALL_AST_TYPES:
                     name = node.metadata.get("ast_name", "")
                     # merge_ast_graph stores the source ASTNode under
                     # metadata["ast_node"]; fall back to its name when the

@@ -31,9 +31,21 @@ class GoCPGProvider(BaseCPGProvider):
     def get_paths(
         self,
         source_path: Path,
-        sink_pattern: str = "exec|Command|Open|ReadFile|Template|HTML|gob",
+        sink_pattern: str | None = None,
     ) -> list[AttackPath]:
         self.logger.debug(f"Building CPG for Go source: {source_path}")
+
+        # Command exec + file ops + template + SSRF-class HTTP client sinks +
+        # SQL sinks (P19: http.Get/Client.Do were missing, so SSRF projects
+        # reported "No sinks found matching pattern"; db.Query/QueryRow/
+        # Exec/Prepare cover SQLi — anchored to `db.` so url.Query() is not
+        # mistaken for a sink).
+        if sink_pattern is None:
+            sink_pattern = (
+                "exec|Command|Open|ReadFile|Template|HTML|gob|"
+                r"http\.Get|http\.Post|http\.NewRequest|\.Do\(|Client|"
+                r"db\.Query|QueryRow|\.Exec\(|\.Prepare\("
+            )
 
         cpg = self._build_cpg(source_path, self.FILE_PATTERNS)
 

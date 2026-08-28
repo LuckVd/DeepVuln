@@ -14,6 +14,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+# Global LLM concurrency manager - shared across all engines
+from src.core.llm import get_global_concurrency_manager
 from src.core.utils import JSONParseError, robust_json_loads
 from src.layers.l3_analysis.engines.base import BaseEngine, engine_registry
 from src.layers.l3_analysis.llm.client import (
@@ -35,9 +37,6 @@ from src.layers.l3_analysis.models import (
 from src.layers.l3_analysis.prompts.security_audit import (
     build_audit_prompt,
 )
-
-# Global LLM concurrency manager - shared across all engines
-from src.core.llm import get_global_concurrency_manager
 
 # Default models for each provider
 DEFAULT_MODELS = {
@@ -576,10 +575,13 @@ class OpenCodeAgent(BaseEngine):
                 cpg_paths = None
                 if self.cpg_provider:
                     try:
-                        # Get attack paths from CPG analysis
+                        # Get attack paths from CPG analysis. No sink_pattern
+                        # is passed on purpose (P19): each language provider
+                        # applies its own appropriate sink set — a hard-coded
+                        # Python-only pattern made Go SSRF (http.Client) and
+                        # Java (Runtime.exec) sinks invisible.
                         cpg_paths = self.cpg_provider.get_attack_paths(
                             source_path=file_path.parent,
-                            sink_pattern="eval|exec|system|subprocess|os\\.system|popen",
                         )
                         if cpg_paths:
                             self.logger.info(

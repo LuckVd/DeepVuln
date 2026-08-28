@@ -31,7 +31,7 @@ class JSCPGProvider(BaseCPGProvider):
     def get_paths(
         self,
         source_path: Path,
-        sink_pattern: str = "eval|exec|system",
+        sink_pattern: str | None = None,
     ) -> list[AttackPath]:
         """
         Get attack paths for JavaScript/TypeScript source.
@@ -43,6 +43,9 @@ class JSCPGProvider(BaseCPGProvider):
         Returns:
             List of AttackPath objects
         """
+        if sink_pattern is None:
+            sink_pattern = "eval|exec|system"
+
         self.logger.debug(f"Building CPG for JavaScript source: {source_path}")
 
         # 1. Build CPG

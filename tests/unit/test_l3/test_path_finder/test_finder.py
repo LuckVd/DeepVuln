@@ -6,15 +6,15 @@ Test AttackPathFinder and related models.
 
 import pytest
 
+from src.layers.l3_analysis.engines.ast_engine.cpg.models import (
+    CodePropertyGraph,
+    CPGEdge,
+    CPGNode,
+)
 from src.layers.l3_analysis.engines.ast_engine.path_finder.models import (
     AttackPath,
     PathFinderConfig,
     PathType,
-)
-from src.layers.l3_analysis.engines.ast_engine.cpg.models import (
-    CPGEdge,
-    CPGNode,
-    CodePropertyGraph,
 )
 
 
@@ -837,3 +837,74 @@ class TestMultiLanguageCFGBuild:
 
         assert blocks >= 2, f"{lang} did not split basic blocks on `if`"
         assert edges >= 1, f"{lang} produced no control-flow edges"
+
+
+class TestGoP19Sinks:
+    """P19: Go default sink pattern covers SSRF (http.Client) and SQL sinks —
+    previously the provider pattern lacked them (0 attack paths for SSRF)."""
+
+    def test_ssrf_http_client_sink(self, tmp_path):
+        from pathlib import Path
+
+        from src.layers.l3_analysis.engines.ast_engine.cpg.providers.go_provider import (
+            GoCPGProvider,
+        )
+
+        src = tmp_path / "main.go"
+        src.write_text(
+            'package main\n'
+            'import (\n'
+            '    "net/http"\n'
+            '    "io"\n'
+            ')\n'
+            'func fetch(w http.ResponseWriter, r *http.Request) {\n'
+            '    url := r.URL.Query().Get("u")\n'
+            '    resp, err := http.Get(url)\n'
+            '    if err != nil { http.Error(w, err.Error(), 500); return }\n'
+            '    body, _ := io.ReadAll(resp.Body)\n'
+            '    _, _ = w.Write(body)\n'
+            '}\n'
+        )
+
+        # None => Go provider default pattern (must include http.Get / SSRF)
+        paths = GoCPGProvider().get_paths(Path(src), None)
+
+        assert len(paths) >= 1
+        assert any("http" in p.sink or "Get" in p.sink for p in paths)
+
+    def test_sql_query_row_sink(self, tmp_path):
+        from pathlib import Path
+
+        from src.layers.l3_analysis.engines.ast_engine.cpg.builder import CPGBuilder
+        from src.layers.l3_analysis.engines.ast_engine.cpg.providers.go_provider import (
+            GoCPGProvider,
+        )
+
+        src = tmp_path / "main.go"
+        src.write_text(
+            'package main\n'
+            'import (\n'
+            '    "database/sql"\n'
+            '    "net/http"\n'
+            ')\n'
+            'func find(w http.ResponseWriter, r *http.Request, db *sql.DB) {\n'
+            '    id := r.URL.Query().Get("id")\n'
+            '    rows, err := db.QueryRow("SELECT * FROM t WHERE id=" + id)\n'
+            '    if err != nil { http.Error(w, err.Error(), 500); return }\n'
+            '    _ = rows\n'
+            '}\n'
+        )
+
+        paths = GoCPGProvider().get_paths(Path(src), None)
+
+        assert len(paths) >= 1
+
+        # The matched sink must be the SQL call (db.QueryRow), NOT the
+        # url.Query() parameter access — the pattern anchors on `db.`.
+        cpg = CPGBuilder().build_from_directory(src.parent, ["*.go"])
+        sink_names = {
+            (cpg.get_node(p.sink).metadata.get("ast_name", "")
+             or getattr(cpg.get_node(p.sink).metadata.get("ast_node"), "name", ""))
+            for p in paths
+        }
+        assert any("db.QueryRow" in n for n in sink_names), sink_names
