@@ -9,11 +9,13 @@ Tests cover:
 - Subprocess env hardening (SEMGREP_LOG_FILE redirect, P1)
 """
 
+import json
 from pathlib import Path
 
 import pytest
 
 from src.layers.l3_analysis.engines.semgrep import (
+    NOISE_RULE_SUBSTRINGS,
     OFFICIAL_RULE_SETS,
     SemgrepEngine,
     engine_registry,
@@ -650,3 +652,87 @@ class TestScanResultModel:
         assert "/test/project" in summary
         assert "semgrep" in summary
         assert "5" in summary
+
+
+class TestNoiseRuleExclusion:
+    """P19: benchmark-noise rules (use-tls / no-direct-write) are excluded."""
+
+    def test_noise_rule_substrings_defined(self):
+        """The noise rules are exactly the FPs seen in the mini baseline."""
+        assert "go.lang.security.audit.net.use-tls" in NOISE_RULE_SUBSTRINGS
+        assert (
+            "go.lang.security.audit.xss.no-direct-write-to-responsewriter"
+            in NOISE_RULE_SUBSTRINGS
+        )
+
+    @pytest.mark.asyncio
+    async def test_scan_excludes_noise_by_default(self, tmp_path, monkeypatch):
+        """Default scan excludes the noise rules from the semgrep cmd."""
+        engine = SemgrepEngine()
+        (tmp_path / "main.go").write_text("package main\n")
+
+        calls = {}
+
+        async def fake_run_command(cmd, cwd=None, env=None):
+            calls["cmd"] = cmd
+            return 0, '{"results": [], "errors": []}', ""
+
+        monkeypatch.setattr(engine, "run_command", fake_run_command)
+        await engine.scan(tmp_path, use_auto_config=True)
+
+        assert "--exclude-rule" in calls["cmd"]
+        for rule in NOISE_RULE_SUBSTRINGS:
+            assert rule in calls["cmd"]
+
+    @pytest.mark.asyncio
+    async def test_scan_keeps_noise_when_opted_in(self, tmp_path, monkeypatch):
+        """keep_semgrep_noise_rules=True restores the previous behavior."""
+        engine = SemgrepEngine()
+        (tmp_path / "main.go").write_text("package main\n")
+
+        calls = {}
+
+        async def fake_run_command(cmd, cwd=None, env=None):
+            calls["cmd"] = cmd
+            return 0, '{"results": [], "errors": []}', ""
+
+        monkeypatch.setattr(engine, "run_command", fake_run_command)
+        await engine.scan(tmp_path, use_auto_config=True, keep_semgrep_noise_rules=True)
+
+        assert "--exclude-rule" not in calls["cmd"]
+
+    @pytest.mark.asyncio
+    async def test_parse_level_noise_filter(self, tmp_path, monkeypatch):
+        """Parse-level fallback drops noise findings even if CLI allowed them."""
+        engine = SemgrepEngine()
+        semgrep_json = json.dumps(
+            {
+                "results": [
+                    {
+                        "check_id": "go.lang.security.audit.net.use-tls.use-tls",
+                        "path": "main.go",
+                        "start": {"line": 1},
+                        "end": {"line": 1},
+                        "extra": {"severity": "WARNING", "message": "Use TLS", "metadata": {}},
+                    },
+                    {
+                        "check_id": "go.lang.security.injection.tainted-sql-string",
+                        "path": "main.go",
+                        "start": {"line": 1},
+                        "end": {"line": 1},
+                        "extra": {"severity": "ERROR", "message": "Tainted SQL", "metadata": {}},
+                    },
+                ],
+                "errors": [],
+            }
+        )
+
+        async def fake_run_command(cmd, cwd=None, env=None):
+            return 0, semgrep_json, ""
+
+        monkeypatch.setattr(engine, "run_command", fake_run_command)
+        result = await engine.scan(tmp_path, use_auto_config=True)
+
+        assert {f.rule_id for f in result.findings} == {
+            "go.lang.security.injection.tainted-sql-string"
+        }

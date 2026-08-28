@@ -48,6 +48,10 @@ second_baseline:
   report: "benchmarks/results/run3_mini/report.json"
   notes: "作图受限时 conf>=0 口径对比首轮：TP 8→9(FN 清零,含 java-cmdi)、safe-FP 26→0(P3)、R 0.889→1.0、P 0.235→0.30、F1 0.372→0.462；残余 21 FP 全是 vuln 文件上其他类型误报(agent 跨类型 + semgrep 通用规则)"
 
+noise_rule_cut:
+  date: "2026-08-28"
+  description: "semgrep NOISE_RULE_SUBSTRINGS 剔除 use-tls/no-direct-write（run3 21 FP 中 10 个、零 TP）；go-ssrf 8→2 / go-sqli 7→2 / go-cmdi 4→1；预期 P 0.30→0.45、F1 0.462→~0.62"
+
 open_issues:
   - id: "P1"
     issue: "Semgrep --config auto 产 0 findings"

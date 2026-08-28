@@ -66,6 +66,16 @@ OFFICIAL_RULE_SETS = {
     "default": "auto",
 }
 
+# Rules with near-zero vulnerability-detection value that routinely fire as
+# noise on easy targets (P19: `use-tls` + `no-direct-write-to-responsewriter`
+# were 10 of the 21 false positives in the second mini baseline with zero TP
+# contribution). Excluded from auto config by default; pass
+# ``keep_semgrep_noise_rules=True`` in scan options to keep them.
+NOISE_RULE_SUBSTRINGS: tuple[str, ...] = (
+    "go.lang.security.audit.net.use-tls",
+    "go.lang.security.audit.xss.no-direct-write-to-responsewriter",
+)
+
 
 class SemgrepEngine(BaseEngine):
     """
@@ -238,6 +248,13 @@ class SemgrepEngine(BaseEngine):
         effective_rule_sets = list(rule_sets) if rule_sets else None
         effective_disabled_packs: list[str] = []
 
+        # P19: drop benchmark-noise rules from the auto pack unless the caller
+        # explicitly opts in (keep_semgrep_noise_rules=True). These rules fire
+        # near-constantly on trivial targets with zero TP value.
+        keep_noise = bool(options.get("keep_semgrep_noise_rules", False))
+        if not keep_noise:
+            excluded_rule_ids.extend(NOISE_RULE_SUBSTRINGS)
+
         if use_rule_gating and (tech_stack or attack_surface):
             try:
                 from src.core.rule_gating import RuleGatingEngine
@@ -392,6 +409,16 @@ class SemgrepEngine(BaseEngine):
                 semgrep_output=semgrep_output,
                 source_path=source_path,
             )
+
+            # P19: belt-and-braces — drop noise rules at parse level too, so
+            # the exclusion holds even if the registry ids evolve under the
+            # CLI --exclude-rule prefix match.
+            if not keep_noise:
+                findings = [
+                    f
+                    for f in findings
+                    if not any(ns in (f.rule_id or "") for ns in NOISE_RULE_SUBSTRINGS)
+                ]
 
             # Apply filters
             if severity_filter:

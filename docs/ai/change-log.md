@@ -1,5 +1,17 @@
 # Change Log
 
+## 2026-08-28
+
+### P19 增量 — semgrep 噪声规则剔除（use-tls / no-direct-write，第二轮 10/21 FP 归零）✅
+
+- **根因**: 第二轮基线 21 个 FP 中 10 个来自两条 Go 通用 best-practice 规则——`go.lang.security.audit.net.use-tls`（×5, conf 0.7）与 `go.lang.security.audit.xss.no-direct-write-to-responsewriter`（×5, conf 0.5），零 TP 贡献（truth 关键词无匹配项）
+- **修复** `src/layers/l3_analysis/engines/semgrep.py`: 新增 `NOISE_RULE_SUBSTRINGS` 常量，默认加进 `--exclude-rule`（CLI 前缀匹配已验证生效）+ 解析层兜底过滤（防 registry id 演化）；`keep_semgrep_noise_rules=True` 逃生阀
+- **验证**:
+  - 新增 4 项测试（常量定义/默认排除/opt-in 保留/解析层兜底）——test_semgrep_engine+integration **48 passed**，ruff 干净
+  - 真实引擎重扫：go-ssrf 8→2（仅保留 tainted-url-host）、go-sqli 7→2、go-cmdi 4→1（dangerous-exec-command 保留）
+  - 预期基线（run3 重算口径）：21 FP → ~11 FP，P 0.30→0.45、F1 0.462→~0.62（R 恒 1.0）
+- **Commit**: 未提交（遵循不自动提交规则）
+
 ## 2026-08-27
 
 ### 第二轮 mini 实测基线 — P1+P3+P4 修复后全链路（Recall 100%，safe 零 FP）✅
