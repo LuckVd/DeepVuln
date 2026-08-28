@@ -452,11 +452,15 @@ class TransformAnalyzer:
         if not string_node or string_node.type != "string":
             return None
 
-        # Get the raw text
+        # Get the raw text (node.text is byte-accurate; slicing the str with
+        # byte offsets garbles nodes after any multi-byte char, P19)
         try:
-            start = string_node.start_byte
-            end = string_node.end_byte
-            raw_text = source_code[start:end]
+            text = getattr(string_node, "text", None)
+            raw_text = (
+                text.decode("utf-8", errors="replace")
+                if text is not None
+                else source_code[string_node.start_byte : string_node.end_byte]
+            )
         except (AttributeError, IndexError):
             return None
 
@@ -477,6 +481,9 @@ class TransformAnalyzer:
         """Get text content of a tree-sitter node."""
         if not node:
             return ""
+        text = getattr(node, "text", None)
+        if text is not None:
+            return text.decode("utf-8", errors="replace")
         try:
             return content[node.start_byte : node.end_byte]
         except (AttributeError, IndexError):

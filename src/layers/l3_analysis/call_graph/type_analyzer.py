@@ -440,6 +440,9 @@ class TypeAnalyzer:
         """Get text content of a tree-sitter node."""
         if not node:
             return ""
+        text = getattr(node, "text", None)
+        if text is not None:
+            return text.decode("utf-8", errors="replace")
         try:
             return content[node.start_byte : node.end_byte]
         except (AttributeError, IndexError):

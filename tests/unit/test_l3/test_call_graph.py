@@ -4,25 +4,22 @@ Tests for Call Graph Analysis.
 Tests the call graph construction and reachability analysis.
 """
 
-import pytest
 from pathlib import Path
-import tempfile
 
+import pytest
+
+from src.layers.l3_analysis.call_graph.analyzer import CallGraphAnalyzer
 from src.layers.l3_analysis.call_graph.models import (
+    CallEdge,
     CallGraph,
     CallNode,
-    CallEdge,
     CallType,
     NodeType,
-    FileCallGraph,
-    ReachabilityResult,
 )
-from src.layers.l3_analysis.call_graph.analyzer import CallGraphAnalyzer
 from src.layers.l3_analysis.call_graph.reachability import (
     ReachabilityChecker,
     ReachabilityConfig,
 )
-
 
 # ============================================================
 # Fixtures
@@ -642,4 +639,70 @@ func main() {}
         # net/http handler signature (ResponseWriter + Request) -> HTTP
         assert entries.get("handler") == "HTTP"
         # func main() -> MAIN
+        assert entries.get("main") == "MAIN"
+
+
+class TestUtf8EntryPointRegression:
+    """P19: multi-byte chars (e.g. em dash in comments) must not garble
+    AST node text — previously `content[start_byte:end_byte]` sliced a str
+    with byte offsets, shifting every node after the multi-byte char and
+    silently losing Servlet/net-http entry points."""
+
+    JAVA_SERVLET = '''// MINI benchmark — vulnerable variant (em dash in comment)\n\
+package bench.vuln;\n\
+import javax.servlet.http.HttpServlet;\n\
+import javax.servlet.http.HttpServletRequest;\n\
+import javax.servlet.http.HttpServletResponse;\n\
+import java.io.IOException;\n\
+public class CmdExecServlet extends HttpServlet {\n\
+    @Override\n\
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {\n\
+        String input = req.getParameter("arg");\n\
+        Runtime.getRuntime().exec("echo " + input);\n\
+    }\n\
+}\n'''
+
+    GO_HANDLER = '''// MINI benchmark — vulnerable variant\n\
+package main\n\
+import (\n\
+    "net/http"\n\
+    "os/exec"\n\
+)\n\
+func handleEcho(w http.ResponseWriter, r *http.Request) {\n\
+    input := r.URL.Query().Get("arg")\n\
+    _ = exec.Command("sh", "-c", "echo "+input)\n\
+}\n\
+func main() {\n\
+    http.HandleFunc("/echo", handleEcho)\n\
+    _ = http.ListenAndServe(":8080", nil)\n\
+}\n'''
+
+    def _build(self, tmp_path, filename: str, content: str):
+        (tmp_path / filename).write_text(content, encoding="utf-8")
+        analyzer = CallGraphAnalyzer()
+        return analyzer.build_graph(tmp_path)
+
+    def test_java_servlet_do_get_entry_after_em_dash(self, tmp_path):
+        """doGet must be an HTTP entry even with a multi-byte comment above."""
+        graph = self._build(tmp_path, "CmdExecServlet.java", self.JAVA_SERVLET)
+
+        entries = {
+            n.name: n.entry_point_type
+            for n in graph.nodes.values() if n.is_entry_point
+        }
+        assert "doGet" in entries, (
+            "P19 regression: Servlet entry lost — got "
+            f"entries={entries}, nodes={[n.name for n in graph.nodes.values()]}"
+        )
+        assert entries["doGet"] == "HTTP"
+
+    def test_go_handler_entry_after_em_dash(self, tmp_path):
+        """net-http handler must be an HTTP entry with a multi-byte comment."""
+        graph = self._build(tmp_path, "main.go", self.GO_HANDLER)
+
+        entries = {
+            n.name: n.entry_point_type
+            for n in graph.nodes.values() if n.is_entry_point
+        }
+        assert entries.get("handleEcho") == "HTTP"
         assert entries.get("main") == "MAIN"

@@ -117,6 +117,13 @@ class ASTDetector(ABC):
         Returns:
             Text content of the node.
         """
+        # node.text (the node's own UTF-8 bytes) is safe: start_byte/end_byte
+        # are byte offsets and slicing `content` (a str) with them silently
+        # garbles every node after a multi-byte character (P19 root cause for
+        # Servlet/Flask/net-http entry points not being detected).
+        text = getattr(node, "text", None)
+        if text is not None:
+            return text.decode("utf-8", errors="replace")
         return content[node.start_byte : node.end_byte]
 
     def _get_line_number(self, node: Any) -> int:

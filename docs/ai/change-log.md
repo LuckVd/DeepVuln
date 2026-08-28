@@ -2,6 +2,22 @@
 
 ## 2026-08-28
 
+### P2 根因修复 — entry points 全灭的元凶：tree-sitter 字节/字符索引错位 + Java 缺 Servlet 识别 ✅（入口层修复）
+
+- **根因（惊悚但简单）**: 4 处 `_get_text` 用 `content[node.start_byte:node.end_byte]` 切字符串——`start_byte/end_byte` 是**字节**偏移，`content` 是 **str**（字符索引）。源码注释里只要出现一个多字节字符（如 em dash `—`），其后**所有**节点的文本就整体错位：方法名提取成 `'e\n    protecte'`、`'tp.Request) {\n\t'` 这类碎片 → `_check_entry_point` 永远匹配不上 → **攻击面与 call graph 双双 0 entry points → exploitability 全 not_exploitable**。go/java/py 三语言 mini 文件头部注释全含 `—`，全中招。
+- **受损代码 4 处**: `call_graph/builders/base.py` / `call_graph/transform_analyzer.py`（2 处）/ `call_graph/type_analyzer.py` / `attack_surface/ast/base.py` —— 全部改为优先 `node.text.decode("utf-8")`（tree-sitter 0.26 的节点自带字节文本），坏路径兜底保留。
+- **补功能**: `attack_surface/ast/java_detector.py` 此前**完全没有 Servlet 支持**（只有 Spring/Dubbo/Kafka/Rabbit/Scheduled）——新增 `_is_servlet_class` + `_extract_servlet_from_class`（HttpServlet 子类的 doGet/doPost/doPut/doDelete → HTTP entry，method 映射 GET/POST/PUT/DELETE）。
+- **验证**:
+  - call graph：java `doGet→HTTP`、go `cmdiVulnHandler→HTTP` + `main→MAIN` 恢复（此前 0）
+  - 攻击面：三语言全识别（java servlet doGet/doPost、python flask /user /ping、go stdlib handlers）
+  - **CPG 攻击路径打通**：py/cmdi 找到 `ping_host → os.system` 1 条（此前 0）
+  - 新增回归测试 5 项：call_graph UTF-8（java/go 含 em dash 注释仍判入口）+ attack_surface Servlet 3 项（doGet/doPost/非 servlet 不判）
+  - test_call_graph 29 passed / test_attack_surface 50 passed / test_web 攻击面服务 1 失败为基线既有
+- **残余（P2 未完）**: java 攻击路径仍 0（doGet 已识别但 CPG sink 可达性映射还有缺口，FF）；go ssrf 为 http.Client sink，finder 的 sink pattern（eval|exec|system|popen）不含 ssrf 类 sink
+- **Commit**: 未提交（遵循不自动提交规则）
+
+## 2026-08-28
+
 ### P19 增量 — semgrep 噪声规则剔除（use-tls / no-direct-write，第二轮 10/21 FP 归零）✅
 
 - **根因**: 第二轮基线 21 个 FP 中 10 个来自两条 Go 通用 best-practice 规则——`go.lang.security.audit.net.use-tls`（×5, conf 0.7）与 `go.lang.security.audit.xss.no-direct-write-to-responsewriter`（×5, conf 0.5），零 TP 贡献（truth 关键词无匹配项）

@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
+from src.core.models.attack_surface import (
+    EntryPointType,
+    HTTPMethod,
+)
 from src.layers.l1_intelligence.attack_surface.ast import (
     GoASTDetector,
     JavaASTDetector,
     PythonASTDetector,
-)
-from src.core.models.attack_surface import (
-    EntryPointType,
-    HTTPMethod,
 )
 
 
@@ -385,3 +385,66 @@ class TestASTDetectorRegistry:
 
         detector = get_ast_detector_for_file(Path("config.json"))
         assert detector is None
+
+
+class TestJavaServletDetector:
+    """P19: HttpServlet endpoints (doGet/doPost) are HTTP entry points."""
+
+    def _detect(self, tmp_path: Path, code: str, name: str = "CmdServ.java"):
+        java_file = tmp_path / name
+        java_file.write_text(code, encoding="utf-8")
+        return JavaASTDetector().detect(code, java_file)
+
+    def test_detect_servlet_do_get(self, tmp_path: Path) -> None:
+        """A class extending HttpServlet with doGet yields an HTTP entry."""
+        code = '''// MINI benchmark — cisła variant
+package bench.vuln;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+public class CmdServ extends HttpServlet {
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String input = req.getParameter("arg");
+        Runtime.getRuntime().exec("echo " + input);
+    }
+}
+'''
+        eps = self._detect(tmp_path, code)
+        assert len(eps) == 1
+        ep = eps[0]
+        assert ep.type == EntryPointType.HTTP
+        assert ep.framework == "servlet"
+        assert ep.method == HTTPMethod.GET
+        assert ep.handler == "doGet"
+
+    def test_detect_servlet_do_post(self, tmp_path: Path) -> None:
+        """doPost maps to POST and is detected alongside the class body."""
+        code = '''package bench.vuln;
+import javax.servlet.http.*;
+import java.io.IOException;
+public class SignUp extends HttpServlet {
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String u = req.getParameter("user");
+        resp.getWriter().write(u);
+    }
+}
+'''
+        eps = self._detect(tmp_path, code, "SignUp.java")
+        assert len(eps) == 1
+        assert eps[0].method == HTTPMethod.POST
+        assert eps[0].handler == "doPost"
+
+    def test_regular_class_no_servlet_entries(self, tmp_path: Path) -> None:
+        """A doGet on a non-Servlet class is not an entry point."""
+        code = '''package bench.vuln;
+import java.io.IOException;
+public class Helper {
+    protected void doGet(String arg) throws IOException {
+        System.out.println(arg);
+    }
+}
+'''
+        eps = self._detect(tmp_path, code, "Helper.java")
+        assert eps == []

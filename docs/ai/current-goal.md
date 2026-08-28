@@ -46,7 +46,7 @@
 | # | 问题 | 影响 | 建议 |
 |---|---|---|---|
 | ~~P1~~ | ~~Semgrep --config auto 产 0 findings~~ | ~~引擎级检出为空~~ | ✅ **已修复 2026-08-26**：HOME 不可写致 semgrep 启动崩溃（引擎注入 SEMGREP_LOG_FILE）+ 相对路径双解析（resolve）；`HOME=/root` 下 python/go/java mini 均检出，4 项新测试 |
-| **P2** | **CPG 可达性全标 not_exploitable**（reachability=0.10）| exploitability 判定质量低 | Flask/Spring/net-http 入口未被 CPG 识别为外部入口——Phase 18 已知问题，mini 基准首次量化了影响 |
+| ~~P2~~ | ~~CPG 可达性全标 not_exploitable~~ | ~~exploitability 判定质量低~~ | 🔶 **入口层已修复 2026-08-28**：根因=tree-sitter 字节/字符索引错位（em dash 后节点文本全乱）+ Java 缺 Servlet 识别；攻击面三语言 + call graph 入口全恢复，py/cmdi 攻击路径打通。**残余**：java CPG sink 可达性映射缺口、go ssrf sink pattern 未覆盖（http.Client），见 change-log |
 | ~~P3~~ | ~~safe 文件 FP 多（agent 产低置信度 suspicious 条目）~~ | ~~Precision 低~~ | ✅ **已修复 2026-08-26**：suspicious 条目抽离为审查队列（默认不进报告，`include_suspicious_findings` 逃生阀可恢复）；DB 模拟 Precision 0.160→0.333、F1 0.271→0.485，零 TP 损失 |
 | ~~P4~~ | ~~java-cmdi 漏报（agent 未识别 Runtime.exec 为 cmd_injection）~~ | ~~Recall 缺口~~ | ✅ **已修复 2026-08-27**：根因①run1 时该文件 agent 调用遇 provider 503 → FN；②`ox-alpha-free` 模型名已下线（401）→ 改用 deepseek-v4-flash 后 agent 检出 command_injection conf=1.0；semgrep（P1 后）另检出 tainted-cmd-from-http-request，双引擎覆盖 |
 

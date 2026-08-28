@@ -6,14 +6,14 @@ from typing import Any
 import tree_sitter_java as tsjava
 
 from src.core.logger.logger import get_logger
-from src.layers.l1_intelligence.attack_surface.ast.base import (
-    ASTDetector,
-    register_ast_detector,
-)
 from src.core.models.attack_surface import (
     EntryPoint,
     EntryPointType,
     HTTPMethod,
+)
+from src.layers.l1_intelligence.attack_surface.ast.base import (
+    ASTDetector,
+    register_ast_detector,
 )
 
 
@@ -23,11 +23,25 @@ class JavaASTDetector(ASTDetector):
 
     Uses Tree-sitter to parse Java source code and extract entry points
     from annotations like @DubboService, @GetMapping, @KafkaListener, etc.
+    Also recognizes classic Servlet endpoints (a class extending
+    ``HttpServlet`` with ``doGet``/``doPost``/``doPut``/``doDelete`` methods).
     """
 
     language_module = tsjava
     language_name = "java"
     file_extensions = [".java"]
+
+    # Servlet methods that map to HTTP endpoints when the class extends
+    # javax.servlet.http.HttpServlet (P19: without this, Servlet projects
+    # reported 0 entry points and exploitability stayed not_exploitable).
+    _SERVLET_METHOD_HTTP: dict[str, HTTPMethod] = {
+        "doGet": HTTPMethod.GET,
+        "doPost": HTTPMethod.POST,
+        "doPut": HTTPMethod.PUT,
+        "doDelete": HTTPMethod.DELETE,
+        "doHead": HTTPMethod.HEAD,
+        "doOptions": HTTPMethod.OPTIONS,
+    }
 
     def __init__(self) -> None:
         """Initialize the Java AST detector."""
@@ -82,6 +96,12 @@ class JavaASTDetector(ASTDetector):
             # Extract class-level @RequestMapping for Spring
             prefix_from_class = self._get_class_mapping_prefix(node, content)
             effective_prefix = prefix_from_class if prefix_from_class else class_prefix
+
+            is_servlet_class = self._is_servlet_class(node, content)
+            if is_servlet_class:
+                entry_points.extend(
+                    self._extract_servlet_from_class(node, content, file_path)
+                )
 
             # Process method declarations within the class
             for child in node.children:
@@ -151,6 +171,57 @@ class JavaASTDetector(ASTDetector):
                         if path:
                             return path
         return ""
+
+    def _is_servlet_class(self, class_node: Any, content: str) -> bool:
+        """Whether the class extends (javax/jakarta) HttpServlet.
+
+        Args:
+            class_node: Class declaration node.
+            content: Original source code content.
+
+        Returns:
+            True if the class's superclass references HttpServlet.
+        """
+        for child in class_node.children:
+            if child.type == "superclass":
+                return "HttpServlet" in self._get_text(child, content)
+        return False
+
+    def _extract_servlet_from_class(
+        self, class_node: Any, content: str, file_path: Path
+    ) -> list[EntryPoint]:
+        """Extract HttpServlet do* endpoints from a Servlet class.
+
+        Args:
+            class_node: Class declaration node.
+            content: Original source code content.
+            file_path: Path to the source file.
+
+        Returns:
+            List of HTTP entry points, one per do* method.
+        """
+        entry_points: list[EntryPoint] = []
+        for child in class_node.children:
+            if child.type != "class_body":
+                continue
+            for member in child.children:
+                if member.type != "method_declaration":
+                    continue
+                method_name = self._get_method_name(member, content)
+                if not method_name or method_name not in self._SERVLET_METHOD_HTTP:
+                    continue
+                entry_points.append(
+                    EntryPoint(
+                        type=EntryPointType.HTTP,
+                        method=self._SERVLET_METHOD_HTTP[method_name],
+                        path=f"/{method_name.replace('do', '').lower()}",
+                        handler=method_name,
+                        file=str(file_path),
+                        line=self._get_line_number(member),
+                        framework="servlet",
+                    )
+                )
+        return entry_points
 
     def _extract_dubbo_from_class(
         self, class_node: Any, content: str, file_path: Path

@@ -63,6 +63,8 @@ open_issues:
     issue: "CPG 可达性全标 not_exploitable (reachability=0.10)"
     impact: "exploitability 判定质量低；Flask/Spring/net-http 入口未被 CPG 识别"
     next: "修 CPG 入口识别——Phase 18 已知问题，mini 基准首次量化了影响"
+    status: "partially resolved 2026-08-28"
+    resolution: "根因①4处 _get_text 字节/字符索引错位（多字节字符后节点文本全乱）→ 改 node.text；②java_detector 缺 Servlet 识别 → 补 _is_servlet_class/do* 映射。攻击面+call graph 入口全恢复、py/cmdi 攻击路径打通。残余：java CPG sink 可达性映射、go ssrf sink pattern"
   - id: "P3"
     issue: "safe 文件 FP 多（agent 低置信度 suspicious 条目）"
     impact: "Precision 低 (0.235→0.421 at conf>=0.5)"

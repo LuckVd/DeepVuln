@@ -234,7 +234,19 @@ class CallGraphBuilder(ABC):
         return node.start_point[0] + 1  # tree-sitter is 0-indexed
 
     def _get_text(self, node: Any, content: str) -> str:
-        """Get text content of a tree-sitter node."""
+        """Get text content of a tree-sitter node.
+
+        Prefers ``node.text`` (the node's own UTF-8 bytes) over slicing
+        ``content`` with ``start_byte``/``end_byte``: those are byte offsets,
+        while ``content`` is a str — any multi-byte character (e.g. an em
+        dash in a comment) earlier in the file shifts str indexing and
+        silently garbles every node that follows (P19 root cause: garbled
+        method names made Servlet/net-http entry detection report 0 entry
+        points).
+        """
+        text = getattr(node, "text", None)
+        if text is not None:
+            return text.decode("utf-8", errors="replace")
         return content[node.start_byte : node.end_byte]
 
     def _create_node_id(self, file_path: str, func_name: str, class_name: str | None = None) -> str:

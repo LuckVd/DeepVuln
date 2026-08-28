@@ -2,6 +2,12 @@
 
 from pathlib import Path
 
+from src.core.models.attack_surface import (
+    AttackSurfaceReport,
+    EntryPoint,
+    EntryPointType,
+    HTTPMethod,
+)
 from src.layers.l1_intelligence.attack_surface.detector import AttackSurfaceDetector
 from src.layers.l1_intelligence.attack_surface.http_detector import (
     EchoDetector,
@@ -9,12 +15,6 @@ from src.layers.l1_intelligence.attack_surface.http_detector import (
     FlaskDetector,
     GinDetector,
     SpringDetector,
-)
-from src.core.models.attack_surface import (
-    AttackSurfaceReport,
-    EntryPoint,
-    EntryPointType,
-    HTTPMethod,
 )
 from src.layers.l1_intelligence.attack_surface.mq_detector import (
     CronDetector,
