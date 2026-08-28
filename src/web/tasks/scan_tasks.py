@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 from celery import Task
 
 from src.web.core.celery_app import get_celery_app
-from src.web.models.database import get_session_local
+from src.web.models.database import get_session_local, init_db
 from src.web.models.scan import ScanStatus
 from src.web.repositories.scan import ScanRepository
 from src.web.services.scan_orchestrator import ScanOrchestrator
@@ -49,6 +49,15 @@ async def _execute_scan_async(
     from src.web.core.config import get_database_settings
 
     db_settings = get_database_settings()
+    # N5 fix: checkpoint_service relies on the shared session factory, which is
+    # only initialized in the web process at startup (src/web/main.py). Ensure it
+    # is initialized here in the worker process too (idempotent; create_all is a
+    # no-op on existing tables). Previously every checkpoint save raised
+    # "Database not initialized. Call init_db() first."
+    try:
+        get_session_local()
+    except RuntimeError:
+        await init_db(db_settings.url)
     engine = create_async_engine(
         db_settings.url,
         echo=False,
