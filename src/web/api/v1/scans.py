@@ -13,6 +13,8 @@ from sqlalchemy import select, func
 from src.web.api.deps import get_db
 from src.web.core.security import require_auth
 from src.web.core.security import optional_api_key
+from src.web.core.config import get_security_settings
+from src.web.services.auth_service import verify_token
 
 logger = logging.getLogger(__name__)
 from src.web.models.schemas import (
@@ -1615,8 +1617,57 @@ from fastapi import WebSocket
 
 from src.web.api.websocket import get_connection_manager
 
+# Separate router WITHOUT the HTTP-level require_auth dependency: browsers
+# cannot send an Authorization header during a WebSocket handshake, so the
+# router-level guard would either reject every connection or (with HTTPBearer
+# auto_error disabled) silently admit unauthenticated ones. The endpoint
+# authenticates the JWT/API key from query parameters instead.
+ws_router = APIRouter()
 
-@router.websocket("/ws/{scan_id}")
+
+async def _authenticate_websocket(websocket: WebSocket, token: str | None) -> bool:
+    """Authenticate a WebSocket handshake from query parameters.
+
+    Mirrors require_auth semantics: valid JWT (``token`` query param, the
+    same token the frontend already sends) or, when API-key auth is enabled,
+    a valid ``api_key`` query param. Dev mode (auth disabled) admits all.
+    """
+    settings = get_security_settings()
+
+    if not settings.auth_enabled:
+        return True
+
+    if token:
+        payload = verify_token(
+            token, settings.jwt_secret, settings.jwt_algorithm
+        )
+        uid = payload.get("sub") if payload else None
+        if uid is not None:
+            from src.web.models.database import get_session_local
+            from src.web.models.user import User
+
+            session_local = get_session_local()
+            async with session_local() as session:
+                result = await session.execute(
+                    select(User).where(User.id == int(uid))
+                )
+                user = result.scalar_one_or_none()
+                if user is not None and user.is_active:
+                    return True
+
+    api_key = websocket.query_params.get("api_key")
+    if settings.api_key_enabled and api_key is not None:
+        import hmac as _hmac
+
+        if any(
+            _hmac.compare_digest(api_key, k) for k in settings.get_api_keys()
+        ):
+            return True
+
+    return False
+
+
+@ws_router.websocket("/ws/{scan_id}")
 async def websocket_scan_updates(
     websocket: WebSocket,
     scan_id: int,
@@ -1627,10 +1678,20 @@ async def websocket_scan_updates(
     Clients can connect to receive real-time updates about scan progress,
     including phase changes, findings, and completion status.
 
+    Authentication: pass the JWT as the ``token`` query parameter (the
+    browser frontend already does this) or an API key as ``api_key``.
+    Unauthenticated connections are closed with policy-violation code 1008.
+
     Args:
         websocket: WebSocket connection
         scan_id: ID of the scan to monitor
     """
+    token = websocket.query_params.get("token")
+    if not await _authenticate_websocket(websocket, token):
+        await websocket.accept()
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+
     manager = get_connection_manager()
 
     try:

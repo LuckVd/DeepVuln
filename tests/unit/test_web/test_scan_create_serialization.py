@@ -35,7 +35,7 @@ async def test_create_scan_stores_config_as_dict(executor):
     scan_create = ScanCreate(
         name="audit-a5-regression",
         source_type="local",
-        source_path="/tmp/target",
+        source_path="/opt/pro/DeepVuln/benchmarks/mini",
         scan_type="base",
         # Explicit non-default config to prove real values survive the round trip.
         config={"engines": ["semgrep", "ast"], "adversarial": True},

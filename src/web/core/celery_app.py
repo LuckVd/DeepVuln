@@ -43,6 +43,22 @@ class CelerySettings(BaseSettings):
     class Config:
         env_prefix = "CELERY_"
 
+    @property
+    def effective_redis_url(self) -> str:
+        """Redis URL for the WebSocket pub/sub bridge.
+
+        Audit 2026-09 fix: the compose stacks (and most deployments) set only
+        ``CELERY_BROKER_URL`` / ``CELERY_RESULT_BACKEND``, never
+        ``CELERY_REDIS_URL`` — so the WS bridge defaulted to
+        ``redis://localhost:6379/0`` and silently lost every cross-process
+        progress event in multi-container deployments. Fall back to the
+        broker URL when the explicit redis_url was left at its (localhost)
+        default.
+        """
+        if self.redis_url and self.redis_url != "redis://localhost:6379/0":
+            return self.redis_url
+        return self.broker_url or self.redis_url
+
 
 def get_celery_settings() -> CelerySettings:
     """Get Celery settings from environment.

@@ -2,7 +2,14 @@
 
 from datetime import datetime, timezone
 from typing import Optional, Any, Annotated
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ConfigDict,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from pydantic.functional_serializers import PlainSerializer
 
 
@@ -104,6 +111,16 @@ class ScanConfig(BaseModel):
     llm_verify: bool = Field(
         default=True,
         description="Enable exploitability verification"
+    )
+
+    # Full multi-round audit: drive the RoundController rounds 1-4
+    # (recon / dataflow / evidence correlation / exploitability calibration)
+    # instead of the default single Round-4 verification. Experimental:
+    # rounds 1-3 additionally re-run semgrep and build their own candidates;
+    # any failure falls back to the Round-4-only path.
+    enable_full_rounds: bool = Field(
+        default=False,
+        description="Run the full 4-round audit via RoundController (experimental; falls back to Round-4 verification on failure)"
     )
 
     # 对抗性验证 (P14-04)
@@ -330,6 +347,64 @@ class ScanBase(BaseModel):
         default_factory=ScanConfig,
         description="Scan configuration parameters"
     )
+
+    @field_validator("source_path")
+    @classmethod
+    def validate_local_source_path(cls, v: str, info: ValidationInfo) -> str:
+        """Audit 2026-09 fix: restrict local source_path scans.
+
+        A security scanner that mirrors arbitrary server paths back into
+        reports is itself a vulnerability. ``local`` scans must point to an
+        existing directory, must not be a sensitive system path, and — when
+        ``DEEPVULN_WEB_LOCAL_SCAN_ROOTS`` is configured — must resolve under
+        one of the allowed roots. ``git``/``zip`` source types are untouched.
+        """
+        if info.data.get("source_type") != "local":
+            return v
+
+        sp = v.strip()
+        if not sp:
+            raise ValueError("local source_path 不能为空")
+
+        from pathlib import Path
+
+        p = Path(sp).expanduser()
+        try:
+            resolved = p.resolve()
+        except Exception as exc:  # pragma: no cover - OS edge cases
+            raise ValueError(f"local source_path 无法解析: {sp}") from exc
+
+        # Sensitive system paths — deny even without an allowlist. The list
+        # is intentionally minimal: anything broader (/opt, /home, /var…)
+        # would break legitimate self-hosted deployments; strict deployments
+        # should set DEEPVULN_WEB_LOCAL_SCAN_ROOTS instead.
+        denied = {
+            "/etc", "/proc", "/sys", "/dev", "/boot", "/root", "/tmp",
+            "/private", "/var", "/run", "/Users",
+        }
+        if any(str(resolved) == d or str(resolved).startswith(d + "/") for d in denied):
+            raise ValueError(
+                f"local source_path 指向敏感系统路径: '{sp}' 不允许扫描"
+            )
+
+        if not resolved.is_dir():
+            raise ValueError(f"local source_path 不存在或不是目录: '{sp}'")
+
+        # Optional allowlist (DEEPVULN_WEB_LOCAL_SCAN_ROOTS).
+        from src.web.core.config import get_web_settings
+
+        roots = get_web_settings().local_scan_roots_list
+        if roots:
+            if not any(
+                resolved == Path(r).resolve() or resolved.is_relative_to(Path(r).resolve())
+                for r in roots
+            ):
+                raise ValueError(
+                    f"local source_path '{sp}' 不在允许的扫描根目录内 "
+                    f"(DEEPVULN_WEB_LOCAL_SCAN_ROOTS: {', '.join(roots)})"
+                )
+
+        return v
 
     @model_validator(mode="after")
     def validate_git_source_path(self) -> "ScanBase":

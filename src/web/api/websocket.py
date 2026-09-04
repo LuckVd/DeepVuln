@@ -239,7 +239,7 @@ class ConnectionManager:
                 from src.web.core.celery_app import get_celery_settings
                 settings = get_celery_settings()
                 self._redis_publisher = aioredis.from_url(
-                    settings.redis_url,
+                    settings.effective_redis_url,
                     decode_responses=True,
                 )
                 logger.info("Redis publisher connected")
@@ -308,7 +308,7 @@ class ConnectionManager:
             try:
                 settings = get_celery_settings()
                 self._redis_subscriber = aioredis.from_url(
-                    settings.redis_url,
+                    settings.effective_redis_url,
                     decode_responses=True,
                 )
                 pubsub = self._redis_subscriber.pubsub()

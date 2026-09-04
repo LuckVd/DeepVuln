@@ -198,16 +198,25 @@ def _emergency_mark_scan_failed(scan_id: int, error_message: str) -> None:
         settings = get_database_settings()
         # Convert async URL to sync (asyncpg -> psycopg2 or similar)
         sync_url = settings.url.replace("+asyncpg", "+psycopg2").replace("+aiosqlite", "")
+        # Audit 2026-09 fix: NOW() is PostgreSQL syntax and breaks the
+        # SQLite fallback path; use a portable timestamp instead.
+        from datetime import UTC, datetime
+
+        now_iso = datetime.now(UTC).isoformat()
         sync_engine = create_engine(sync_url, isolation_level="AUTOCOMMIT")
         with sync_engine.connect() as conn:
             conn.execute(
                 text(
                     "UPDATE scans SET status = 'failed', "
                     "error_message = :err, "
-                    "completed_at = NOW() "
+                    "completed_at = :now_iso "
                     "WHERE id = :sid AND status IN ('running', 'pending')"
                 ),
-                {"err": error_message[:500], "sid": scan_id},
+                {
+                    "err": error_message[:500],
+                    "sid": scan_id,
+                    "now_iso": now_iso,
+                },
             )
         sync_engine.dispose()
         logger.info(f"Emergency DB update: scan {scan_id} marked as failed")

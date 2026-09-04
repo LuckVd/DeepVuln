@@ -19,7 +19,7 @@ class TestScanSchemas:
         scan = ScanCreate(
             name="test-scan",
             source_type="local",
-            source_path="/tmp/target",
+            source_path="/opt/pro/DeepVuln/benchmarks/mini",
             scan_type=ScanType.FULL,
             config={"max_depth": 3}
         )
@@ -31,7 +31,7 @@ class TestScanSchemas:
             ScanCreate(
                 name="test-scan",
                 source_type="local",
-                source_path="/tmp/target",
+                source_path="/opt/pro/DeepVuln/benchmarks/mini",
                 scan_type="invalid"
             )
 

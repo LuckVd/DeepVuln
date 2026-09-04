@@ -110,6 +110,24 @@ class WebSettings(BaseSettings):
         description="Maximum upload size in MB for scan source archives"
     )
 
+    # Local source scanning security: comma-separated absolute paths. When
+    # set, local source_type scans are restricted to paths under one of
+    # these roots. When empty, only an explicit sensitive-path denylist
+    # applies (see ScanBase.validate_local_source_path). Kept as a raw
+    # string (not list[str]) because pydantic-settings JSON-decodes complex
+    # fields before validators run, making a comma-separated env var
+    # unusable — the env var DEEPVULN_WEB_LOCAL_SCAN_ROOTS maps naturally to
+    # this string field.
+    local_scan_roots: str = Field(
+        default="",
+        description="Allowed roots for local source_path scans (comma-separated absolute paths; empty = denylist only)",
+    )
+
+    @property
+    def local_scan_roots_list(self) -> list[str]:
+        """Parsed allowed local scan roots."""
+        return [p.strip() for p in self.local_scan_roots.split(",") if p.strip()]
+
     # Pagination
     default_page_size: int = Field(
         default=20,
