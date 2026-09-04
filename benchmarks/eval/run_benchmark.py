@@ -158,45 +158,106 @@ def _basename(p: str | None) -> str:
     return Path(p or "").name.lower()
 
 
+_SINK_FAMILY_TOKENS: dict[str, tuple[str, ...]] = {
+    "sql-injection": ("sql", "sqli"),
+    "command-injection": ("command", "cmd", "cmdi"),
+    "code-injection": ("code", "eval"),
+    "ssrf": ("ssrf",),
+    "weak-hash": ("md5", "sha1", "weak", "crypto", "hash"),
+}
+
+
+def _family_tokens(case) -> tuple[str, ...]:
+    """Type-family tokens for a case, derived from its sink_comment.
+
+    Audit 2026-09 fix: matching on the raw ``cwe_keywords`` swallowed
+    cross-type FPs — the generic keyword "injection" matched
+    *any* ``*_injection`` vuln_type, so a command_injection finding on a
+    sql case was counted as a duplicate TP instead of an FP (and the
+    reverse inflated precision in both directions). Family tokens are
+    distinctive per type so cross-type findings never match.
+    """
+    comment = str(case.get("sink_comment") or "").lower()
+    for sig, tokens in _SINK_FAMILY_TOKENS.items():
+        if sig in comment:
+            return tokens
+    # Fallback: keep the case's own keywords minus generic carriers.
+    return tuple(
+        kw for kw in (case.get("cwe_keywords") or [])
+        if kw not in ("injection", "rce", "dynamic", "exec", "process",
+                      "outbound", "fetch", "broken crypto")
+    )
+
+
+def _rel_to_case(p: str, case) -> str:
+    """Normalize a finding path to be comparable with case vuln/safe files.
+
+    Finding file_paths are relative to the *case scan directory* (e.g.
+    ``vuln/main.go``, ``safe/main.go``) or absolute; truth files are
+    relative to MINI_ROOT (e.g. ``go/sqli/vuln/main.go``). Return the
+    case-dir-relative form from either.
+    """
+    p = (p or "").replace("\\", "/")
+    case_dir = (case.get("dir") or "").replace("\\", "/").rstrip("/")
+    if case_dir and case_dir + "/" in p:
+        p = p.split(case_dir + "/", 1)[1]
+    elif "://" in p:  # pragma: no cover - not expected for mini
+        p = p.split("://", 1)[1]
+    return p.strip("/").lower()
+
+
 def evaluate_mini_cases(findings: list[dict], truth: dict) -> dict:
-    """按 case 目录归属判定：TP=vuln 文件且类型关键词匹配；FP=safe 文件任何 finding 或类型不符。"""
+    """按 case 归属判定：TP=vuln 文件且类型关键词匹配；FP=safe 文件任何 finding 或类型不符。
+
+    Audit 2026-09 fix: findings are tagged with their case id by
+    ``run_mini`` (``_benchmark_case``), and file attribution uses the
+    case-relative path (``vuln/...`` vs ``safe/...``) instead of basenames.
+    Basename matching silently swallowed real safe-file FPs: all Go cases
+    share ``main.go`` and every Java pair shares a Servlet name, so the old
+    ``all_vuln_bases`` dict collapsed cases and same-type findings on safe
+    files were mis-attributed to other cases' vuln files.
+    """
     tp, fn = [], []
     fp_safe, fp_other = [], []
     hit: set[str] = set()
-    for case in truth["cases"]:
-        vuln_base = Path(case["vuln_file"]).name.lower()
-        safe_base = Path(case["safe_file"]).name.lower()
-        for f in findings:
-            base = _basename(f.get("file_path"))
-            if base != vuln_base:
-                continue
-            text = _finding_text(f)
-            if any(kw in text for kw in case["cwe_keywords"]):
-                if case["id"] not in hit:
-                    hit.add(case["id"])
-                    tp.append({"case": case["id"], "cwe": case["cwe"], "finding": f})
-    # 第二遍：其余 finding 全部计负贡献
-    all_vuln_bases = {Path(c["vuln_file"]).name.lower(): c["id"] for c in truth["cases"]}
-    all_safe_bases = {Path(c["safe_file"]).name.lower() for c in truth["cases"]}
-    tp_keys = {(t["case"], _basename(t["finding"].get("file_path"))) for t in tp}
-    seen_fp: set[tuple] = set()
+
+    case_by_id = {c["id"]: c for c in truth["cases"]}
+
     for f in findings:
-        base = _basename(f.get("file_path"))
-        cid = all_vuln_bases.get(base)
-        if cid is not None:
-            text_ok = any(kw in _finding_text(f) for kw in
-                          next(c for c in truth["cases"] if c["id"] == cid)["cwe_keywords"])
-            if text_ok and (cid, base) in tp_keys:
-                continue  # 已计 TP（重复同类 finding 不重复计）
-            key = ("fp", id(f))
-            if key in seen_fp:
-                continue
-            seen_fp.add(key)
-            fp_other.append({"case": cid, "reason": "type-mismatch-or-dup", "finding": f})
-        elif base in all_safe_bases:
-            fp_safe.append({"safe_file": base, "finding": f})
+        cid = f.get("_benchmark_case")
+        if cid is not None and cid in case_by_id:
+            case = case_by_id[cid]
         else:
-            fp_other.append({"case": None, "reason": "unknown-file", "finding": f})
+            # Untagged finding (external use): attribute by unique case-relative
+            # path match; ambiguous → unknown-file FP rather than a guess.
+            base_l = Path(f.get("file_path") or "").name.lower()
+            candidates = [c for c in truth["cases"]
+                          if _rel_to_case(c["vuln_file"], c) == base_l
+                          or _rel_to_case(c["safe_file"], c) == base_l]
+            if len(candidates) != 1:
+                fp_other.append({"case": None, "reason": "unknown-file", "finding": f})
+                continue
+            case = candidates[0]
+            cid = case["id"]
+
+        vuln_rel = _rel_to_case(case["vuln_file"], case)
+        safe_rel = _rel_to_case(case["safe_file"], case)
+        fpath = _rel_to_case(f.get("file_path") or "", case)
+        text = _finding_text(f)
+        text_ok = any(tok in text for tok in _family_tokens(case))
+
+        if fpath == vuln_rel and text_ok:
+            if cid not in hit:
+                hit.add(cid)
+                tp.append({"case": cid, "cwe": case["cwe"], "finding": f})
+            # else: duplicate of an already-counted TP — ignore.
+        elif fpath == vuln_rel:
+            fp_other.append({"case": cid, "reason": "type-mismatch", "finding": f})
+        elif fpath == safe_rel:
+            fp_safe.append({"safe_file": safe_rel, "finding": f})
+        else:
+            fp_other.append({"case": cid, "reason": "unknown-file", "finding": f})
+
     for case in truth["cases"]:
         if case["id"] not in hit:
             fn.append({"case": case["id"], "cwe": case["cwe"]})
@@ -334,6 +395,10 @@ def run_mini(api: ApiClient, args) -> dict:
         fs = fetch_findings(api, snap["id"])
         print(f"  -> status={snap.get('status')} findings={len(fs)}")
         scans.append({"case": case["id"], "scan_id": snap.get("id"), "status": snap.get("status")})
+        # Tag each finding with its case so evaluation never has to guess
+        # from (colliding) basenames.
+        for f in fs:
+            f["_benchmark_case"] = case["id"]
         all_findings.extend(fs)
     matched = evaluate_mini_cases(all_findings, truth)
     summary = summarize_mini(matched, truth)
