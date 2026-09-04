@@ -105,7 +105,10 @@ start_services() {
 
 # 主流程
 main() {
-    cd /opt/projects/DeepVuln
+    # Audit 2026-09 fix: was hardcoded to /opt/projects/DeepVuln (a
+    # different machine's path) under `set -e`, which aborted the script
+    # everywhere else.
+    cd "$SCRIPT_DIR"
     check_dependencies
     init_database
     start_services

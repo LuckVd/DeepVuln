@@ -9,7 +9,7 @@
 # 使用方法:
 #   1. 配置环境变量（参考 .env.example）
 #   2. docker-compose -f docker-compose-web.yml up -d
-#   3. 访问 http://localhost:8000/api/v1/health
+#   3. 访问 http://localhost:8000/health
 
 version: "3.8"
 
@@ -68,14 +68,22 @@ services:
       # 数据库连接
       # 代码只读 DEEPVULN_DB_* 前缀（audit B3：DATABASE_URL 从未生效）
       - DEEPVULN_DB_URL=postgresql+asyncpg://deepvuln:deepvuln_password@postgres:5432/deepvuln
-      # Redis 连接
+      # Redis 连接（broker + WS pub/sub）
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_REDIS_URL=redis://redis:6379/0
+      # 安全：JWT secret 必须显式提供（web service 在默认 secret 下拒绝启动）
+      # 用法：openssl rand -hex 32，然后 export DEEPVULN_SECURITY_JWT_SECRET=...
+      - DEEPVULN_SECURITY_JWT_SECRET=${DEEPVULN_SECURITY_JWT_SECRET:?请在 .env 中设置 DEEPVULN_SECURITY_JWT_SECRET（openssl rand -hex 32 生成）}
+      - DEEPVULN_SECURITY_DEV_MODE=${DEEPVULN_SECURITY_DEV_MODE:-false}
+      # ZIP 上传扫描：worker 读取 web-api 解压后的源码（共享 uploads 卷）
+      - DEEPVULN_WEB_UPLOAD_DIR=/app/uploads
     volumes:
       - ./src:/app/src:ro
       - deepvuln-cache:/home/deepvuln/.cache
       - codeql-databases:/tmp/codeql_cache
       - codeql-packs:/home/deepvuln/.codeql
+      - uploads-data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,9 +114,16 @@ services:
       # 数据库连接
       # 代码只读 DEEPVULN_DB_* 前缀（audit B3：DATABASE_URL 从未生效）
       - DEEPVULN_DB_URL=postgresql+asyncpg://deepvuln:deepvuln_password@postgres:5432/deepvuln
-      # Redis 连接
+      # Redis 连接（broker + WS pub/sub）
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_REDIS_URL=redis://redis:6379/0
+      # 安全：JWT secret 必须显式提供（web service 在默认 secret 下拒绝启动）
+      # 用法：openssl rand -hex 32，然后 export DEEPVULN_SECURITY_JWT_SECRET=...
+      - DEEPVULN_SECURITY_JWT_SECRET=${DEEPVULN_SECURITY_JWT_SECRET:?请在 .env 中设置 DEEPVULN_SECURITY_JWT_SECRET（openssl rand -hex 32 生成）}
+      - DEEPVULN_SECURITY_DEV_MODE=${DEEPVULN_SECURITY_DEV_MODE:-false}
+      # ZIP 上传扫描：web-api 与 celery-worker 共享 uploads 卷（Dockerfile WORKDIR=/app）
+      - DEEPVULN_WEB_UPLOAD_DIR=/app/uploads
     ports:
       - "8000:8000"
     volumes:
@@ -116,6 +131,7 @@ services:
       - deepvuln-cache:/home/deepvuln/.cache
       - codeql-databases:/tmp/codeql_cache
       - codeql-packs:/home/deepvuln/.codeql
+      - uploads-data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -131,7 +147,7 @@ services:
         delay: 5s
         max_attempts: 3
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -148,6 +164,8 @@ volumes:
     name: codeql-databases
   codeql-packs:
     name: codeql-packs
+  uploads-data:
+    name: deepvuln-uploads-data
 
 networks:
   deepvuln-network:
