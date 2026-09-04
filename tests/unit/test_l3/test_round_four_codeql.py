@@ -494,8 +494,10 @@ class TestExploitabilityWithCodeQL:
             result = await executor._verify_exploitability(candidate)
 
             # P5-01d multi-dimensional scoring: CodeQL confirms but no entry point
-            # reachable + user_input + sanitizer(yes/no) + attack_surface(no) -> UNLIKELY
-            assert result.status == ExploitabilityStatus.UNLIKELY
+            # reachable + user_input + sanitizer(yes/no) + attack_surface(no) -> CONDITIONAL
+            # Audit 2026-09: was UNLIKELY; excluding the failed-taint phantom
+            # 0.0 dimension lifts the fused score into CONDITIONAL.
+            assert result.status == ExploitabilityStatus.CONDITIONAL
 
             assert "CodeQL" in result.reasoning or "confirmed" in result.reasoning.lower()
 
@@ -568,8 +570,10 @@ class TestExploitabilityWithCodeQL:
 
             result = await executor._verify_exploitability(sample_candidate)
             # P5-01d: static analysis only (no CodeQL) - partial dimensions available
-            # reachable(yes, mocked) + user_input(yes) + sanitizer(no) + attack_surface(no) -> UNLIKELY
-            assert result.status == ExploitabilityStatus.UNLIKELY
+            # reachable(yes, mocked) + user_input(yes) + sanitizer(no) + attack_surface(no) -> CONDITIONAL
+            # Audit 2026-09: was UNLIKELY; excluding the failed-taint phantom
+            # 0.0 dimension lifts the fused score into CONDITIONAL.
+            assert result.status == ExploitabilityStatus.CONDITIONAL
             assert result.is_entry_point is True
             # Reasoning now shows multi-dimensional scoring info
             assert "Multi-dimensional" in result.reasoning or "score" in result.reasoning.lower()
@@ -617,9 +621,11 @@ class TestExploitabilityWithCodeQL:
             mock_flow.return_value = []
 
             result = await executor._verify_exploitability(candidate)
-            # P5-01d: CodeQL confirms but no attack surface -> UNLIKELY
+            # P5-01d: CodeQL confirms but no attack surface -> CONDITIONAL
             # (reachable + user_input + no sanitizer + attack_surface(no))
-            assert result.status == ExploitabilityStatus.UNLIKELY
+            # Audit 2026-09: was UNLIKELY; excluding the failed-taint phantom
+            # 0.0 dimension lifts the fused score into CONDITIONAL.
+            assert result.status == ExploitabilityStatus.CONDITIONAL
 
 
 # ============================================================

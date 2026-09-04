@@ -276,10 +276,14 @@ class TestRoundFourExecutorLLM:
             result = await executor._verify_exploitability(sample_candidate)
 
             # P5-01d: multi-dimensional scoring produces conclusive result without LLM
-            # reachable(no) + user_input(yes) + sanitizer(no) + attack_surface(no) -> NOT_EXPLOITABLE
+            # reachable(no) + user_input(yes) + sanitizer(no) + attack_surface(no) -> UNLIKELY
             # LLM is NOT called because scoring is conclusive
+            # Audit 2026-09: was NOT_EXPLOITABLE while a failed taint trace
+            # dragged the fused score to the not-exploitable floor; with the
+            # failure correctly excluded the verdict is the evidence-backed
+            # UNLIKELY instead of a strong negative.
             mock_llm_client.complete_with_context.assert_not_called()
-            assert result.status == ExploitabilityStatus.NOT_EXPLOITABLE
+            assert result.status == ExploitabilityStatus.UNLIKELY
 
     @pytest.mark.asyncio
     async def test_llm_not_called_for_exploitable(
@@ -314,9 +318,10 @@ class TestRoundFourExecutorLLM:
             result = await executor._verify_exploitability(sample_candidate)
 
             # P5-01d: entry_point + user_input + no sanitizer + attack_surface(yes)
-            # But multi-dimensional scoring may produce UNLIKELY due to confidence adjustments
+            # Audit 2026-09: was UNLIKELY; excluding the failed-taint phantom
+            # 0.0 dimension lifts the fused score into CONDITIONAL.
             mock_llm_client.complete_with_context.assert_not_called()
-            assert result.status == ExploitabilityStatus.UNLIKELY
+            assert result.status == ExploitabilityStatus.CONDITIONAL
 
     @pytest.mark.asyncio
     async def test_llm_result_used_when_returned(
@@ -350,11 +355,12 @@ class TestRoundFourExecutorLLM:
 
             result = await executor._verify_exploitability(sample_candidate)
 
-            # P5-01d: multi-dimensional scoring produces NOT_EXPLOITABLE without calling LLM
-            # (reachable=no + user_input=yes + sanitizer=no + attack_surface=no)
-            # LLM is NOT called because scoring is already conclusive
+            # Audit 2026-09: was NOT_EXPLOITABLE while a failed taint trace
+            # dragged the fused score to the not-exploitable floor; with the
+            # failure correctly excluded the verdict is the evidence-backed
+            # UNLIKELY.
             mock_llm_client.complete_with_context.assert_not_called()
-            assert result.status == ExploitabilityStatus.NOT_EXPLOITABLE
+            assert result.status == ExploitabilityStatus.UNLIKELY
 
     @pytest.mark.asyncio
     async def test_llm_failure_fallback(self, tmp_path, sample_candidate):
@@ -392,9 +398,11 @@ class TestRoundFourExecutorLLM:
             # Should not raise, should fallback to NEEDS_REVIEW (keep original status)
             result = await executor._verify_exploitability(sample_candidate)
 
-            # P5-01d: multi-dimensional scoring produces conclusive result without LLM
-            # reachable(no) + user_input(yes) + sanitizer(no) + attack_surface(no) -> NOT_EXPLOITABLE
-            assert result.status == ExploitabilityStatus.NOT_EXPLOITABLE
+            # Audit 2026-09: was NOT_EXPLOITABLE while a failed taint trace
+            # dragged the fused score to the not-exploitable floor; with the
+            # failure correctly excluded the verdict is the evidence-backed
+            # UNLIKELY (LLM failure does not fabricate a strong negative).
+            assert result.status == ExploitabilityStatus.UNLIKELY
 
 
 class TestExploitabilityStatusMapping:

@@ -2398,6 +2398,34 @@ class CodeQLEngine(BaseEngine):
             # Build title
             title = self._extract_title(rule_id, message)
 
+            # Audit 2026-09 fix: extract source→sink dataflow information
+            # from SARIF codeFlows. Previously the conversion dropped all
+            # path data (metadata carried only sarif_level/tool_name), so
+            # round_four._extract_codeql_dataflow_dict could never see
+            # has_source=True — the CODEQL confirming-evidence dimension of
+            # the multi-dim scorer was dead even with CodeQL installed.
+            path_locations: list[dict[str, Any]] = []
+            for flow in result.get("codeFlows", []) or []:
+                for thread_flow in flow.get("threadFlows", []) or []:
+                    for loc in thread_flow.get("locations", []) or []:
+                        loc_obj = loc.get("location") or {}
+                        phys = loc_obj.get("physicalLocation") or {}
+                        region = phys.get("region") or {}
+                        art = phys.get("artifactLocation") or {}
+                        if art.get("uri"):
+                            path_locations.append(
+                                {
+                                    "file": art.get("uri"),
+                                    "line": region.get("startLine"),
+                                    "message": (
+                                        loc_obj.get("message", {}).get("text", "")
+                                    ),
+                                }
+                            )
+            has_dataflow = len(path_locations) >= 2
+            # First thread-flow location is the taint source; last is the sink.
+            sources = [path_locations[0]] if has_dataflow else []
+
             # Build finding
             finding = Finding(
                 id=f"codeql-{uuid.uuid4().hex[:8]}",
@@ -2416,6 +2444,9 @@ class CodeQLEngine(BaseEngine):
                 metadata={
                     "sarif_level": level,
                     "tool_name": tool_name,
+                    "has_dataflow": has_dataflow,
+                    "sources": sources,
+                    "path": path_locations,
                 },
             )
 

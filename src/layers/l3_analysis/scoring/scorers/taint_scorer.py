@@ -36,6 +36,32 @@ class TaintTrackingScorer:
                 evidence={"reason": "No taint tracking result available"},
             )
 
+        # Audit 2026-09 fix: distinguish "tracking could not analyze this
+        # sink" from a genuine "not reachable" verdict. The failure
+        # signature (trace_from_sink's no-sink-node fallback) is an empty
+        # path with zero confidence — a real BFS verdict always carries at
+        # least the sink node in ``path``. Counting the failure as an
+        # available 0.0-score dimension dragged the weighted-average fusion
+        # and confidence down even when the tracker never actually ran on
+        # this sink.
+        if (
+            not taint_trace_result.is_reachable
+            and not taint_trace_result.path
+            and taint_trace_result.confidence <= 0.0
+        ):
+            return DimensionScore(
+                dimension=ScoringDimension.TAINT_TRACKING,
+                score=0.0,
+                confidence=0.0,
+                available=False,
+                evidence={
+                    "reason": (
+                        "Taint tracking could not analyze this sink "
+                        "(no call-graph node and source unavailable)"
+                    )
+                },
+            )
+
         evidence = {
             "is_reachable": taint_trace_result.is_reachable,
             "is_sanitized": taint_trace_result.is_sanitized,

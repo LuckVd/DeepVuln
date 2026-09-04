@@ -1513,10 +1513,18 @@ class RoundFourExecutor:
         # Extract metadata
         metadata = codeql_finding.metadata or {}
 
+        # Audit 2026-09 fix: derive has_sink from real path evidence instead
+        # of hardcoding True. With the SARIF codeFlows extraction now
+        # populating metadata["path"], a complete source→sink path implies
+        # the sink (last path location). Findings without path data keep
+        # has_sink only when an explicit sinks list exists — a bare CodeQL
+        # alert no longer counts as dataflow-grade confirming evidence.
+        has_sink = bool(metadata.get("sinks")) or bool(metadata.get("path"))
+
         # Convert to format expected by CodeQLScorer
         return {
             "has_source": metadata.get("has_dataflow", False) or bool(metadata.get("sources")),
-            "has_sink": True,  # If we have a CodeQL finding, there's a sink
+            "has_sink": has_sink,
             "has_sanitizer": bool(metadata.get("sanitizers")),
             "sanitizer_effectiveness": metadata.get("sanitizer_effectiveness", "none"),
             "path_length": len(metadata.get("path", [])),

@@ -1557,6 +1557,19 @@ class ScanOrchestrator:
             finding.metadata["exploitability_verification"] = exploit_dict
             verified_count += 1
 
+            # Audit 2026-09 fix: persist the verdict on the finding itself so
+            # the adjudication chain actually consumes it. Previously this
+            # default (non-full-rounds) path only wrote
+            # metadata["exploitability_verification"], while
+            # adjudication.get_exploitability_value() reads
+            # finding.exploitability / metadata["exploitability"] — the write
+            # and read keys never met, so every finding defaulted to
+            # CONDITIONAL and final_score's exploitability component was a
+            # constant 0.5. Mirrors round_four._apply_verification_result
+            # (the full-rounds path) without changing confidence semantics.
+            finding.exploitability = result.status.value
+            finding.metadata["exploitability"] = result.status.value
+
             # Broadcast per-finding verification result
             await self.progress_callback.broadcast_event("verification_result", {
                 "finding_id": finding.id or "unknown",

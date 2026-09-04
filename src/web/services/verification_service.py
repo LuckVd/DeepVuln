@@ -175,15 +175,17 @@ class VerificationService:
         Returns:
             CLI Finding instance
         """
-        from src.layers.l3_analysis.models import FindingLocation
+        from src.layers.l3_analysis.models import CodeLocation
 
-        # Create FindingLocation
-        location = FindingLocation(
+        # Create FindingLocation (audit 2026-09: was a stale
+        # ``FindingLocation`` import that does not exist — ImportError at
+        # call time; ``CodeLocation`` is the real location model).
+        location = CodeLocation(
             file=web_finding.get("file_path", ""),
-            line=web_finding.get("line_start", 0),
-            column=web_finding.get("column_start", 0),
-            end_line=web_finding.get("line_end", web_finding.get("line_start", 0)),
-            end_column=web_finding.get("column_end", 0),
+            line=web_finding.get("line_start", 1),
+            column=web_finding.get("column_start"),
+            end_line=web_finding.get("end_line", web_finding.get("line_start")),
+            end_column=web_finding.get("end_column"),
             snippet=web_finding.get("evidence", ""),
             function=web_finding.get("function_name"),
         )
