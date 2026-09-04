@@ -1,6 +1,34 @@
 # Change Log
 
-## 2026-08-28
+## 2026-09-01
+
+### 全量复核审计 + 修复批 — 裁决链断链/证据门/WS 认证/路径校验/基准口径 ✅
+
+- **依据**: 4 路并行子审计（引擎/编排裁决链/Web 层/基准测试）+ 主线读码 + 生产 DB 实证（历史 146 条 findings 全部 `conditional`）+ run5 真实数据重评。发现并修复 9 项问题
+- **裁决链断链（最高优先级）**:
+  - 根因：默认（非 full-rounds）验证路径只写 `metadata["exploitability_verification"]`（`scan_orchestrator.py:1555`），而 `adjudication.get_exploitability_value` 读 `finding.exploitability`/`metadata["exploitability"]`——写读键永不交汇 → 每个 finding 恒 CONDITIONAL，final_score 可利用性分量恒 0.5
+  - 修复：默认路径回写 `finding.exploitability` + `metadata["exploitability"]`（与 full-rounds 的 `_apply_verification_result` 对齐，不改 confidence 语义）。裁决 Rule 1/3（NOT_EXPLOITABLE 覆盖 / EXPLOITABLE 确认）即恢复生效
+  - 新增回归测试 `test_exploitability_wiring.py`（9 个）
+- **CodeQL confirming 证据死信复活**:
+  - 根因①：`_convert_sarif_result_to_finding` 丢弃 SARIF `codeFlows` → metadata 只有 sarif_level/tool_name → `has_source` 恒 False，即使装了 CodeQL confirming 也不可达
+  - 根因②：`_extract_codeql_dataflow_dict` 的 `"has_sink": True` 硬编码——裸 CodeQL 告警冒充数据流级证据
+  - 修复：SARIF codeFlows 提取 `has_dataflow`/`sources`/`path`（首尾位置=source/sink）；`has_sink` 改为读真实 path/sinks。`codeql_scorer` 全链路验证：完整路径→confirming，裸告警→低分非 confirming
+  - 新增回归测试 `test_codeql_sarif_dataflow.py`（5 个）；顺带修 `verification_service.convert_web_finding_to_cli_finding` 的陈旧 `FindingLocation` 导入（Call 时必 ImportError）
+- **taint 失败维度失真**: `trace_from_sink` 失败（sink 无节点+无源码→空 path/0 置信度）被计为 available=True 的 0 分维度拖低加权融合分。修复：失败签名（空 path+confidence≤0）→ `available=False`（真实 BFS 不可达结论总带 sink 节点 path）。`test_taint_scorer_availability.py`（5 个）
+- **四轮审计可达性**: `enable_full_rounds` 此前不在 ScanConfig schema（API 无法开启）。已加入 `schemas.py`（默认 False，文档化实验属性，失败自动回退单轮验证）
+- **WebSocket 认证**: 端点原挂 router 级 HTTPBearer 依赖（浏览器握手无法带 Authorization 头，认证开启时必断/关闭时裸奔）。修复：独立 `ws_router`（无 HTTP 依赖）+ query 参数认证（`token` JWT 校验 + `api_key` 回退，dev 模式放行）。`test_websocket_auth.py`（6 个）
+- **source_path 任意路径读取**: local 扫描零校验。修复 `ScanBase.validate_local_source_path`：敏感系统路径黑名单（/etc /proc /sys /dev /boot /root /tmp /private /var /run /Users）+ 必须存在且是目录 + 可选白名单 `DEEPVULN_WEB_LOCAL_SCAN_ROOTS`（逗号分隔，`WebSettings.local_scan_roots` str 字段 + `local_scan_roots_list` 属性——避免 pydantic-settings 复杂字段 env 解析坑）。git/zip 类型不受影响。`test_source_path_and_redis_fallback.py`（7 个）
+- **WS 广播容器栈断链**: `websocket.py` 读 `CELERY_REDIS_URL`（compose 未设置→localhost 空转）。修复：`CelerySettings.effective_redis_url` —— redis_url 为默认 localhost 时回退 broker_url；compose 两个文件同时显式设置 `CELERY_REDIS_URL`
+- **scan_tasks 紧急兜底 SQLite 兼容**: `_emergency_mark_scan_failed` 的 `NOW()` 是 PG 语法，SQLite 兜底路径会炸。改参数化时间戳
+- **compose 部署三连**（验证：web-api 容器必崩/healthcheck 永 404/uploads 不共享）:
+  - `DEEPVULN_SECURITY_JWT_SECRET` 用 `${...:?}` 强制显式提供（web service 默认 secret 拒启）；`DEEPVULN_SECURITY_DEV_MODE` 透传
+  - healthcheck `/api/v1/health` → `/health`（README 同步）；头注释同步
+  - `uploads-data` 共享卷 + `DEEPVULN_WEB_UPLOAD_DIR=/app/uploads`（web-api 与 celery-worker 双挂，ZIP 扫描跨容器可读）
+  - `start-web.sh` 的 `cd /opt/projects/DeepVuln` 硬编码 → `cd "$SCRIPT_DIR"`
+  - `.env.web.example` 补 JWT secret 说明、`CELERY_REDIS_URL`、`DEEPVULN_WEB_LOCAL_SCAN_ROOTS`
+- **基准匹配器修复（run5 数字修正）**: 旧逻辑按 basename 归属（Go 三例同 `main.go`/Java 同名 Servlet → dict 覆盖）+ "injection" 泛化关键词吸收跨类型 FP + 重复 finding 计 FP。修复：`run_mini` 给 finding 打 `_benchmark_case` 标签 + case 相对路径（vuln/ vs safe/）归属 + sink_comment 派生类型族 token 匹配。**用修正后匹配器重评 run5 真实 DB findings：TP=9 FP=11→6，P 0.45→0.60，F1 0.621→0.75**——"safe 零 FP"确系旧匹配逻辑构造（真实 safe FP=4）。历史 run3/run4 数字需重跑校准。`test_benchmark_eval.py`（7 个）
+- **Tests**: 新增 39 个回归测试全绿；`tests/unit/test_l3` + `tests/unit/test_web` 全量基线无回归（详见当次运行结果）
+- **Commit**: ad69a06（l3 裁决链）+ ea41a17（web 安全）+ d176a88（deploy）+ d308f3d（bench 匹配器）+ 当次 docs 归档
 
 ### Phase 20 — P-A1 攻击面任务化 + P-A2 Gate 适用性门控（Codebuddy 借鉴落地）✅
 
@@ -296,7 +324,7 @@
 - **Tests**: `test_path_finder`+`test_cpg`+`test_cfg` = 109 passed；四语言参数化裂块 + provider e2e（可达→`True`/死代码→`False`）；全 `test_l3` 2177 passed / 24 既有失败（零回归，+10 通过）
 - **Dead Code**: `get_cfgs_for_file` 初为未用 → 已接入 `_locate_block`；`get_successors(edge_types)` 为预留 API（按设计 BFS 不消费 cfg 边，CFG 作独立校验），已单测覆盖
 - **Security**: 无硬编码密钥（扫描通过）；无新增对外接口/鉴权变更
-- **Commit**: 待提交（pending）
+- **Commit**: 05d9b40
 
 ## 2026-04-25
 
@@ -608,7 +636,7 @@
   修复前: L3 → L1 → Core (循环依赖)
   修复后: L3 → Core ← L1 (单向依赖)
   ```
-- **Commit ID**: 待提交
+- **Commit ID**: 11b2634
 
 ---
 

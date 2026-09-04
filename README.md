@@ -102,7 +102,7 @@ docker compose -f docker-compose-web.yml up -d
 docker compose -f docker-compose-web-host.yml up -d
 
 # 健康检查
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/health
 ```
 
 ### 提交扫描
@@ -170,10 +170,16 @@ ruff check src/ --select F
 
 ### 1. 多轮审计与可利用性裁决
 
-- Round 1-4 由 `RoundController` 编排（候选回填 → 深度审计 → 对抗辩论 → 验证落分）
+- 默认扫描：引擎产出后走**单轮 Round-4 可利用性验证**（多维评分 + LLM 助评），
+  验证结论回写 finding 后进入裁决（NOT_EXPLOITABLE 覆盖 / EXPLOITABLE 确认）
+- 完整四轮审计（Round 1-4：候选回填 → CodeQL 深度审计 → 证据关联 → 验证落分）
+  通过 `config.enable_full_rounds=true` 开启（实验性，Round 1-3 额外重跑 semgrep；
+  失败自动回退单轮验证）
 - 统一打分链：多轮产出 `confidence/exploitability` → 裁决前计算 `final_score`
-- 证据门：EXPLOITABLE 需要 confirming 级证据（CodeQL 数据流 / taint 可利用），
-  单纯攻击面标签不可单独确认
+- 证据门：EXPLOITABLE 需要 confirming 级证据（CodeQL source→sink 数据流 / taint
+  可利用），单纯攻击面标签不可单独确认；confirming 证据仅在装有 CodeQL
+  或调用图 taint 追踪命中时产生
+- 验证结论在报告与前端以 conditional / likely / NOT_EXPLOITABLE 呈现
 
 ### 2. 断点续扫
 
